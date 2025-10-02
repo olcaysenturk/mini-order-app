@@ -73,9 +73,9 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 /** GÜNCELLE: PATCH /api/orders/:id */
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+/** GÜNCELLE: PATCH /api/orders/:id  (non-interactive transaction) */
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
-    const { id } = await ctx.params
     const json = await req.json()
     const parsed = PatchBodySchema.safeParse(json)
     if (!parsed.success) {
@@ -85,134 +85,143 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       )
     }
 
+    const orderId = params.id
     const {
-      note, customerName, customerPhone, status, items,
+      note, customerName, customerPhone, status, items = [],
       storLines, accessoryLines,
     } = parsed.data
 
+    // Temizlik
     const storClean = (storLines ?? []).map(s => s.trim()).filter(Boolean)
     const accClean  = (accessoryLines ?? []).map(s => s.trim()).filter(Boolean)
 
-    const updated = await prisma.$transaction(async (tx) => {
-      // 1) Kalem işlemleri (varsa)
-      if (Array.isArray(items) && items.length > 0) {
-        // 1a) Silinecekler
-        const toDeleteIds = items
-          .filter(i => (i._action ?? 'upsert') === 'delete' && i.id)
-          .map(i => String(i.id))
+    // Bu siparişe ait mevcut kalem id'lerini çek (sahiplik kontrolü için)
+    const owned = await prisma.orderItem.findMany({
+      where: { orderId },
+      select: { id: true },
+    })
+    const ownedSet = new Set(owned.map(o => o.id))
 
-        if (toDeleteIds.length) {
-          await tx.orderItem.deleteMany({
-            where: { orderId: id, id: { in: toDeleteIds } },
+    // Silinecekler
+    const toDeleteIds = items
+      .filter(i => (i._action ?? 'upsert') === 'delete' && i.id && ownedSet.has(String(i.id)))
+      .map(i => String(i.id))
+
+    // Upsert edilecekler
+    const upserts = items.filter(i => (i._action ?? 'upsert') === 'upsert')
+
+    // İlk transaction: silme + upsert + header patch (TOPLAM hariç)
+    const ops: Prisma.PrismaPromise<any>[] = []
+
+    if (toDeleteIds.length) {
+      ops.push(
+        prisma.orderItem.deleteMany({
+          where: { orderId, id: { in: toDeleteIds } },
+        })
+      )
+    }
+
+    for (const it of upserts) {
+      const qty       = Math.max(1, Math.trunc(Number(it.qty ?? 0)))
+      const width     = Math.max(0, Math.trunc(Number(it.width ?? 0)))
+      const height    = Math.max(0, Math.trunc(Number(it.height ?? 0)))
+      const unitPrice = new Prisma.Decimal(it.unitPrice ?? 0)
+      const density   = new Prisma.Decimal(Number(it.fileDensity ?? 1))
+      const m2        = new Prisma.Decimal(qty).mul(width).mul(height).div(10000)
+      const subtotal  = unitPrice.mul(m2).mul(density)
+      const lineNote  = (it.note ?? null) as string | null
+
+      if (it.id) {
+        // Sahiplik doğrulaması
+        if (!ownedSet.has(String(it.id))) {
+          return NextResponse.json({ error: 'forbidden_item_update' }, { status: 403 })
+        }
+        ops.push(
+          prisma.orderItem.update({
+            where: { id: String(it.id) },
+            data: {
+              qty, width, height,
+              unitPrice, subtotal,
+              fileDensity: density,
+              note: lineNote,
+              category: { connect: { id: String(it.categoryId) } },
+              variant:  { connect: { id: String(it.variantId) } },
+            },
           })
-        }
-
-        // 1b) Upsert edilecekler (m² * fileDensity * unitPrice hesabı ile)
-        const upserts = items.filter(i => (i._action ?? 'upsert') === 'upsert')
-        for (const it of upserts) {
-          const qty = Math.max(1, Math.trunc(Number(it.qty ?? 0)))
-          const width = Math.max(0, Math.trunc(Number(it.width ?? 0)))
-          const height = Math.max(0, Math.trunc(Number(it.height ?? 0)))
-          const unitPrice = new Prisma.Decimal(it.unitPrice ?? 0)
-          const density = new Prisma.Decimal(Number(it.fileDensity ?? 1))
-          const qDec = new Prisma.Decimal(qty)
-          const wDec = new Prisma.Decimal(width)
-          const hDec = new Prisma.Decimal(height)
-          const m2 = qDec.mul(wDec).mul(hDec).div(10000) // cm -> m²
-          const subtotal = unitPrice.mul(m2).mul(density)
-          const lineNote = (it.note ?? null) as string | null
-
-          if (it.id) {
-            // Güvenlik: bu kalem gerçekten bu siparişe mi ait?
-            const owned = await tx.orderItem.findUnique({
-              where: { id: String(it.id) },
-              select: { orderId: true },
-            })
-            if (!owned || owned.orderId !== id) {
-              throw new Error('forbidden_item_update') // başka order'a ait item
-            }
-
-            await tx.orderItem.update({
-              where: { id: String(it.id) },
-              data: {
-                qty, width, height,
-                unitPrice, subtotal,
-                fileDensity: density,
-                note: lineNote,
-                category: { connect: { id: String(it.categoryId) } },
-                variant:  { connect: { id: String(it.variantId) } },
-              },
-            })
-          } else {
-            await tx.orderItem.create({
-              data: {
-                order:    { connect: { id } },
-                category: { connect: { id: String(it.categoryId) } },
-                variant:  { connect: { id: String(it.variantId) } },
-                qty, width, height,
-                unitPrice, subtotal,
-                fileDensity: density,
-                note: lineNote,
-              },
-            })
-          }
-        }
+        )
+      } else {
+        ops.push(
+          prisma.orderItem.create({
+            data: {
+              order:    { connect: { id: orderId } },
+              category: { connect: { id: String(it.categoryId) } },
+              variant:  { connect: { id: String(it.variantId) } },
+              qty, width, height,
+              unitPrice, subtotal,
+              fileDensity: density,
+              note: lineNote,
+            },
+          })
+        )
       }
+    }
 
-      // 2) Toplamı yeniden hesapla (sadece item'lardan)
-      const freshItems = await tx.orderItem.findMany({
-        where: { orderId: id },
-        select: { subtotal: true },
-      })
-      let total = new Prisma.Decimal(0)
-      for (const fi of freshItems) {
-        total = total.add(new Prisma.Decimal(fi.subtotal))
-      }
+    // Header patch (TOPLAM HARİÇ)
+    const headerPatch: Prisma.OrderUpdateInput = {}
+    if (typeof note !== 'undefined') headerPatch.note = note
+    if (typeof status !== 'undefined') headerPatch.status = status
+    if (typeof customerName !== 'undefined') headerPatch.customerName = customerName.trim()
+    if (typeof customerPhone !== 'undefined') headerPatch.customerPhone = customerPhone.trim()
+    if (typeof storLines !== 'undefined') headerPatch.storLines = storClean as unknown as Prisma.InputJsonValue
+    if (typeof accessoryLines !== 'undefined') headerPatch.accessoryLines = accClean as unknown as Prisma.InputJsonValue
 
-      // 3) Sipariş başlığını güncelle
-      const data: Prisma.OrderUpdateInput = { total }
+    if (Object.keys(headerPatch).length > 0) {
+      ops.push(prisma.order.update({ where: { id: orderId }, data: headerPatch }))
+    }
 
-      if (typeof note !== 'undefined') data.note = note
-      if (typeof status !== 'undefined') data.status = status
-      if (typeof customerName !== 'undefined') data.customerName = customerName.trim()
-      if (typeof customerPhone !== 'undefined') data.customerPhone = customerPhone.trim()
+    // Non-interactive transaction (zaman aşımını artırdık)
+    if (ops.length > 0) {
+      await prisma.$transaction(ops, { timeout: 20000, maxWait: 5000 })
+    }
 
-      // NEW: STOR / AKSESUAR alanlarını güncelle
-      if (typeof storLines !== 'undefined') {
-        data.storLines = storClean as unknown as Prisma.InputJsonValue
-      }
-      if (typeof accessoryLines !== 'undefined') {
-        data.accessoryLines = accClean as unknown as Prisma.InputJsonValue
-      }
+    // 2. adım: TOPLAM'ı tek sorgu ile hesapla (OrderItem + OrderExtra)
+    const totalRow = await prisma.$queryRaw<{ total: number }[]>`
+      SELECT
+        COALESCE((
+          SELECT SUM("subtotal")::float FROM "OrderItem"  WHERE "orderId" = ${orderId}
+        ), 0)
+        +
+        COALESCE((
+          SELECT SUM("subtotal")::float FROM "OrderExtra" WHERE "orderId" = ${orderId}
+        ), 0) AS total
+    `
+    const total = (totalRow?.[0]?.total ?? 0)
 
-      await tx.order.update({
-        where: { id },
-        data,
-      })
-
-      // 4) Güncel siparişi detaylı döndür
-      return tx.order.findUnique({
-        where: { id },
-        include: {
-          items: {
-            include: { category: true, variant: true },
-            orderBy: { id: 'asc' },
-          },
-        },
-      })
+    // Toplamı güncelle
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { total: new Prisma.Decimal(total) },
     })
 
+    // Güncel siparişi döndür
+    const updated = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: { category: true, variant: true },
+          orderBy: { id: 'asc' },
+        },
+        extras: true,
+      },
+    })
     if (!updated) return NextResponse.json({ error: 'not_found' }, { status: 404 })
     return NextResponse.json(updated)
   } catch (e) {
     console.error('PATCH /orders/:id error:', e)
-    const code = e instanceof Error ? e.message : String(e)
-    if (code === 'forbidden_item_update') {
-      return NextResponse.json({ error: 'forbidden_item_update' }, { status: 403 })
-    }
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
 }
+
 
 /** SİL: DELETE /api/orders/:id */
 export async function DELETE(_req: NextRequest, ctx: Ctx) {

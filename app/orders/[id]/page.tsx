@@ -14,11 +14,11 @@ type LineItem = {
   variantId: string;
   qty: number;
   width: number; // cm
-  height: number; // cm
+  height: number; // cm (formülde kullanılmıyor ama UI'da dursun)
   unitPrice: number; // snapshot
   note?: string | null;
-  fileDensity: number; // 1, 1.5, 2, 2.5, 3
-  subtotal: number; // unitPrice * m2 * fileDensity
+  fileDensity: number; // default 1.0
+  subtotal: number; // unitPrice * ((width/100)*fileDensity || 1) * qty
 };
 
 type Order = {
@@ -47,7 +47,7 @@ const fmt = (n: number) =>
 const BOX_COUNTS: Record<string, number> = {
   "TÜL PERDE": 10,
   "FON PERDE": 5,
-  GÜNEŞLİK: 5,
+  "GÜNEŞLİK": 5,
 };
 
 const normalize = (s: string) => s.trim().toLocaleUpperCase("tr-TR");
@@ -99,7 +99,7 @@ export default function EditOrderPage() {
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
   const [lineNote, setLineNote] = useState("");
-  const [fileDensity, setFileDensity] = useState(2.0);
+  const [fileDensity, setFileDensity] = useState(1.0); // default 1.0
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
 
   /* ==== Load ==== */
@@ -122,15 +122,14 @@ export default function EditOrderPage() {
         setOrderSeq(typeof ord.seq === "number" ? ord.seq : ord.id);
         setStatus(ord.status ?? "pending");
 
-        // Decimal’leri number’a çevir ve m² * density hesabı ile subtotal’ı normalize et
+        // Normalize: yeni formülle subtotal (unitPrice * ((width/100)*density || 1) * qty)
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
           const width = Math.max(0, Number(i.width ?? 0));
           const height = Math.max(0, Number(i.height ?? 0));
           const unitPrice = Number(i.unitPrice ?? 0);
           const density = Number(i.fileDensity ?? 1);
-          const m2 = (qty * width * height) / 10000; // cm² → m²
-          const subtotal = unitPrice * m2 * density;
+          const sub = unitPrice * (((width / 100) * density) || 1) * qty;
           return {
             id: i.id || uid(),
             categoryId: i.categoryId,
@@ -141,12 +140,12 @@ export default function EditOrderPage() {
             unitPrice,
             fileDensity: density,
             note: i.note ?? null,
-            subtotal,
+            subtotal: sub,
           };
         });
         setItems(normalized);
 
-        // DB’den gelen GERÇEK kalem id’lerini kaydet
+        // DB’den gelen gerçek kalem id’leri
         existingDbItemIds.current = new Set(
           (ord.items || []).map((it: any) => it.id)
         );
@@ -182,16 +181,15 @@ export default function EditOrderPage() {
     }
   }, [selectedCategory, variants, varId]);
 
-  // Önizleme: birimFiyat * (m2) * fileDensity
+  // Önizleme: unitPrice * ((width/100) * fileDensity || 1) * qty
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0;
     const p = Number(selectedVariant.unitPrice) || 0;
     const q = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
-    const h = Math.max(0, Math.floor(height));
-    const m2 = (q * w * h) / 10000; // cm -> m²
-    return p * m2 * (Number(fileDensity) || 1);
-  }, [selectedVariant, qty, width, height, fileDensity]);
+    const d = Number(fileDensity) || 1;
+    return p * (((w / 100) * d) || 1) * q;
+  }, [selectedVariant, qty, width, fileDensity]);
 
   // Maps
   const catById = useMemo(
@@ -250,7 +248,7 @@ export default function EditOrderPage() {
     setWidth(0);
     setHeight(0);
     setLineNote("");
-    setFileDensity(2.0); // reset default
+    setFileDensity(1.0); // reset default 1.0
     setEditingLineId(null);
   };
 
@@ -266,7 +264,7 @@ export default function EditOrderPage() {
     setWidth(0);
     setHeight(0);
     setLineNote("");
-    setFileDensity(2.0);
+    setFileDensity(1.0);
     setEditingLineId(null);
   };
 
@@ -279,11 +277,11 @@ export default function EditOrderPage() {
     if (!selectedCategory || !selectedVariant) return;
     const q = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
-    const h = Math.max(0, Math.floor(height));
     const price = Number(selectedVariant.unitPrice) || 0;
-    const density = Number(fileDensity) || 1;
-    const m2 = (q * w * h) / 10000; // cm -> m²
-    const sub = price * m2 * density;
+    const d = Number(fileDensity) || 1;
+
+    // Yeni formül
+    const sub = price * (((w / 100) * d) || 1) * q;
 
     if (editingLineId) {
       setItems((prev) =>
@@ -295,10 +293,10 @@ export default function EditOrderPage() {
                 variantId: selectedVariant.id,
                 qty: q,
                 width: w,
-                height: h,
+                height,
                 unitPrice: price,
                 note: lineNote || null,
-                fileDensity: density,
+                fileDensity: d,
                 subtotal: sub,
               }
             : it
@@ -311,10 +309,10 @@ export default function EditOrderPage() {
         variantId: selectedVariant.id,
         qty: q,
         width: w,
-        height: h,
+        height,
         unitPrice: price,
         note: lineNote || undefined,
-        fileDensity: density,
+        fileDensity: d,
         subtotal: sub,
       };
       setItems((prev) => [...prev, line]);
@@ -338,7 +336,7 @@ export default function EditOrderPage() {
     setWidth(line.width);
     setHeight(line.height);
     setLineNote(line.note || "");
-    setFileDensity(line.fileDensity || 1);
+    setFileDensity(line.fileDensity || 1.0);
   };
 
   const saveOrder = async () => {
@@ -352,8 +350,7 @@ export default function EditOrderPage() {
     }
     setSaving(true);
     try {
-      // SADECE DB'de var olan id'leri gönder (upsert),
-      // yeni eklenenlere id göndermeyin (create)
+      // SADECE DB'de var olan id'leri gönder (upsert); yeni eklenenlerde id gönderme (create)
       const payloadItems = items.map((i) => {
         const base = {
           categoryId: i.categoryId,
@@ -365,14 +362,13 @@ export default function EditOrderPage() {
           fileDensity: i.fileDensity,
           note: i.note ?? null,
         } as any;
-
         if (existingDbItemIds.current.has(i.id)) {
           base.id = i.id; // update
         }
         return base;
       });
 
-      // (Opsiyonel) Kullanıcı UI’dan sildiyse, server’a bildir
+      // UI’dan silinenler
       const currentIds = new Set(items.map((i) => i.id));
       const deletedIds: string[] = [];
       existingDbItemIds.current.forEach((oldId) => {
@@ -389,7 +385,6 @@ export default function EditOrderPage() {
         note: orderNote || null,
         status,
         items: [...payloadItems, ...deleteOps],
-        // storLines / accessoryLines ekleyecekseniz burada sağlayın
       };
 
       const res = await fetch(`/api/orders/${orderId}`, {
@@ -403,11 +398,6 @@ export default function EditOrderPage() {
         alert("Değişiklikler kaydedilemedi.");
         return;
       }
-
-      // İsterseniz güncel id setini ve items state’ini de sync edebilirsiniz:
-      // const updated = await res.json();
-      // existingDbItemIds.current = new Set(updated.items.map((it: any) => it.id));
-      // setItems(updated.items);
 
       alert("Sipariş güncellendi!");
       router.refresh?.();
@@ -430,7 +420,10 @@ export default function EditOrderPage() {
         <h1 className="text-xl font-semibold">Sipariş Düzenle</h1>
         <div className="flex justify-between gap-3">
           <button className="btn" onClick={() => window.print()}>
-            🖨️ Yazdır Önizleme
+            🖨️ Yazdır
+          </button>
+          <button className="btn" onClick={() => router.push(`/orders/${orderId}/label`)}>
+            🖨️ Barkod Yazdır
           </button>
           <button
             className="btn-secondary disabled:opacity-50"
@@ -824,18 +817,7 @@ function Header({
             Uğur Mumcu Mah. Muhsin Yazıcıoğlu Cad. No: 56/A Sultangazi / İST.
           </div>
           <div>Gsm: 0533 702 04 88</div>
-          <div className="mt-1 flex items-center gap-1">
-            <span className="[&>svg]:h-4 [&>svg]:w-4">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="currentColor"
-                viewBox="0 0 448 512"
-              >
-                <path d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9s51.3 114.9 114.9 114.9S339 319.5 339 255.9 287.7 141 224.1 141zm0 189.6c-41.1 0-74.7-33.5-74.7-74.7s33.5-74.7 74.7-74.7 74.7 33.5 74.7 74.7-33.6 74.7-74.7 74.7zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zm76.1 27.2c-1.7-35.9-9.9-67.7-36.2-93.9-26.2-26.2-58-34.4-93.9-36.2-37-2.1-147.9-2.1-184.9 0-35.8 1.7-67.6 9.9-93.9 36.1s-34.4 58-36.2 93.9c-2.1 37-2.1 147.9 0 184.9 1.7 35.9 9.9 67.7 36.2 93.9s58 34.4 93.9 36.2c37 2.1 147.9 2.1 184.9 0 35.9-1.7 67.7-9.9 93.9-36.2 26.2-26.2 34.4-58 36.2-93.9 2.1-37 2.1-147.8 0-184.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7-2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z" />
-              </svg>
-            </span>
-            Perdekonagi
-          </div>
+          <div className="mt-1 flex items-center gap-1">Perdekonagi</div>
         </div>
       </div>
       <div className="w-[300px] text-left">

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { redirect } from 'next/navigation'
-import Image from 'next/image'
+import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
@@ -14,12 +14,12 @@ type LineItem = {
   categoryId: string;
   variantId: string;
   qty: number;
-  width: number;     // cm
-  height: number;    // cm
-  unitPrice: number; // snapshot
+  width: number;  // cm
+  height: number; // UI'da dursun (formülde yok)
+  unitPrice: number;
   note?: string | null;
-  fileDensity: number; // 1, 1.5, 2, 2.5, 3
-  subtotal: number;    // unitPrice * m2 * fileDensity
+  fileDensity: number; // default 1.0
+  subtotal: number;    // unitPrice * ((width/100) * fileDensity || 1) * qty
 };
 
 type InsertSlot = { title: string; index: number } | null;
@@ -32,13 +32,11 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 
-// Kategori başına kutucuk sayısı (print düzeniyle aynı)
 const BOX_COUNTS: Record<string, number> = {
   "TÜL PERDE": 10,
   "FON PERDE": 5,
   "GÜNEŞLİK": 5,
 };
-
 const normalize = (s: string) => s.trim().toLocaleUpperCase("tr-TR");
 const hasBoxCount = (name: string) =>
   Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name));
@@ -52,6 +50,8 @@ async function fetchCategories(): Promise<Category[]> {
 
 /* ========= Page ========= */
 export default function NewOrderPagePrintLike() {
+  const router = useRouter();
+
   // master data
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
@@ -64,20 +64,24 @@ export default function NewOrderPagePrintLike() {
   const [status, setStatus] = useState<Status>("pending");
   const [saving, setSaving] = useState(false);
 
-  // drawer (inline editor)
+  // iskonto
+  const [discountPercent, setDiscountPercent] = useState<number>(0);
+  const [discountAmount, setDiscountAmount] = useState<number>(0);
+
+  // drawer
   const [slot, setSlot] = useState<InsertSlot>(null);
   const [catId, setCatId] = useState("");
   const [varId, setVarId] = useState("");
   const [qty, setQty] = useState(1);
   const [width, setWidth] = useState(0);
-  const [height, setHeight] = useState(0);
+  const [height, setHeight] = useState(0); // formülde yok
   const [lineNote, setLineNote] = useState("");
-  const [fileDensity, setFileDensity] = useState(2.0);
+  const [fileDensity, setFileDensity] = useState(1.0); // default 1.0
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
 
-  // load categories
+  /* ==== Load ==== */
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       setLoading(true);
       try {
         const data = await fetchCategories();
@@ -85,15 +89,14 @@ export default function NewOrderPagePrintLike() {
       } finally {
         setLoading(false);
       }
-    };
-    run();
+    })();
   }, []);
 
-  // derived
+  /* ==== Derived ==== */
   const selectedCategory = useMemo(
-  () => categories.find((c) => c.id === catId),
-  [categories, catId]
-)
+    () => categories.find((c) => c.id === catId),
+    [categories, catId]
+  );
   const variants = selectedCategory?.variants ?? [];
   const selectedVariant = useMemo(
     () => variants.find((v) => v.id === varId),
@@ -110,18 +113,17 @@ export default function NewOrderPagePrintLike() {
     }
   }, [selectedCategory, variants, varId]);
 
-  // Önizleme: birimFiyat * (m2) * fileSıklığı
+  // Önizleme (drawer): unitPrice * ((width/100) * fileDensity || 1) * qty
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0;
     const p = Number(selectedVariant.unitPrice) || 0;
-    const q = Math.max(1, Math.floor(qty));
+    const quantity = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
-    const h = Math.max(0, Math.floor(height));
-    const m2 = (q * w * h) / 10000; // cm -> m²
-    return p * m2 * (Number(fileDensity) || 1);
-  }, [selectedVariant, qty, width, height, fileDensity]);
+    const d = Number(fileDensity) || 1;
+    return p * ((w / 100) * d || 1) * quantity;
+  }, [selectedVariant, qty, width, fileDensity]);
 
-  // grouping by category display name
+  // maps
   const catById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
     [categories]
@@ -132,6 +134,7 @@ export default function NewOrderPagePrintLike() {
     return m;
   }, [categories]);
 
+  // grouping by category name
   const groupedByCategoryName = useMemo(() => {
     const g = new Map<string, LineItem[]>();
     for (const it of items) {
@@ -148,7 +151,7 @@ export default function NewOrderPagePrintLike() {
     const sorted: string[] = [];
     for (const p of priority) {
       if (!arr.find((a) => a.toLowerCase() === p.toLowerCase())) {
-        sorted.push(p); // boş da olsa göster
+        sorted.push(p);
       } else {
         sorted.push(arr.find((a) => a.toLowerCase() === p.toLowerCase())!);
       }
@@ -160,9 +163,21 @@ export default function NewOrderPagePrintLike() {
     return [...sorted, ...others];
   }, [groupedByCategoryName]);
 
-  const total = useMemo(
-    () => items.reduce((a, b) => a + b.subtotal, 0),
+  // totals
+  const subTotal = useMemo(
+    () => items.reduce((a, b) => a + (Number(b.subtotal) || 0), 0),
     [items]
+  );
+  const computedDiscount = useMemo(() => {
+    const pct = Math.max(0, Math.min(100, Number(discountPercent) || 0));
+    const byPct = (subTotal * pct) / 100;
+    const fixed = Math.max(0, Number(discountAmount) || 0);
+    const chosen = fixed > 0 ? fixed : byPct;
+    return Math.min(chosen, subTotal); // eksi toplam olmasın
+  }, [subTotal, discountPercent, discountAmount]);
+  const grandTotal = useMemo(
+    () => Math.max(0, subTotal - computedDiscount),
+    [subTotal, computedDiscount]
   );
 
   /* ===== actions ===== */
@@ -177,11 +192,10 @@ export default function NewOrderPagePrintLike() {
     setWidth(0);
     setHeight(0);
     setLineNote("");
-    setFileDensity(2.0); // reset default
+    setFileDensity(1.0); // reset default
     setEditingLineId(null);
   };
 
-  // ÖZEL: Belirli bir kategori adıyla hızlı + aç (STOR/AKSESUAR)
   const openQuickFor = (categoryName: string, index: number) => {
     const cat = categories.find(
       (c) => c.name.trim().toLowerCase() === categoryName.trim().toLowerCase()
@@ -193,7 +207,7 @@ export default function NewOrderPagePrintLike() {
     setWidth(0);
     setHeight(0);
     setLineNote("");
-    setFileDensity(2.0);
+    setFileDensity(1.0);
     setEditingLineId(null);
   };
 
@@ -206,11 +220,10 @@ export default function NewOrderPagePrintLike() {
     if (!selectedCategory || !selectedVariant) return;
     const q = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
-    const h = Math.max(0, Math.floor(height));
     const price = Number(selectedVariant.unitPrice) || 0;
-    const density = Number(fileDensity) || 1;
-    const m2 = (q * w * h) / 10000; // cm -> m²
-    const sub = price * m2 * density;
+    const d = Number(fileDensity) || 1;
+
+    const sub = price * ((w / 100) * d || 1) * q;
 
     if (editingLineId) {
       setItems((prev) =>
@@ -222,10 +235,10 @@ export default function NewOrderPagePrintLike() {
                 variantId: selectedVariant.id,
                 qty: q,
                 width: w,
-                height: h,
+                height,
                 unitPrice: price,
                 note: lineNote || null,
-                fileDensity: density,
+                fileDensity: d,
                 subtotal: sub,
               }
             : it
@@ -238,15 +251,14 @@ export default function NewOrderPagePrintLike() {
         variantId: selectedVariant.id,
         qty: q,
         width: w,
-        height: h,
+        height,
         unitPrice: price,
         note: lineNote || undefined,
-        fileDensity: density,
+        fileDensity: d,
         subtotal: sub,
       };
       setItems((prev) => [...prev, line]);
     }
-
     closeDrawer();
   };
 
@@ -265,7 +277,7 @@ export default function NewOrderPagePrintLike() {
     setWidth(line.width);
     setHeight(line.height);
     setLineNote(line.note || "");
-    setFileDensity(line.fileDensity || 2.0);
+    setFileDensity(line.fileDensity || 1.0);
   };
 
   const saveOrder = async () => {
@@ -279,7 +291,7 @@ export default function NewOrderPagePrintLike() {
     }
     setSaving(true);
     try {
-      const payload = {
+      const payload: any = {
         customerName,
         customerPhone,
         note: orderNote || "",
@@ -296,6 +308,11 @@ export default function NewOrderPagePrintLike() {
         })),
       };
 
+      // Backend şeman hazırsa şunları da ekleyebilirsin:
+      // payload.discountPercent = Number(discountPercent) || 0
+      // payload.discountAmount  = computedDiscount
+      // payload.payable         = grandTotal
+
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -307,36 +324,23 @@ export default function NewOrderPagePrintLike() {
         alert("Sipariş kaydedilemedi");
         return;
       }
-      // reset
-      setItems([]);
-      setOrderNote("");
-      setCustomerName("");
-      setCustomerPhone("");
-      setStatus("pending");
+
       alert("Sipariş kaydedildi!");
-      redirect("/orders");
+      router.push("/orders");
     } finally {
       setSaving(false);
     }
   };
 
-  // Özel bölümlerde ilgili kategorinin mevcut satırlarını alalım
+  // özel bölümler
   const storItems = groupedByCategoryName.get("STOR PERDE") || [];
   const aksesuarItems = groupedByCategoryName.get("AKSESUAR") || [];
 
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
-      {/* Toolbar (ekranda) */}
+      {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 mb-4 print:hidden mt-4 py-4 px-4">
         <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
-        
-        {/* <button
-          className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
-          disabled={saving}
-          onClick={saveOrder}
-        >
-          {saving ? "Kaydediliyor…" : "Siparişi Kaydet"}
-        </button> */}
       </div>
 
       {/* A4 Alanı */}
@@ -349,7 +353,7 @@ export default function NewOrderPagePrintLike() {
           status={status}
         />
 
-        {/* Müşteri Alanları (ekranda düzenlenebilir) */}
+        {/* Müşteri Alanları */}
         <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
           <div>
             <label className="text-sm">Müşteri Adı</label>
@@ -369,8 +373,6 @@ export default function NewOrderPagePrintLike() {
               placeholder="05xx xxx xx xx"
             />
           </div>
-
-          {/* Durum seçimi */}
           <div>
             <label className="text-sm">Durum</label>
             <select
@@ -386,17 +388,15 @@ export default function NewOrderPagePrintLike() {
           </div>
         </div>
 
-        {/* Kategoriler (print grid düzeni) */}
+        {/* Kategoriler */}
         {sectionTitles.map((title) => {
           const key = normalize(title);
-          const visible = hasBoxCount(title);   // ← burada kontrol
-          if (!visible) return null;            // ← görünmesin
+          const visible = hasBoxCount(title);
+          if (!visible) return null;
 
-          const boxCount = BOX_COUNTS[key];     // güvenle al
+          const boxCount = BOX_COUNTS[key];
           const lines = groupedByCategoryName.get(title) || [];
 
-
-          if (!visible) return null;
           return (
             <SectionEditable
               key={title}
@@ -415,7 +415,7 @@ export default function NewOrderPagePrintLike() {
           );
         })}
 
-        {/* === ÖZEL BÖLÜM: STOR PERDE (input yerine +, doluysa özet) === */}
+        {/* STOR / AKSESUAR */}
         <SectionQuickPlus
           title="STOR PERDE"
           items={storItems}
@@ -426,8 +426,6 @@ export default function NewOrderPagePrintLike() {
             if (line) editLine(line);
           }}
         />
-
-        {/* === ÖZEL BÖLÜM: AKSESUAR (STOR ile aynı davranış) === */}
         <SectionQuickPlus
           title="AKSESUAR"
           items={aksesuarItems}
@@ -439,28 +437,65 @@ export default function NewOrderPagePrintLike() {
           }}
         />
 
-        {/* Genel Not & Toplam */}
+        {/* Not & Toplamlar + İskonto */}
         <div className="grid grid-cols-3 gap-4 mt-6">
           <div className="col-span-2">
             <div className="text-sm font-semibold">Sipariş Notu</div>
             <textarea
-              className="input mt-1 min-h-[72px] w-full"
+              className="input mt-1 min-h-[125px] w-full"
               value={orderNote}
               onChange={(e) => setOrderNote(e.target.value)}
             />
           </div>
-          <div className="text-sm">
-            <div className="font-semibold">TOPLAM :</div>
-            <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-end text-base tracking-wide">
-              {fmt(total)}
+
+          <div className="text-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <div>Ara Toplam</div>
+              <div className="font-medium">{fmt(subTotal)}</div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs">İskonto %</label>
+                <input
+                  className="input mt-1 text-right"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={discountPercent}
+                  onChange={(e) => setDiscountPercent(parseFloat(e.target.value || "0"))}
+                />
+              </div>
+              <div>
+                <label className="text-xs">İskonto (₺)</label>
+                <input
+                  className="input mt-1 text-right"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={discountAmount}
+                  onChange={(e) => setDiscountAmount(parseFloat(e.target.value || "0"))}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>Uygulanan İskonto</div>
+              <div className="font-medium">- {fmt(computedDiscount)}</div>
+            </div>
+
+            <div className="flex items-center justify-between border-t pt-2">
+              <div className="font-semibold">GENEL TOPLAM</div>
+              <div className="font-bold text-base">{fmt(grandTotal)}</div>
             </div>
           </div>
         </div>
 
         {/* Alt uyarı */}
         <div className="mt-6 text-[10px] tracking-wide">
-          ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>.
-          MÜŞTERİDEN KAYNAKLI HATALI ÖLÇÜLERDE <b>TERZİ ÜCRETİ ALINMAKTADIR</b>.
+          ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>. MÜŞTERİDEN
+          KAYNAKLI HATALI ÖLÇÜLERDE <b>TERZİ ÜCRETİ ALINMAKTADIR</b>.
         </div>
       </div>
 
@@ -495,9 +530,7 @@ export default function NewOrderPagePrintLike() {
                   onChange={(e) => setCatId(e.target.value)}
                   disabled={loading}
                 >
-                  <option value="">
-                    {loading ? "Yükleniyor…" : "Seçin"}
-                  </option>
+                  <option value="">{loading ? "Yükleniyor…" : "Seçin"}</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -633,49 +666,26 @@ export default function NewOrderPagePrintLike() {
         </div>
       )}
 
-<div className="flex items-center justify-end gap-3 mb-4 print:hidden mt-4 py-4 px-4">
-       <button
+      <div className="flex items-center justify-end gap-3 mb-4 print:hidden mt-4 py-4 px-4">
+        <button
           className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
           disabled={saving}
           onClick={saveOrder}
         >
           {saving ? "Kaydediliyor…" : "Siparişi Kaydet"}
         </button>
-
-</div>
+      </div>
 
       {/* Print styles */}
       <style jsx global>{`
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-          html,
-          body {
-            background: white !important;
-          }
-          .btn,
-          .btn-secondary,
-          .print\\:hidden {
-            display: none !important;
-          }
-          input,
-          select,
-          textarea {
-            border: none !important;
-            outline: none !important;
-          }
+          @page { size: A4 portrait; margin: 0; }
+          html, body { background: white !important; }
+          .btn, .btn-secondary, .print\\:hidden { display: none !important; }
+          input, select, textarea { border: none !important; outline: none !important; }
         }
-        /* Focus/outline tamamen kapansın */
-        input, select, textarea {
-          outline: none !important;
-          box-shadow: none !important;
-        }
-        input:focus, select:focus, textarea:focus {
-          outline: none !important;
-          box-shadow: none !important;
-        }
+        input, select, textarea { outline: none !important; box-shadow: none !important; }
+        input:focus, select:focus, textarea:focus { outline: none !important; box-shadow: none !important; }
       `}</style>
     </div>
   );
@@ -728,7 +738,14 @@ function Header({
       </div>
       <div className="w-[300px] text-left">
         <div className="mb-3">
-          <Image src="/brillant.png" alt="Brillant" width={300} height={80} priority style={{ width: '100%', height: 'auto' }} />
+          <Image
+            src="/brillant.png"
+            alt="Brillant"
+            width={300}
+            height={80}
+            priority
+            style={{ width: "100%", height: "auto" }}
+          />
         </div>
         <div className="text-xs flex justify-between">
           <b>Müşteri Adı:</b>{" "}
@@ -742,15 +759,12 @@ function Header({
             {customerPhone || "—"}
           </span>
         </div>
-
-        {/* Durum satırı */}
         <div className="text-xs mt-1 flex justify-between">
           <b>Durum:</b>{" "}
           <span className="inline-block min-w-[140px] text-right">
             {statusLabelMap[status]}
           </span>
         </div>
-
         <div className="mt-3 font-semibold">
           SIRA No:{" "}
           <span className="inline-block min-w-[80px] text-red-700">
@@ -788,7 +802,7 @@ function SectionEditable({
         {Array.from({ length: boxCount }).map((_, i) => {
           const it = items[i];
           const variant = it ? variantById.get(it.variantId) : null;
-          
+
           return (
             <div
               key={i}
@@ -807,7 +821,8 @@ function SectionEditable({
                     <b>Tür :</b> {variant?.name || "—"}
                   </div>
                   <div>
-                    <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×{it.height} cm
+                    <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×
+                    {it.height} cm
                     <br />
                     <b>File Sıklığı :</b> {it.fileDensity}x
                     <br />
@@ -820,18 +835,11 @@ function SectionEditable({
                       Not: {it.note}
                     </div>
                   )}
-                  {/* Row actions (screen only) */}
                   <div className="absolute right-1 top-1 flex gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      className="px-1 py-0.5 text-[10px] border"
-                      onClick={() => onEdit(it.id)}
-                    >
+                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onEdit(it.id)}>
                       Düzenle
                     </button>
-                    <button
-                      className="px-1 py-0.5 text-[10px] border"
-                      onClick={() => onRemove(it.id)}
-                    >
+                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onRemove(it.id)}>
                       Sil
                     </button>
                   </div>
@@ -845,7 +853,6 @@ function SectionEditable({
   );
 }
 
-/* ===== Özel Bölüm: STOR / AKSESUAR (input yerine “+ Ekle”; doluysa özet) ===== */
 function SectionQuickPlus({
   title,
   items,
@@ -859,7 +866,6 @@ function SectionQuickPlus({
   onAddAt: (index: number) => void;
   onEdit: (id: string) => void;
 }) {
-  // İki sütunda 1-4, 2-5, 3-6
   const order = [0, 3, 1, 4, 2, 5];
 
   return (
@@ -870,9 +876,6 @@ function SectionQuickPlus({
           const it = items[i];
           const variant = it ? variantById.get(it.variantId) : null;
 
-          // Aynı CSS (input gibi ince alt çizgili satır). İçerik dinamik:
-          // - Boşsa: "+ Ekle"
-          // - Doluysa: özet metin (tıklayınca düzenle)
           return (
             <div key={i} className="flex items-center gap-0">
               <div className="w-6 text-right text-xs">{i + 1}-</div>
@@ -889,9 +892,13 @@ function SectionQuickPlus({
                 "
                 title={it ? "Düzenlemek için tıklayın" : "Ekle"}
               >
-                {it
-                  ? `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${it.height} cm • ${fmt(it.subtotal)}`
-                  : "+ Ekle"}
+                {it ? (
+                  `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${
+                    it.height
+                  } cm • ${fmt(it.subtotal)}`
+                ) : (
+                  <span className="print:hidden">+ Ekle</span>
+                )}
               </button>
             </div>
           );
