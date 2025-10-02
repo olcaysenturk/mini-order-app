@@ -4,13 +4,10 @@ import { prisma } from '@/app/lib/db'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 
-/** ---------- Ortak tipler / şemalar ---------- */
-const StatusSchema = z.enum(['pending','processing','completed','cancelled'])
+/** ---------- Şemalar ---------- */
+const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled'])
 
-const LinesSchema = z
-  .array(z.string().transform(s => s.trim()))
-  .max(6)
-  .optional()
+const LinesSchema = z.array(z.string().transform(s => s.trim())).max(6).optional()
 
 const PatchItemSchema = z.object({
   id: z.string().optional(),
@@ -18,14 +15,14 @@ const PatchItemSchema = z.object({
   variantId: z.string(),
   qty: z.number().int().positive(),
   width: z.number().int().nonnegative(),   // cm
-  height: z.number().int().nonnegative(),  // cm
-  unitPrice: z.union([z.number(), z.string()]).transform((v) => {
+  height: z.number().int().nonnegative(),  // cm (saklanır, hesapta kullanılmaz)
+  unitPrice: z.union([z.number(), z.string()]).transform(v => {
     const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v
     return Number.isFinite(n) && n >= 0 ? n : 0
   }),
-  fileDensity: z.number().positive().default(1), // m² ile çarpılacak
+  fileDensity: z.number().positive().default(1), // default 1
   note: z.string().nullable().optional(),
-  _action: z.enum(['upsert','delete']).optional(), // default: upsert
+  _action: z.enum(['upsert', 'delete']).optional(), // default: upsert
 })
 
 const PatchBodySchema = z.object({
@@ -34,23 +31,21 @@ const PatchBodySchema = z.object({
   customerPhone: z.string().optional(),
   status: StatusSchema.optional(),
   items: z.array(PatchItemSchema).optional(),
-
-  // NEW alanlar:
   storLines: LinesSchema,
   accessoryLines: LinesSchema,
 })
 
 type Ctx = { params: Promise<{ id: string }> }
 
-/** TEK SİPARİŞ: GET /api/orders/:id  (seq dahil) */
+/** ---------- GET /api/orders/:id (seq dahil) ---------- */
 export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const { id } = await ctx.params
 
-    // seq hesaplama (oluşturulma tarihine göre, en eski 1, en yeni N olacak şekilde)
+    // Sıra numarası (createdAt artan)
     const all = await prisma.order.findMany({
       select: { id: true, createdAt: true },
-      orderBy: { createdAt: 'asc' }, // artan; index+1 = seq
+      orderBy: { createdAt: 'asc' },
     })
     const index = all.findIndex(o => o.id === id)
     const seq = index === -1 ? null : index + 1
@@ -62,6 +57,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
           include: { category: true, variant: true },
           orderBy: { id: 'asc' },
         },
+        extras: true, // varsa ücretli ekstra satırlar
       },
     })
     if (!order) return NextResponse.json({ error: 'not_found' }, { status: 404 })
@@ -72,10 +68,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   }
 }
 
-/** GÜNCELLE: PATCH /api/orders/:id */
-/** GÜNCELLE: PATCH /api/orders/:id  (non-interactive transaction) */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+/** ---------- PATCH /api/orders/:id ---------- */
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
+    const { id: orderId } = await ctx.params
     const json = await req.json()
     const parsed = PatchBodySchema.safeParse(json)
     if (!parsed.success) {
@@ -85,17 +81,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       )
     }
 
-    const orderId = params.id
     const {
-      note, customerName, customerPhone, status, items = [],
+      note, customerName, customerPhone, status,
+      items = [],
       storLines, accessoryLines,
     } = parsed.data
 
-    // Temizlik
-    const storClean = (storLines ?? []).map(s => s.trim()).filter(Boolean)
-    const accClean  = (accessoryLines ?? []).map(s => s.trim()).filter(Boolean)
-
-    // Bu siparişe ait mevcut kalem id'lerini çek (sahiplik kontrolü için)
+    // Bu siparişe ait mevcut kalem id’leri (sahiplik kontrolü)
     const owned = await prisma.orderItem.findMany({
       where: { orderId },
       select: { id: true },
@@ -110,8 +102,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     // Upsert edilecekler
     const upserts = items.filter(i => (i._action ?? 'upsert') === 'upsert')
 
-    // İlk transaction: silme + upsert + header patch (TOPLAM hariç)
-    const ops: Prisma.PrismaPromise<any>[] = []
+    // Toplayıp tek seferde transaction yapalım
+    const ops: Prisma.PrismaPromise<unknown>[] = []
 
     if (toDeleteIds.length) {
       ops.push(
@@ -122,51 +114,56 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
 
     for (const it of upserts) {
-      const qty       = Math.max(1, Math.trunc(Number(it.qty ?? 0)))
-      const width     = Math.max(0, Math.trunc(Number(it.width ?? 0)))
-      const height    = Math.max(0, Math.trunc(Number(it.height ?? 0)))
-      const unitPrice = new Prisma.Decimal(it.unitPrice ?? 0)
+      const qtyInt    = Math.max(1, Math.trunc(Number(it.qty ?? 0)))
+      const widthInt  = Math.max(0, Math.trunc(Number(it.width ?? 0)))
+      const heightInt = Math.max(0, Math.trunc(Number(it.height ?? 0))) // sakla
+      const price     = new Prisma.Decimal(it.unitPrice ?? 0)
       const density   = new Prisma.Decimal(Number(it.fileDensity ?? 1))
-      const m2        = new Prisma.Decimal(qty).mul(width).mul(height).div(10000)
-      const subtotal  = unitPrice.mul(m2).mul(density)
-      const lineNote  = (it.note ?? null) as string | null
+
+      // === YENİ FORMÜL ===
+      // subtotal = unitPrice * qty * (width/100) * fileDensity
+      const subtotal  = price.mul(new Prisma.Decimal(widthInt).div(100))
+                            .mul(density)
+                            .mul(qtyInt)
+
+      const lineData = {
+        qty: qtyInt,
+        width: widthInt,
+        height: heightInt,
+        unitPrice: price,
+        fileDensity: density,
+        subtotal,
+        note: (it.note ?? null) as string | null,
+        category: { connect: { id: String(it.categoryId) } },
+        variant:  { connect: { id: String(it.variantId) } },
+      } as const
 
       if (it.id) {
-        // Sahiplik doğrulaması
         if (!ownedSet.has(String(it.id))) {
           return NextResponse.json({ error: 'forbidden_item_update' }, { status: 403 })
         }
         ops.push(
           prisma.orderItem.update({
             where: { id: String(it.id) },
-            data: {
-              qty, width, height,
-              unitPrice, subtotal,
-              fileDensity: density,
-              note: lineNote,
-              category: { connect: { id: String(it.categoryId) } },
-              variant:  { connect: { id: String(it.variantId) } },
-            },
+            data: lineData,
           })
         )
       } else {
         ops.push(
           prisma.orderItem.create({
             data: {
-              order:    { connect: { id: orderId } },
-              category: { connect: { id: String(it.categoryId) } },
-              variant:  { connect: { id: String(it.variantId) } },
-              qty, width, height,
-              unitPrice, subtotal,
-              fileDensity: density,
-              note: lineNote,
+              order: { connect: { id: orderId } },
+              ...lineData,
             },
           })
         )
       }
     }
 
-    // Header patch (TOPLAM HARİÇ)
+    // Başlık güncelle (total HARİÇ — total birazdan hesaplanacak)
+    const storClean = (storLines ?? []).map(s => s.trim()).filter(Boolean)
+    const accClean  = (accessoryLines ?? []).map(s => s.trim()).filter(Boolean)
+
     const headerPatch: Prisma.OrderUpdateInput = {}
     if (typeof note !== 'undefined') headerPatch.note = note
     if (typeof status !== 'undefined') headerPatch.status = status
@@ -175,29 +172,24 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (typeof storLines !== 'undefined') headerPatch.storLines = storClean as unknown as Prisma.InputJsonValue
     if (typeof accessoryLines !== 'undefined') headerPatch.accessoryLines = accClean as unknown as Prisma.InputJsonValue
 
-    if (Object.keys(headerPatch).length > 0) {
+    if (Object.keys(headerPatch).length) {
       ops.push(prisma.order.update({ where: { id: orderId }, data: headerPatch }))
     }
 
-    // Non-interactive transaction (zaman aşımını artırdık)
-    if (ops.length > 0) {
-      await prisma.$transaction(ops, { timeout: 20000, maxWait: 5000 })
+    if (ops.length) {
+     await prisma.$transaction(ops)
     }
 
-    // 2. adım: TOPLAM'ı tek sorgu ile hesapla (OrderItem + OrderExtra)
+    // === Toplamı tek sorguda hesapla (OrderItem + OrderExtra) ===
     const totalRow = await prisma.$queryRaw<{ total: number }[]>`
       SELECT
-        COALESCE((
-          SELECT SUM("subtotal")::float FROM "OrderItem"  WHERE "orderId" = ${orderId}
-        ), 0)
+        COALESCE((SELECT SUM("subtotal")::float FROM "OrderItem"  WHERE "orderId" = ${orderId}), 0)
         +
-        COALESCE((
-          SELECT SUM("subtotal")::float FROM "OrderExtra" WHERE "orderId" = ${orderId}
-        ), 0) AS total
+        COALESCE((SELECT SUM("subtotal")::float FROM "OrderExtra" WHERE "orderId" = ${orderId}), 0)
+        AS total
     `
-    const total = (totalRow?.[0]?.total ?? 0)
+    const total = totalRow?.[0]?.total ?? 0
 
-    // Toplamı güncelle
     await prisma.order.update({
       where: { id: orderId },
       data: { total: new Prisma.Decimal(total) },
@@ -222,8 +214,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 }
 
-
-/** SİL: DELETE /api/orders/:id */
+/** ---------- DELETE /api/orders/:id ---------- */
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
     const { id } = await ctx.params

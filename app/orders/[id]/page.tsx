@@ -541,7 +541,7 @@ export default function EditOrderPage() {
           <div className="col-span-2">
             <input
               type="text"
-              className="input mt-1 min-h-[50px] w-full"
+              className="input mt-1 min-h-[40px] w-full rounded-none"
               value={orderNote}
               placeholder="Not:"
               onChange={(e) => setOrderNote(e.target.value)}
@@ -826,7 +826,7 @@ function Header({
             src={"/brillant.png"}
             alt="Brillant"
             height={60}
-            style={{ width: "100%", height: "120px" }}
+            style={{ width: "100%", height: "100px" }}
           />
         </div>
         <div className="text-xs flex justify-between">
