@@ -1,0 +1,96 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/* ============== KATALOG ============== */
+model Category {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  variants   Variant[]
+  orderItems OrderItem[]
+}
+
+model Variant {
+  id         String      @id @default(cuid())
+  name       String
+  unitPrice  Decimal     @default(0)
+  categoryId String
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+}
+
+/* ============== SİPARİŞ ============== */
+model Order {
+  id             String      @id @default(cuid())
+  createdAt      DateTime    @default(now())
+  note           String?
+  total          Decimal     @default(0)
+  customerName   String      @default("")
+  customerPhone  String      @default("")
+  status         OrderStatus @default(pending)
+
+  items          OrderItem[]
+  extras         OrderExtra[]      // NEW: ücretli STOR/AKSESUAR kalemleri
+
+  // Eski serbest metin alanları (opsiyonel, toplam hesabına katılmaz)
+  storLines       Json?
+  accessoryLines  Json?
+}
+
+enum OrderStatus {
+  pending
+  processing
+  completed
+  cancelled
+}
+
+/* m² * fileDensity * unitPrice */
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+
+  variantId   String
+  variant     Variant  @relation(fields: [variantId], references: [id])
+
+  qty         Int
+  width       Int       // cm
+  height      Int       // cm
+  unitPrice   Decimal   @default(0)
+  fileDensity Decimal   @default(1)   // 1, 1.5, 2, 2.5, 3 ...
+
+  subtotal    Decimal   @default(0)
+  note        String?
+}
+
+/* Adet * Birim Fiyat */
+model OrderExtra {
+  id         String    @id @default(cuid())
+  orderId    String
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  type       ExtraType // STOR | ACCESSORY
+  text       String
+  qty        Int       @default(1)
+  unitPrice  Decimal   @default(0)
+  subtotal   Decimal   @default(0) // qty * unitPrice
+  note       String?
+
+  createdAt  DateTime  @default(now())
+
+  @@index([orderId, type])
+}
+
+enum ExtraType {
+  STOR
+  ACCESSORY
+}
