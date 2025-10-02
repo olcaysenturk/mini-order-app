@@ -1,31 +1,36 @@
 // app/api/categories/[id]/variants/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 
-// İsteğe göre: hem Next 14 hem 15 ile uyumlu küçük yardımcı
-type Ctx<P extends Record<string, string>> =
-  | { params: P }
-  | { params: Promise<P> }
+export const runtime = 'nodejs'
 
-async function getParams<P extends Record<string, string>>(ctx: Ctx<P>) {
-  return await Promise.resolve(ctx.params)
-}
+type Params = { id: string }
 
-const VariantSchema = z.object({
-  name: z.string().min(1),
+const BodySchema = z.object({
+  name: z.string().trim().min(1, 'İsim zorunlu'),
   unitPrice: z.union([z.number(), z.string()]).transform((v) => {
-    const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v
+    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'))
     return Number.isFinite(n) && n >= 0 ? n : 0
   }),
 })
 
-export async function POST(req: NextRequest, ctx: Ctx<{ id: string }>) {
+/** GET /api/categories/:id/variants -> bu kategoriye ait varyantlar */
+export async function GET(_req: NextRequest, ctx: { params: Promise<Params> }) {
+  const { id } = await ctx.params
+  const variants = await prisma.variant.findMany({
+    where: { categoryId: id },
+    orderBy: { name: 'asc' },
+  })
+  return NextResponse.json(variants)
+}
+
+/** POST /api/categories/:id/variants -> kategoriye yeni varyant ekle */
+export async function POST(req: NextRequest, ctx: { params: Promise<Params> }) {
   try {
-    const { id } = await getParams(ctx) // ← params'ı await edin
+    const { id } = await ctx.params
     const json = await req.json()
-    const parsed = VariantSchema.safeParse(json)
+    const parsed = BodySchema.safeParse(json)
     if (!parsed.success) {
       return NextResponse.json(
         { error: 'validation_error', details: parsed.error.flatten() },
@@ -33,18 +38,17 @@ export async function POST(req: NextRequest, ctx: Ctx<{ id: string }>) {
       )
     }
 
-    const { name, unitPrice } = parsed.data
-    const created = await prisma.variant.create({
+    const variant = await prisma.variant.create({
       data: {
-        name,
-        unitPrice: new Prisma.Decimal(unitPrice),
         categoryId: id,
+        name: parsed.data.name,
+        unitPrice: parsed.data.unitPrice, // Decimal alanı, number kabul eder
       },
     })
 
-    return NextResponse.json(created, { status: 201 })
+    return NextResponse.json(variant, { status: 201 })
   } catch (e) {
-    console.error('POST /api/categories/[id]/variants error:', e)
+    console.error('POST /categories/[id]/variants error', e)
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
 }
