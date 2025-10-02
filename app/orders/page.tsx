@@ -13,6 +13,9 @@ type OrderItem = {
   category: { name: string }
   variant: { name: string }
 }
+
+type Status = 'pending' | 'processing' | 'completed' | 'cancelled'
+
 type Order = {
   id: string
   createdAt: string
@@ -21,10 +24,29 @@ type Order = {
   items: OrderItem[]
   customerName: string
   customerPhone: string
+  status: Status
 }
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+
+const statusLabel: Record<Status, string> = {
+  pending: 'Beklemede',
+  processing: 'İşlemde',
+  completed: 'Tamamlandı',
+  cancelled: 'İptal',
+}
+
+function StatusBadge({ s }: { s: Status }) {
+  const common = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium'
+  const map: Record<Status, string> = {
+    pending: `${common} bg-gray-100 text-gray-700 border border-gray-200`,
+    processing: `${common} bg-blue-100 text-blue-700 border border-blue-200`,
+    completed: `${common} bg-green-100 text-green-700 border border-green-200`,
+    cancelled: `${common} bg-red-100 text-red-700 border border-red-200`,
+  }
+  return <span className={map[s]}>{statusLabel[s]}</span>
+}
 
 export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
@@ -33,9 +55,11 @@ export default function OrdersPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [q, setQ] = useState('')
 
+  // status filtresi: 'all' + tekli durum
+  const [statusFilter, setStatusFilter] = useState<'all' | Status>('all')
+
   // Açık (genişletilmiş) sipariş id'leri
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
-
   const toggleOpen = (id: string) => {
     setOpenIds(prev => {
       const next = new Set(prev)
@@ -45,18 +69,24 @@ export default function OrdersPage() {
     })
   }
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (status: 'all' | Status) => {
     setLoading(true); setError(null)
     try {
-      const res = await fetch('/api/orders', { cache: 'no-store' })
+      const qs = status === 'all' ? '' : `?status=${encodeURIComponent(status)}`
+      const res = await fetch(`/api/orders${qs}`, { cache: 'no-store' })
       if (!res.ok) throw new Error('Siparişler alınamadı')
       const data: Order[] = await res.json()
       setOrders(data)
-    } catch (e: any) {
-      setError(e?.message || 'Bilinmeyen hata')
-    } finally { setLoading(false) }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Bilinmeyen hata'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
   }
-  useEffect(() => { fetchOrders() }, [])
+
+  // ilk yükleme + status değişiminde yeniden çek
+  useEffect(() => { fetchOrders(statusFilter) }, [statusFilter])
 
   const removeOrder = async (id: string) => {
     if (!confirm(`#${id} siparişini silmek istiyor musun?`)) return
@@ -68,12 +98,12 @@ export default function OrdersPage() {
       setOpenIds(prev => {
         const next = new Set(prev); next.delete(id); return next
       })
-    } catch (e: any) {
-      alert(e?.message || 'Silmede hata')
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Silmede hata')
     } finally { setDeletingId(null) }
   }
 
-  // Filtrelenmiş liste (metin aramasına göre)
+  // Metin araması (müşteri, telefon, not, kategori/varyant)
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     if (!needle) return orders
@@ -98,12 +128,26 @@ export default function OrdersPage() {
       <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Siparişler</h1>
         <div className="flex gap-2">
+          <select
+            className="select h-[40px]"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | Status)}
+            title="Duruma göre filtrele"
+          >
+            <option value="all">Tümü</option>
+            <option value="pending">Beklemede</option>
+            <option value="processing">İşlemde</option>
+            <option value="completed">Tamamlandı</option>
+            <option value="cancelled">İptal</option>
+          </select>
+
           <input
             className="input h-[40px]"
             placeholder="Ara: müşteri, telefon, not, kategori/varyant…"
             value={q}
             onChange={e => setQ(e.target.value)}
           />
+
           <a href="/order" className="btn whitespace-nowrap">+ Yeni Sipariş</a>
         </div>
       </div>
@@ -118,11 +162,14 @@ export default function OrdersPage() {
           const isOpen = openIds.has(order.id)
           const detailId = `order-detail-${order.id}`
           return (
-            <div key={order.id} className="border rounded-2xl p-4 dark:border-gray-800">
+            <div key={order.id} className="border rounded-2xl p-4">
               {/* Header satırı (kısa özet) */}
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                  <div className="font-semibold">Sipariş #{num}</div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <div className="font-semibold">Sipariş #{num}</div>
+                    <StatusBadge s={order.status} />
+                  </div>
                   <div className="text-sm">
                     <span className="font-medium">Müşteri:</span> {order.customerName || '—'}
                   </div>
