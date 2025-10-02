@@ -1008,7 +1008,7 @@ function SectionQuickPlus({
                   ? `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${
                       it.height
                     } cm • ${fmt(it.subtotal)}`
-                  : "+ Ekle"}
+                  : <span className="only-screen print:hidden">+ Ekle</span>}
               </button>
             </div>
           );

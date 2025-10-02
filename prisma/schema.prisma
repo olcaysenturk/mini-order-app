@@ -1,9 +1,9 @@
 // prisma/schema.prisma
 datasource db {
- provider  = "postgresql"
+  provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
- }
+}
 
 generator client {
   provider = "prisma-client-js"
@@ -20,10 +20,12 @@ model Category {
 model Variant {
   id         String      @id @default(cuid())
   name       String
-  unitPrice  Decimal     @default(0)
+  unitPrice  Decimal     @default(0) @db.Decimal(12,2)
   categoryId String
   category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
+
+  @@index([categoryId])
 }
 
 /* ============== SİPARİŞ ============== */
@@ -31,17 +33,21 @@ model Order {
   id             String      @id @default(cuid())
   createdAt      DateTime    @default(now())
   note           String?
-  total          Decimal     @default(0)
+  total          Decimal     @default(0) @db.Decimal(12,2)
   customerName   String      @default("")
   customerPhone  String      @default("")
   status         OrderStatus @default(pending)
 
   items          OrderItem[]
-  extras         OrderExtra[]      // NEW: ücretli STOR/AKSESUAR kalemleri
+  extras         OrderExtra[]      // ücretli STOR/AKSESUAR kalemleri
 
   // Eski serbest metin alanları (opsiyonel, toplam hesabına katılmaz)
   storLines       Json?
   accessoryLines  Json?
+
+  // Rapor & aramalar için indexler
+  @@index([createdAt])
+  @@index([status, createdAt])
 }
 
 enum OrderStatus {
@@ -66,11 +72,15 @@ model OrderItem {
   qty         Int
   width       Int       // cm
   height      Int       // cm
-  unitPrice   Decimal   @default(0)
-  fileDensity Decimal   @default(1)   // 1, 1.5, 2, 2.5, 3 ...
+  unitPrice   Decimal   @default(0) @db.Decimal(12,2)
+  fileDensity Decimal   @default(1) @db.Decimal(3,1)   // 1.0, 1.5, 2.0, ...
 
-  subtotal    Decimal   @default(0)
+  subtotal    Decimal   @default(0) @db.Decimal(12,2)
   note        String?
+
+  @@index([orderId])
+  @@index([categoryId])
+  @@index([variantId])
 }
 
 /* Adet * Birim Fiyat */
@@ -82,8 +92,8 @@ model OrderExtra {
   type       ExtraType // STOR | ACCESSORY
   text       String
   qty        Int       @default(1)
-  unitPrice  Decimal   @default(0)
-  subtotal   Decimal   @default(0) // qty * unitPrice
+  unitPrice  Decimal   @default(0) @db.Decimal(12,2)
+  subtotal   Decimal   @default(0) @db.Decimal(12,2) // qty * unitPrice
   note       String?
 
   createdAt  DateTime  @default(now())

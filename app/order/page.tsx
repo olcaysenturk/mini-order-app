@@ -327,16 +327,16 @@ export default function NewOrderPagePrintLike() {
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
       {/* Toolbar (ekranda) */}
-      <div className="flex items-center gap-3 mb-4 print:hidden">
+      <div className="flex items-center justify-between gap-3 mb-4 print:hidden mt-4 py-4 px-4">
         <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
         
-        <button
-          className="btn-secondary disabled:opacity-50"
+        {/* <button
+          className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
           disabled={saving}
           onClick={saveOrder}
         >
           {saving ? "Kaydediliyor…" : "Siparişi Kaydet"}
-        </button>
+        </button> */}
       </div>
 
       {/* A4 Alanı */}
@@ -632,6 +632,17 @@ export default function NewOrderPagePrintLike() {
           </div>
         </div>
       )}
+
+<div className="flex items-center justify-end gap-3 mb-4 print:hidden mt-4 py-4 px-4">
+       <button
+          className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
+          disabled={saving}
+          onClick={saveOrder}
+        >
+          {saving ? "Kaydediliyor…" : "Siparişi Kaydet"}
+        </button>
+
+</div>
 
       {/* Print styles */}
       <style jsx global>{`
