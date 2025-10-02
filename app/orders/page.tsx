@@ -195,7 +195,6 @@ export default function OrdersPage() {
 
                   <div className="flex gap-2">
                     <a href={`/orders/${order.id}`} className="btn-secondary">Düzenle</a>
-                    <a href={`/orders/${order.id}/print`} className="btn-secondary" target="_blank">🖨️ Yazdır</a>
                     <button
                       className="btn-secondary disabled:opacity-50"
                       onClick={() => removeOrder(order.id)}

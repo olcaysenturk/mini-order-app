@@ -155,8 +155,11 @@ export async function POST(req: Request) {
     })
 
     return NextResponse.json(order, { status: 201 })
-  } catch (e: any) {
+  } catch (e) {
     console.error('POST /orders error', e)
-    return NextResponse.json({ error: 'server_error', details: e?.message }, { status: 500 })
+    return NextResponse.json(
+      { error: 'server_error', details: (e as Error)?.message },
+      { status: 500 }
+    )
   }
 }

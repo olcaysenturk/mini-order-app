@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { redirect } from 'next/navigation'
+import Image from 'next/image'
 
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
@@ -90,9 +91,9 @@ export default function NewOrderPagePrintLike() {
 
   // derived
   const selectedCategory = useMemo(
-    () => categories.find((c) => c.id === catId),
-    [categories, catId]
-  );
+  () => categories.find((c) => c.id === catId),
+  [categories, catId]
+)
   const variants = selectedCategory?.variants ?? [];
   const selectedVariant = useMemo(
     () => variants.find((v) => v.id === varId),
@@ -328,9 +329,7 @@ export default function NewOrderPagePrintLike() {
       {/* Toolbar (ekranda) */}
       <div className="flex items-center gap-3 mb-4 print:hidden">
         <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
-        <button className="btn" onClick={() => window.print()}>
-          🖨️ Yazdır Önizleme
-        </button>
+        
         <button
           className="btn-secondary disabled:opacity-50"
           disabled={saving}
@@ -718,7 +717,7 @@ function Header({
       </div>
       <div className="w-[300px] text-left">
         <div className="mb-3">
-          <img src={"/brillant.png"} alt="Brillant" height={80} style={{ width: "100%" }} />
+          <Image src="/brillant.png" alt="Brillant" width={300} height={80} priority style={{ width: '100%', height: 'auto' }} />
         </div>
         <div className="text-xs flex justify-between">
           <b>Müşteri Adı:</b>{" "}

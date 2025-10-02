@@ -1,5 +1,5 @@
 // app/api/orders/[id]/route.ts
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
@@ -23,7 +23,7 @@ const PatchItemSchema = z.object({
     const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v
     return Number.isFinite(n) && n >= 0 ? n : 0
   }),
-  fileDensity: z.number().positive().default(1), // NEW: m² ile çarpılacak
+  fileDensity: z.number().positive().default(1), // m² ile çarpılacak
   note: z.string().nullable().optional(),
   _action: z.enum(['upsert','delete']).optional(), // default: upsert
 })
@@ -40,19 +40,23 @@ const PatchBodySchema = z.object({
   accessoryLines: LinesSchema,
 })
 
+type Ctx = { params: Promise<{ id: string }> }
+
 /** TEK SİPARİŞ: GET /api/orders/:id  (seq dahil) */
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
+    const { id } = await ctx.params
+
     // seq hesaplama (oluşturulma tarihine göre, en eski 1, en yeni N olacak şekilde)
     const all = await prisma.order.findMany({
       select: { id: true, createdAt: true },
       orderBy: { createdAt: 'asc' }, // artan; index+1 = seq
     })
-    const index = all.findIndex(o => o.id === params.id)
+    const index = all.findIndex(o => o.id === id)
     const seq = index === -1 ? null : index + 1
 
     const order = await prisma.order.findUnique({
-      where: { id: params.id },
+      where: { id },
       include: {
         items: {
           include: { category: true, variant: true },
@@ -69,8 +73,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 }
 
 /** GÜNCELLE: PATCH /api/orders/:id */
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
+    const { id } = await ctx.params
     const json = await req.json()
     const parsed = PatchBodySchema.safeParse(json)
     if (!parsed.success) {
@@ -98,7 +103,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
         if (toDeleteIds.length) {
           await tx.orderItem.deleteMany({
-            where: { orderId: params.id, id: { in: toDeleteIds } },
+            where: { orderId: id, id: { in: toDeleteIds } },
           })
         }
 
@@ -123,7 +128,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
               where: { id: String(it.id) },
               select: { orderId: true },
             })
-            if (!owned || owned.orderId !== params.id) {
+            if (!owned || owned.orderId !== id) {
               throw new Error('forbidden_item_update') // başka order'a ait item
             }
 
@@ -141,7 +146,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
           } else {
             await tx.orderItem.create({
               data: {
-                order:    { connect: { id: params.id } },
+                order:    { connect: { id } },
                 category: { connect: { id: String(it.categoryId) } },
                 variant:  { connect: { id: String(it.variantId) } },
                 qty, width, height,
@@ -156,7 +161,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
       // 2) Toplamı yeniden hesapla (sadece item'lardan)
       const freshItems = await tx.orderItem.findMany({
-        where: { orderId: params.id },
+        where: { orderId: id },
         select: { subtotal: true },
       })
       let total = new Prisma.Decimal(0)
@@ -181,13 +186,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       }
 
       await tx.order.update({
-        where: { id: params.id },
+        where: { id },
         data,
       })
 
       // 4) Güncel siparişi detaylı döndür
       return tx.order.findUnique({
-        where: { id: params.id },
+        where: { id },
         include: {
           items: {
             include: { category: true, variant: true },
@@ -199,9 +204,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
     if (!updated) return NextResponse.json({ error: 'not_found' }, { status: 404 })
     return NextResponse.json(updated)
-  } catch (e: any) {
+  } catch (e) {
     console.error('PATCH /orders/:id error:', e)
-    const code = String(e?.message || '')
+    const code = e instanceof Error ? e.message : String(e)
     if (code === 'forbidden_item_update') {
       return NextResponse.json({ error: 'forbidden_item_update' }, { status: 403 })
     }
@@ -210,9 +215,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 }
 
 /** SİL: DELETE /api/orders/:id */
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
-    await prisma.order.delete({ where: { id: params.id } })
+    const { id } = await ctx.params
+    await prisma.order.delete({ where: { id } })
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('DELETE /orders/:id error:', e)
