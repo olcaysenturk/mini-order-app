@@ -1,90 +1,138 @@
-import { NextResponse } from 'next/server'
+// app/api/orders/route.ts
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/app/lib/db'
-import { Prisma, OrderStatus } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
 
-// ---- Zod şemaları
 const StatusSchema = z.enum(['pending','processing','completed','cancelled'])
-const LinesSchema = z
-  .array(z.string().transform(s => s.trim()))
-  .max(6)
-  .optional()
 
 const ItemSchema = z.object({
-  categoryId: z.string().min(1),
-  variantId: z.string().min(1),
+  categoryId: z.string(),
+  variantId: z.string(),
   qty: z.number().int().positive(),
-  width: z.number().int().nonnegative(),   // cm
-  height: z.number().int().nonnegative(),  // cm
-  unitPrice: z.union([z.number(), z.string()]).transform((v) => {
-    const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v
+  width: z.number().int().nonnegative(),
+  height: z.number().int().nonnegative(), // UI'da dursun (formülde yok)
+  unitPrice: z.union([z.number(), z.string()]).transform(v => {
+    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'))
     return Number.isFinite(n) && n >= 0 ? n : 0
   }),
-  fileDensity: z.number().positive().default(1), // NEW
+  fileDensity: z.number().positive().default(1),
   note: z.string().nullable().optional(),
 })
 
 const BodySchema = z.object({
-  note: z.string().optional(),
-  status: StatusSchema.optional(),
+  // müşteri bağlama
+  customerId: z.string().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
-  items: z.array(ItemSchema).min(1),
 
-  // NEW:
-  storLines: LinesSchema,
-  accessoryLines: LinesSchema,
+  note: z.string().nullable().optional(),
+  status: StatusSchema.default('pending'),
+  discount: z.union([z.number(), z.string()]).optional(), // TL
+
+  items: z.array(ItemSchema).min(1),
 })
 
-// ================== GET: listeleme ==================
-export async function GET(req: Request) {
+/** LISTE: GET /api/orders
+ * Query:
+ *  - customerId: string
+ *  - status: pending|processing|completed|cancelled (tek ya da virgülle birden çok)
+ *  - q: string  (id, not, müşteri adı/telefonu + kalem kategori/varyant/not içinde arar)
+ *  - take: number (default 100, max 200)
+ */
+export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const rawStatus = searchParams.get('status')
-    const from = searchParams.get('from') // YYYY-MM-DD
-    const to   = searchParams.get('to')   // YYYY-MM-DD
-    const q    = searchParams.get('q')
+    const url = new URL(req.url)
+    const sp = url.searchParams
 
-    const s = rawStatus?.toLowerCase()
-    const statusStr = s && StatusSchema.safeParse(s).success ? (s as z.infer<typeof StatusSchema>) : undefined
-    const statusEnum = statusStr as OrderStatus | undefined
-
-    const createdAt: Prisma.OrderWhereInput['createdAt'] = {}
-    if (from) createdAt.gte = new Date(from + 'T00:00:00')
-    if (to)   createdAt.lte = new Date(to   + 'T23:59:59')
-
-    const textFilter: Prisma.OrderWhereInput[] = q
-      ? [
-          { customerName: { contains: q } },
-          { customerPhone: { contains: q } },
-        ]
+    const customerId = sp.get('customerId') || undefined
+    const q = (sp.get('q') || '').trim()
+    const statusParam = (sp.get('status') || '').trim()
+    const valid = new Set(['pending','processing','completed','cancelled'] as const)
+    const inList = statusParam
+      ? statusParam.split(',').map(s => s.trim()).filter(s => valid.has(s as any))
       : []
 
-    const where: Prisma.OrderWhereInput = {
-      ...(statusEnum ? { status: statusEnum } : {}),
-      ...(from || to ? { createdAt } : {}),
-      ...(q ? { OR: textFilter } : {}),
+    const takeRaw = Number(sp.get('take') || '100')
+    const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 100
+
+    const where: Prisma.OrderWhereInput = {}
+
+    if (customerId) where.customerId = customerId
+    if (inList.length) where.status = { in: inList as any }
+
+    if (q) {
+      where.OR = [
+        { id: { contains: q } },
+        { note: { contains: q } },
+        { customerName: { contains: q } },
+        { customerPhone: { contains: q } },
+        {
+          items: {
+            some: {
+              OR: [
+                { note: { contains: q } },
+                { category: { name: { contains: q } } },
+                { variant:  { name: { contains: q } } },
+              ],
+            },
+          },
+        },
+      ]
     }
 
     const orders = await prisma.order.findMany({
       where,
-      include: {
-        items: { include: { category: true, variant: true } },
-      },
       orderBy: { createdAt: 'desc' },
+      take,
+      include: {
+        items: {
+          include: {
+            category: { select: { name: true } },
+            variant:  { select: { name: true } },
+          },
+          orderBy: { id: 'asc' },
+        },
+        customer: { select: { id: true, name: true, phone: true } },
+      },
     })
 
-    return NextResponse.json(orders)
+    const payload = orders.map(o => ({
+      id: o.id,
+      createdAt: o.createdAt,
+      note: o.note,
+      status: o.status,
+      customerName: o.customerName,
+      customerPhone: o.customerPhone,
+      customer: o.customer,
+      total: Number(o.total),
+      discount: Number((o as any).discount ?? 0),
+      netTotal: Number((o as any).netTotal ?? o.total),
+      items: o.items.map(it => ({
+        id: it.id,
+        qty: it.qty,
+        width: it.width,
+        height: it.height,
+        unitPrice: Number(it.unitPrice),
+        fileDensity: Number(it.fileDensity),
+        subtotal: Number(it.subtotal),
+        note: it.note,
+        category: { name: it.category.name },
+        variant:  { name: it.variant.name },
+      })),
+    }))
+
+    return NextResponse.json(payload)
   } catch (e) {
-    console.error('GET /orders error', e)
-    return NextResponse.json({ error: 'fetch_failed' }, { status: 500 })
+    console.error('GET /orders error:', e)
+    return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
 }
 
-// ================== POST: oluşturma ==================
-export async function POST(req: Request) {
+/** OLUSTUR: POST /api/orders  — yeni formülle hesaplar */
+export async function POST(req: NextRequest) {
   try {
     const json = await req.json()
     const parsed = BodySchema.safeParse(json)
@@ -95,71 +143,117 @@ export async function POST(req: Request) {
       )
     }
 
-    const {
-      note, items, customerName, customerPhone, status,
-      storLines = [], accessoryLines = [],
-    } = parsed.data
+    const { customerId, customerName, customerPhone, note, status, discount, items } = parsed.data
 
-    const statusEnum: OrderStatus = (status as OrderStatus | undefined) ?? OrderStatus.pending
+    // --- Müşteriyi belirle ---
+    let linkedCustomerId: string | null = null
+    let snapName = (customerName || '').trim()
+    let snapPhone = (customerPhone || '').trim()
 
-    // Satırları temizle (boşları ayıkla)
-    const storClean = (storLines || []).map(s => s.trim()).filter(Boolean)
-    const accClean  = (accessoryLines || []).map(s => s.trim()).filter(Boolean)
-
-    // Toplam tutar
-    let total = new Prisma.Decimal(0)
-
-    // Hazırlık: Decimal ile m² * fileDensity * unitPrice
-    const prepared = items.map(i => {
-      const unitPrice   = new Prisma.Decimal(i.unitPrice)      // para
-      const qtyDec      = new Prisma.Decimal(i.qty)            // adet
-      const widthDec    = new Prisma.Decimal(i.width)          // cm
-      const heightDec   = new Prisma.Decimal(i.height)         // cm
-      const densityDec  = new Prisma.Decimal(i.fileDensity)    // file sıklığı
-
-      // m² = (qty * width(cm) * height(cm)) / 10000
-      const m2 = qtyDec.mul(widthDec).mul(heightDec).div(10000)
-
-      // subtotal = unitPrice * m² * fileDensity
-      const subtotal = unitPrice.mul(m2).mul(densityDec)
-
-      total = total.add(subtotal)
-
-      return {
-        categoryId: i.categoryId,
-        variantId: i.variantId,
-        qty: i.qty,
-        width: i.width,
-        height: i.height,
-        unitPrice,                 // Decimal
-        fileDensity: densityDec,   // Decimal
-        subtotal,                  // Decimal
-        note: i.note ?? null,
+    if (customerId) {
+      const c = await prisma.customer.findUnique({ where: { id: customerId } })
+      if (c) {
+        linkedCustomerId = c.id
+        if (!snapName) snapName = c.name
+        if (!snapPhone) snapPhone = c.phone
       }
+    } else if (snapPhone) {
+      const existing = await prisma.customer.findUnique({ where: { phone: snapPhone } })
+      if (existing) {
+        linkedCustomerId = existing.id
+        if (!snapName) snapName = existing.name
+      } else if (snapName) {
+        const created = await prisma.customer.create({
+          data: { name: snapName, phone: snapPhone },
+          select: { id: true, name: true, phone: true },
+        })
+        linkedCustomerId = created.id
+      }
+    }
+
+    // --- Siparişi ve kalemleri tek seferde oluştur ---
+    const created = await prisma.$transaction(async (tx) => {
+      // 1) Order oluştur
+      const order = await tx.order.create({
+        data: {
+          note: note ?? null,
+          status,
+          customerId: linkedCustomerId,
+          customerName: snapName || '',
+          customerPhone: snapPhone || '',
+          total:    new Prisma.Decimal(0),
+          discount: new Prisma.Decimal(Number(discount ?? 0) || 0),
+          netTotal: new Prisma.Decimal(0),
+        },
+        select: { id: true }
+      })
+
+      // 2) Kalemleri oluştur + brüt toplam
+      let total = new Prisma.Decimal(0)
+
+      for (const it of items) {
+        const qty       = Math.max(1, Math.trunc(Number(it.qty)))
+        const width     = Math.max(0, Math.trunc(Number(it.width)))
+        const unitPrice = new Prisma.Decimal(it.unitPrice)
+        const density   = new Prisma.Decimal(Number(it.fileDensity) || 1)
+
+        // === YENİ FORMÜL ===
+        // lineTotal = unitPrice * ((width/100) * density || 1) * qty
+        const wmt       = new Prisma.Decimal(width).div(100) // en/100 (metre)
+        const meterPart = Prisma.Decimal.max(new Prisma.Decimal(1), wmt.mul(density))
+        const lineTotal = unitPrice.mul(meterPart).mul(qty)
+
+        await tx.orderItem.create({
+          data: {
+            orderId:    order.id,
+            categoryId: it.categoryId,
+            variantId:  it.variantId,
+            qty,
+            width,
+            height:     Math.max(0, Math.trunc(Number(it.height))), // UI için tutuluyor
+            unitPrice,
+            fileDensity: density,
+            subtotal:   lineTotal,
+            note: it.note ?? null,
+          }
+        })
+
+        total = total.add(lineTotal)
+      }
+
+      // 3) Net toplam (iskonto uygulanır; 0..total aralığına clamp)
+      const discReq = new Prisma.Decimal(Number(discount ?? 0) || 0)
+      const disc = Prisma.Decimal.max(
+        new Prisma.Decimal(0),
+        Prisma.Decimal.min(discReq, total)
+      )
+      const net = total.sub(disc)
+
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          total,
+          discount: disc,
+          netTotal: net,
+        }
+      })
+
+      // 4) Siparişi detaylı döndür
+      return tx.order.findUnique({
+        where: { id: order.id },
+        include: {
+          items: {
+            include: { category: true, variant: true },
+            orderBy: { id: 'asc' },
+          },
+          customer: { select: { id: true, name: true, phone: true } },
+        }
+      })
     })
 
-    const order = await prisma.order.create({
-      data: {
-        note: note?.trim() || undefined,
-        status: statusEnum,
-        customerName: (customerName ?? '').trim(),
-        customerPhone: (customerPhone ?? '').trim(),
-        total,
-        storLines:      storClean as unknown as Prisma.InputJsonValue,   // NEW
-        accessoryLines: accClean  as unknown as Prisma.InputJsonValue,   // NEW
-        items: { create: prepared }, // include ile uyumlu
-      },
-      include: {
-        items: { include: { category: true, variant: true } },
-      },
-    })
-
-    return NextResponse.json(order, { status: 201 })
+    return NextResponse.json(created, { status: 201 })
   } catch (e) {
-    console.error('POST /orders error', e)
-    return NextResponse.json(
-      { error: 'server_error', details: (e as Error)?.message },
-      { status: 500 }
-    )
+    console.error('POST /orders error:', e)
+    return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
 }

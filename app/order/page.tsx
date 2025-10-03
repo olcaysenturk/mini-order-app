@@ -8,6 +8,7 @@ import Image from "next/image";
 type Variant = { id: string; name: string; unitPrice: number };
 type Category = { id: string; name: string; variants: Variant[] };
 type Status = "pending" | "processing" | "completed" | "cancelled";
+type CustomerBasic = { id: string; name: string; phone: string };
 
 type LineItem = {
   id: string;
@@ -64,6 +65,16 @@ export default function NewOrderPagePrintLike() {
   const [status, setStatus] = useState<Status>("pending");
   const [saving, setSaving] = useState(false);
 
+  // müşteri arama/seçim
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerList, setCustomerList] = useState<CustomerBasic[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const clearSelectedCustomer = () => {
+    setSelectedCustomerId(null);
+    // kullanıcı manuel düzenleyebilir, query'yi de temizleyelim
+    setCustomerQuery("");
+  };
+
   // iskonto
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [discountAmount, setDiscountAmount] = useState<number>(0);
@@ -91,6 +102,33 @@ export default function NewOrderPagePrintLike() {
       }
     })();
   }, []);
+
+  /* ==== Customer search ==== */
+  useEffect(() => {
+    const q = customerQuery.trim();
+    if (!q) {
+      setCustomerList([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/customers?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+        if (res.ok) {
+          const rows: CustomerBasic[] = await res.json();
+          setCustomerList(rows);
+        }
+      } catch (_) {/* yut */}
+    }, 300);
+    return () => clearTimeout(t);
+  }, [customerQuery]);
+
+  const chooseCustomer = (c: CustomerBasic) => {
+    setSelectedCustomerId(c.id);
+    setCustomerName(c.name);
+    setCustomerPhone(c.phone);
+    setCustomerQuery(`${c.name} • ${c.phone}`);
+    setCustomerList([]);
+  };
 
   /* ==== Derived ==== */
   const selectedCategory = useMemo(
@@ -292,10 +330,12 @@ export default function NewOrderPagePrintLike() {
     setSaving(true);
     try {
       const payload: any = {
+        customerId: selectedCustomerId ?? undefined, // müşteri bağlama
         customerName,
         customerPhone,
         note: orderNote || "",
         status,
+        discount: computedDiscount, // TL olarak sunucuya gönder
         items: items.map((i) => ({
           categoryId: i.categoryId,
           variantId: i.variantId,
@@ -307,11 +347,6 @@ export default function NewOrderPagePrintLike() {
           fileDensity: i.fileDensity,
         })),
       };
-
-      // Backend şeman hazırsa şunları da ekleyebilirsin:
-      // payload.discountPercent = Number(discountPercent) || 0
-      // payload.discountAmount  = computedDiscount
-      // payload.payable         = grandTotal
 
       const res = await fetch("/api/orders", {
         method: "POST",
@@ -354,8 +389,38 @@ export default function NewOrderPagePrintLike() {
         />
 
         {/* Müşteri Alanları */}
-        <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
-          <div>
+        <div className="grid grid-cols-2 gap-3 my-4 print:hidden">
+          <div className="col-span-1 relative">
+            <label className="text-sm">Müşteri Ara</label>
+            <input
+              className="input mt-1"
+              value={customerQuery}
+              onChange={(e) => { setCustomerQuery(e.target.value); setSelectedCustomerId(null); }}
+              placeholder="Örn: Ali / 05xx..."
+            />
+            {customerList.length > 0 && (
+              <div className="absolute z-20 left-0 right-0 border rounded-md mt-1 max-h-48 overflow-auto bg-white">
+                {customerList.map(c => (
+                  <button
+                    type="button"
+                    key={c.id}
+                    className="w-full text-left px-2 py-1 hover:bg-black/5"
+                    onClick={() => chooseCustomer(c)}
+                  >
+                    {c.name} — {c.phone}
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedCustomerId && (
+              <div className="text-xs text-green-700 mt-1 flex items-center gap-2">
+                Seçildi: <b>{customerName}</b>
+                <button className="underline" onClick={clearSelectedCustomer}>Kaldır</button>
+              </div>
+            )}
+          </div>
+
+          {/* <div>
             <label className="text-sm">Müşteri Adı</label>
             <input
               className="input mt-1"
@@ -372,7 +437,8 @@ export default function NewOrderPagePrintLike() {
               onChange={(e) => setCustomerPhone(e.target.value)}
               placeholder="05xx xxx xx xx"
             />
-          </div>
+          </div> */}
+
           <div>
             <label className="text-sm">Durum</label>
             <select

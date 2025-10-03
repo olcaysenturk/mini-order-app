@@ -134,7 +134,7 @@ export default function AdminPage() {
       <h1 className="text-xl font-semibold mb-4">Admin: Kategori & Varyant</h1>
 
       {/* Kategori ekleme */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      <div className="flex gap-2 mb-6">
         <input
           className="input"
           placeholder="Kategori adı"
