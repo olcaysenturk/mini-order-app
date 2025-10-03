@@ -166,7 +166,7 @@ export default async function Home() {
 
       {/* FİYATLANDIRMA */}
       <section id="fiyat" className="mx-auto max-w-6xl px-4 py-10 sm:py-16">
-        <h2 className="text-2xl sm:text-3xl font-bold text-center">Basit fiyatlandırma</h2>
+        <h2 className="text-2xl sm:text-3xl font-bold text-center">Fiyatlandırma</h2>
         <p className="mt-2 text-center text-gray-600">Küçükten büyüğe tüm işletmeler için.</p>
 
         <div className="mt-8 grid md:grid-cols-2 gap-6">
@@ -175,7 +175,7 @@ export default async function Home() {
             <div className="mt-2 text-3xl font-extrabold">0 ₺</div>
             <p className="text-gray-600 mt-2 text-sm">Tek kullanıcı, sınırlı rapor, temel çıktılar.</p>
             <ul className="mt-4 space-y-2 text-sm">
-              <li>✔ Kategori & Varyant</li>
+              <li>✔ Ücretsiz Demo</li>
               <li>✔ Sipariş oluşturma</li>
               <li>✔ Yazdırılabilir A4</li>
             </ul>
@@ -184,7 +184,7 @@ export default async function Home() {
 
           <div className="rounded-3xl border-2 border-indigo-600 bg-white p-6 shadow-md">
             <div className="text-sm font-semibold text-indigo-700">Pro</div>
-            <div className="mt-2 text-3xl font-extrabold">— ₺/ay</div>
+            <div className="mt-2 text-3xl font-extrabold">2000 ₺/ay</div>
             <p className="text-gray-600 mt-2 text-sm">Çoklu kullanıcı, gelişmiş raporlar, öncelikli destek.</p>
             <ul className="mt-4 space-y-2 text-sm">
               <li>✔ Çoklu kullanıcı</li>
