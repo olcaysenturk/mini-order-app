@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type Status = 'pending' | 'processing' | 'completed' | 'cancelled'
 
@@ -23,7 +23,36 @@ type OrderLite = {
   discount?: number
 }
 
+const fmt = (n: number | undefined | null) =>
+  new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
+    Number(n ?? 0)
+  )
+
+const fmtDateTime = (d: string | Date) =>
+  new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }).format(
+    typeof d === 'string' ? new Date(d) : d
+  )
+
+const statusLabel: Record<Status, string> = {
+  pending: 'Beklemede',
+  processing: 'İşlemde',
+  completed: 'Tamamlandı',
+  cancelled: 'İptal',
+}
+
+function StatusBadge({ s }: { s: Status }) {
+  const base = 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border'
+  const cls: Record<Status, string> = {
+    pending: `${base} bg-neutral-100 text-neutral-700 border-neutral-200`,
+    processing: `${base} bg-blue-50 text-blue-700 border-blue-200`,
+    completed: `${base} bg-emerald-50 text-emerald-700 border-emerald-200`,
+    cancelled: `${base} bg-rose-50 text-rose-700 border-rose-200`,
+  }
+  return <span className={cls[s]}>{statusLabel[s]}</span>
+}
+
 export default function CustomersPage() {
+  // ---- state
   const [items, setItems] = useState<Customer[]>([])
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
@@ -35,9 +64,12 @@ export default function CustomersPage() {
   const [email, setEmail] = useState('')
   const [address, setAddress] = useState('')
   const [note, setNote] = useState('')
+  const [adding, setAdding] = useState(false)
 
   // inline edit draft’ları
   const [editing, setEditing] = useState<Record<string, Partial<Customer>>>({})
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [removingId, setRemovingId] = useState<string | null>(null)
 
   // akordeon açık müşteri id’leri
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
@@ -47,24 +79,24 @@ export default function CustomersPage() {
     Record<string, { loading: boolean; error: string | null; items: OrderLite[] }>
   >({})
 
-  const fmtDate = (d: string) =>
-    new Date(d).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })
-  const fmt = (n: number | undefined | null) =>
-    new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(
-      Number(n ?? 0)
-    )
+  // abort controller referansı (liste fetch)
+  const listAbort = useRef<AbortController | null>(null)
 
+  // ---- helpers
   const fetchCustomers = async (query = '') => {
+    listAbort.current?.abort()
+    const ac = new AbortController()
+    listAbort.current = ac
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/customers' + (query ? `?q=${encodeURIComponent(query)}` : ''), {
-        cache: 'no-store',
-      })
+      const url = '/api/customers' + (query ? `?q=${encodeURIComponent(query)}` : '')
+      const res = await fetch(url, { cache: 'no-store', signal: ac.signal })
       if (!res.ok) throw new Error('Müşteriler alınamadı')
       const data: Customer[] = await res.json()
       setItems(data)
-    } catch (e: unknown) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return
       setError(e instanceof Error ? e.message : 'Bilinmeyen hata')
     } finally {
       setLoading(false)
@@ -73,6 +105,8 @@ export default function CustomersPage() {
 
   useEffect(() => {
     fetchCustomers()
+    return () => listAbort.current?.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const filtered = useMemo(() => {
@@ -91,6 +125,7 @@ export default function CustomersPage() {
     })
   }, [items, q])
 
+  // yeni kayıt
   const add = async () => {
     const payload = {
       name: name.trim(),
@@ -103,27 +138,32 @@ export default function CustomersPage() {
       alert('İsim ve telefon zorunlu.')
       return
     }
-    const res = await fetch('/api/customers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    if (res.status === 409) {
-      alert('Bu telefon numarası zaten kayıtlı.')
-      return
+    setAdding(true)
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (res.status === 409) {
+        alert('Bu telefon numarası zaten kayıtlı.')
+        return
+      }
+      if (!res.ok) {
+        const t = await res.text().catch(() => '')
+        console.error(t)
+        alert('Kayıt başarısız.')
+        return
+      }
+      setName('')
+      setPhone('')
+      setEmail('')
+      setAddress('')
+      setNote('')
+      await fetchCustomers(q)
+    } finally {
+      setAdding(false)
     }
-    if (!res.ok) {
-      const t = await res.text().catch(() => '')
-      console.error(t)
-      alert('Kayıt başarısız.')
-      return
-    }
-    setName('')
-    setPhone('')
-    setEmail('')
-    setAddress('')
-    setNote('')
-    fetchCustomers(q)
   }
 
   const ensureDraft = (c: Customer) => {
@@ -156,41 +196,51 @@ export default function CustomersPage() {
   const save = async (id: string) => {
     const draft = editing[id]
     if (!draft) return
-    const res = await fetch(`/api/customers/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(draft),
-    })
-    if (res.status === 409) {
-      alert('Telefon zaten kullanılıyor.')
-      return
+    setSavingId(id)
+    try {
+      const res = await fetch(`/api/customers/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      })
+      if (res.status === 409) {
+        alert('Telefon zaten kullanılıyor.')
+        return
+      }
+      if (!res.ok) {
+        alert('Güncelleme başarısız.')
+        return
+      }
+      const updated: Customer = await res.json()
+      setItems((prev) => prev.map((c) => (c.id === id ? updated : c)))
+      cancelEdit(id)
+    } finally {
+      setSavingId(null)
     }
-    if (!res.ok) {
-      alert('Güncelleme başarısız.')
-      return
-    }
-    const updated: Customer = await res.json()
-    setItems((prev) => prev.map((c) => (c.id === id ? updated : c)))
-    cancelEdit(id)
   }
 
   const remove = async (id: string) => {
     if (!confirm('Müşteri silinsin mi? (Siparişi varsa silinemez)')) return
-    const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' })
-    if (res.status === 400) {
-      alert('Bu müşteriye bağlı siparişler var, silinemez.')
-      return
+    setRemovingId(id)
+    try {
+      const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' })
+      if (res.status === 400) {
+        alert('Bu müşteriye bağlı siparişler var, silinemez.')
+        return
+      }
+      if (!res.ok) {
+        alert('Silme başarısız.')
+        return
+      }
+      setItems((prev) => prev.filter((c) => c.id !== id))
+      setOpenIds((prev) => {
+        const n = new Set(prev)
+        n.delete(id)
+        return n
+      })
+    } finally {
+      setRemovingId(null)
     }
-    if (!res.ok) {
-      alert('Silme başarısız.')
-      return
-    }
-    setItems((prev) => prev.filter((c) => c.id !== id))
-    setOpenIds((prev) => {
-      const n = new Set(prev)
-      n.delete(id)
-      return n
-    })
   }
 
   // sipariş fetch
@@ -205,7 +255,6 @@ export default function CustomersPage() {
       })
       if (!res.ok) throw new Error('Siparişler alınamadı')
       const data: any[] = await res.json()
-      // UI’da gereken alanlara indirgeme
       const lite: OrderLite[] = data.map((o) => ({
         id: o.id,
         createdAt: o.createdAt,
@@ -233,240 +282,354 @@ export default function CustomersPage() {
         next.delete(c.id)
       } else {
         next.add(c.id)
-        // ilk kez açılıyorsa: draft hazırla + sipariş çek
         ensureDraft(c)
-        if (!ordersByCustomer[c.id]) fetchOrdersFor(c.id)
+        if (!ordersByCustomer[c.id]) void fetchOrdersFor(c.id)
       }
       return next
     })
   }
 
+  // özet
+  const summary = useMemo(() => ({ count: filtered.length }), [filtered])
+
+  // skeleton
+  const Skeleton = () => (
+    <div className="animate-pulse rounded-2xl border border-neutral-200 p-4">
+      <div className="h-4 w-40 rounded bg-neutral-200" />
+      <div className="mt-2 h-3 w-80 rounded bg-neutral-200" />
+    </div>
+  )
+
   return (
-    <div className="card">
-      <div className="flex items-center justify-between mb-4 gap-2">
-        <h1 className="text-xl font-semibold">Müşteriler</h1>
-        <div className="flex gap-2">
-          <input
-            className="input h-[40px]"
-            placeholder="Ara: ad, telefon, e-posta…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
-          <button className="btn-secondary" onClick={() => fetchCustomers(q)}>
+    <main className="mx-auto max-w-7xl p-4 sm:p-6">
+      {/* Başlık + özet */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold tracking-tight">Müşteriler</h1>
+        <div className="text-sm text-neutral-600">{summary.count} kayıt</div>
+      </div>
+
+      {/* Ara / Yenile */}
+      <div className="mt-4 rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <input
+              className="h-9 w-80 rounded-xl border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              placeholder="Ara: ad, telefon, e-posta, adres, not…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="Müşterilerde ara"
+            />
+            {q && (
+              <button
+                type="button"
+                onClick={() => setQ('')}
+                className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100"
+                aria-label="Aramayı temizle"
+                title="Temizle"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    d="M18 6L6 18M6 6l12 12"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => fetchCustomers(q)}
+            className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
+            title="Listeyi yenile"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+              <path fill="currentColor" d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z" />
+            </svg>
             Yenile
           </button>
         </div>
       </div>
 
       {/* Yeni müşteri formu */}
-      <div className="border rounded-2xl p-4 mb-6">
-        <div className="font-medium mb-3">Yeni Müşteri</div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+      <section className="mt-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="font-medium">Yeni Müşteri</div>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-5">
           <input
-            className="input"
+            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm"
             placeholder="Ad Soyad"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
           <input
-            className="input"
+            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm"
             placeholder="Telefon"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />
           <input
-            className="input"
+            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm"
             placeholder="E-posta (opsiyonel)"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
           <input
-            className="input"
+            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm"
             placeholder="Adres (opsiyonel)"
             value={address}
             onChange={(e) => setAddress(e.target.value)}
           />
           <input
-            className="input"
+            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm"
             placeholder="Not (opsiyonel)"
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
         </div>
         <div className="mt-3">
-          <button className="btn" onClick={add}>
-            Ekle
+          <button
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+            onClick={add}
+            disabled={adding}
+          >
+            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+              <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
+            </svg>
+            {adding ? 'Ekleniyor…' : 'Ekle'}
           </button>
         </div>
-      </div>
+      </section>
 
-      {loading && <p className="text-sm text-gray-500 mb-2">Yükleniyor…</p>}
-      {error && <p className="text-sm text-red-600 mb-2">{error}</p>}
-      {!loading && filtered.length === 0 && <p>Sonuç bulunamadı.</p>}
+      {/* Durumlar */}
+      {loading && (
+        <p className="mt-3 text-sm text-neutral-500">Yükleniyor…</p>
+      )}
+      {error && (
+        <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {error}
+        </div>
+      )}
+      {!loading && filtered.length === 0 && !error && (
+        <p className="mt-3 text-neutral-600">Sonuç bulunamadı.</p>
+      )}
 
-      {/* Akordeon liste */}
-      <div className="space-y-3">
-        {filtered.map((c) => {
-          const isOpen = openIds.has(c.id)
-          const draft = editing[c.id]
-          const ord = ordersByCustomer[c.id]
-          return (
-            <div key={c.id} className="border rounded-2xl">
-              {/* HEADER */}
-              <button
-                className="w-full text-left p-4 flex items-center justify-between gap-3"
-                onClick={() => toggleOpen(c)}
-                aria-expanded={isOpen}
-              >
-                <div className="min-w-0">
-                  <div className="font-semibold truncate">{c.name}</div>
-                  <div className="text-sm text-gray-600 truncate">
-                    {c.phone} • {c.email || '—'} • {fmtDate(c.createdAt)}
-                  </div>
-                </div>
-                <div className="shrink-0 text-gray-500">{isOpen ? '▲' : '▼'}</div>
-              </button>
+      {/* Liste */}
+      <div className="mt-4 space-y-3">
+        {loading && items.length === 0 && (
+          <>
+            <Skeleton />
+            <Skeleton />
+            <Skeleton />
+          </>
+        )}
 
-              {/* PANEL */}
-              {isOpen && (
-                <div className="px-4 pb-4">
-                  {/* Edit alanları */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-xs">Ad Soyad</label>
-                      <input
-                        className="input mt-1"
-                        value={draft ? String(draft.name ?? '') : c.name}
-                        onChange={(e) => changeEdit(c.id, { name: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs">Telefon</label>
-                      <input
-                        className="input mt-1"
-                        value={draft ? String(draft.phone ?? '') : c.phone}
-                        onChange={(e) => changeEdit(c.id, { phone: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs">E-posta</label>
-                      <input
-                        className="input mt-1"
-                        value={draft ? String(draft.email ?? '') : c.email ?? ''}
-                        onChange={(e) => changeEdit(c.id, { email: e.target.value })}
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="text-xs">Adres</label>
-                      <input
-                        className="input mt-1"
-                        value={draft ? String(draft.address ?? '') : c.address ?? ''}
-                        onChange={(e) => changeEdit(c.id, { address: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs">Not</label>
-                      <input
-                        className="input mt-1"
-                        value={draft ? String(draft.note ?? '') : c.note ?? ''}
-                        onChange={(e) => changeEdit(c.id, { note: e.target.value })}
-                      />
+        {!loading &&
+          filtered.map((c) => {
+            const isOpen = openIds.has(c.id)
+            const draft = editing[c.id]
+            const ord = ordersByCustomer[c.id]
+            const ordSummary =
+              ord && ord.items.length
+                ? {
+                    count: ord.items.length,
+                    total: ord.items.reduce((acc, o) => acc + Number(o.netTotal ?? o.total ?? 0), 0),
+                  }
+                : { count: 0, total: 0 }
+
+            return (
+              <section key={c.id} className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
+                {/* HEADER */}
+                <button
+                  className="w-full text-left px-4 py-3 flex items-center justify-between gap-3"
+                  onClick={() => toggleOpen(c)}
+                  aria-expanded={isOpen}
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{c.name}</div>
+                    <div className="text-sm text-neutral-600 truncate">
+                      {c.phone} • {c.email || '—'} • {fmtDateTime(c.createdAt)}
                     </div>
                   </div>
-
-                  {/* Actions */}
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    <button className="btn" onClick={() => save(c.id)}>
-                      Kaydet
-                    </button>
-                    <button className="btn-secondary" onClick={() => cancelEdit(c.id)}>
-                      İptal
-                    </button>
-                    <button className="btn-secondary" onClick={() => remove(c.id)}>
-                      Sil
-                    </button>
-                    <a className="btn-secondary" href={`/order?customerId=${c.id}`}>
-                      + Yeni Sipariş
-                    </a>
+                  <div className="shrink-0 text-neutral-500">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className={`size-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                      aria-hidden
+                    >
+                      <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+                    </svg>
                   </div>
+                </button>
 
-                  {/* Siparişler */}
-                  <div className="mt-5">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium">Siparişler</div>
-                      <div className="flex gap-2">
-                        <button
-                          className="btn-secondary"
-                          onClick={() => fetchOrdersFor(c.id)}
-                          disabled={!!ord?.loading}
-                        >
-                          Yenile
-                        </button>
+                {/* PANEL */}
+                {isOpen && (
+                  <div className="px-4 pb-4">
+                    {/* Edit alanları */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-xs text-neutral-500">Ad Soyad</label>
+                        <input
+                          className="mt-1 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm"
+                          value={draft ? String(draft.name ?? '') : c.name}
+                          onChange={(e) => changeEdit(c.id, { name: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-neutral-500">Telefon</label>
+                        <input
+                          className="mt-1 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm"
+                          value={draft ? String(draft.phone ?? '') : c.phone}
+                          onChange={(e) => changeEdit(c.id, { phone: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-neutral-500">E-posta</label>
+                        <input
+                          className="mt-1 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm"
+                          value={draft ? String(draft.email ?? '') : c.email ?? ''}
+                          onChange={(e) => changeEdit(c.id, { email: e.target.value })}
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="text-xs text-neutral-500">Adres</label>
+                        <input
+                          className="mt-1 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm"
+                          value={draft ? String(draft.address ?? '') : c.address ?? ''}
+                          onChange={(e) => changeEdit(c.id, { address: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-neutral-500">Not</label>
+                        <input
+                          className="mt-1 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm"
+                          value={draft ? String(draft.note ?? '') : c.note ?? ''}
+                          onChange={(e) => changeEdit(c.id, { note: e.target.value })}
+                        />
                       </div>
                     </div>
 
-                    {ord?.loading && <div className="text-sm text-gray-500">Yükleniyor…</div>}
-                    {ord?.error && <div className="text-sm text-red-600">{ord.error}</div>}
-                    {(!ord || (!ord.loading && ord.items.length === 0)) && (
-                      <div className="text-sm text-gray-600">Kayıtlı sipariş bulunamadı.</div>
-                    )}
+                    {/* Actions */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                        onClick={() => save(c.id)}
+                        disabled={savingId === c.id}
+                        title="Kaydet"
+                      >
+                        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                          <path fill="currentColor" d="M5 13l4 4L19 7l-1.4-1.4L9 13.2L6.4 10.6z" />
+                        </svg>
+                        {savingId === c.id ? 'Kaydediliyor…' : 'Kaydet'}
+                      </button>
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                        onClick={() => cancelEdit(c.id)}
+                      >
+                        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                          <path fill="currentColor" d="M6 19L19 6l-1.4-1.4L4.6 17.6z" />
+                        </svg>
+                        İptal
+                      </button>
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        onClick={() => remove(c.id)}
+                        disabled={removingId === c.id}
+                      >
+                        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                          <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" />
+                        </svg>
+                        {removingId === c.id ? 'Siliniyor…' : 'Sil'}
+                      </button>
+                      <a
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                        href={`/order?customerId=${c.id}`}
+                      >
+                        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                          <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
+                        </svg>
+                        Yeni Sipariş
+                      </a>
+                    </div>
 
-                    {ord && ord.items.length > 0 && (
-                      <div className="overflow-x-auto">
-                        <table className="table">
-                          <thead>
-                            <tr>
-                              <th>Tarih</th>
-                              <th>Durum</th>
-                              <th className="text-right">Tutar</th>
-                              <th className="text-right">Net</th>
-                              <th className="w-28"></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {ord.items.map((o) => (
-                              <tr key={o.id}>
-                                <td>{fmtDate(o.createdAt)}</td>
-                                <td>
-                                  <span className="inline-block px-2 py-0.5 text-xs rounded-full border">
-                                    {statusLabel(o.status)}
-                                  </span>
-                                </td>
-                                <td className="text-right">{fmt(o.total)} ₺</td>
-                                <td className="text-right">{fmt(o.netTotal ?? o.total)} ₺</td>
-                                <td className="text-right">
-                                  <a className="btn-secondary" href={`/orders/${o.id}`}>
-                                    Görüntüle
-                                  </a>
-                                </td>
+                    {/* Siparişler */}
+                    <div className="mt-5">
+                      <div className="mb-2 flex items-center justify-between">
+                        <div className="font-medium">
+                          Siparişler{' '}
+                          {ord && ord.items.length > 0 && (
+                            <span className="text-sm text-neutral-500">
+                              · {ordSummary.count} adet · toplam {fmt(ordSummary.total)} ₺
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="inline-flex h-8 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-xs text-neutral-700 hover:bg-neutral-50"
+                            onClick={() => fetchOrdersFor(c.id)}
+                            disabled={!!ord?.loading}
+                          >
+                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                              <path
+                                fill="currentColor"
+                                d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z"
+                              />
+                            </svg>
+                            Yenile
+                          </button>
+                        </div>
+                      </div>
+
+                      {ord?.loading && <div className="text-sm text-neutral-500">Yükleniyor…</div>}
+                      {ord?.error && <div className="text-sm text-rose-700">{ord.error}</div>}
+                      {(!ord || (!ord.loading && ord.items.length === 0)) && (
+                        <div className="text-sm text-neutral-600">Kayıtlı sipariş bulunamadı.</div>
+                      )}
+
+                      {ord && ord.items.length > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-sm">
+                            <thead>
+                              <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
+                                <th>Tarih</th>
+                                <th>Durum</th>
+                                <th className="text-right">Tutar</th>
+                                <th className="text-right">Net</th>
+                                <th className="w-28"></th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+                            </thead>
+                            <tbody className="divide-y">
+                              {ord.items.map((o) => (
+                                <tr key={o.id} className="[&>td]:px-3 [&>td]:py-2">
+                                  <td>{fmtDateTime(o.createdAt)}</td>
+                                  <td>
+                                    <StatusBadge s={o.status} />
+                                  </td>
+                                  <td className="text-right">{fmt(o.total)} ₺</td>
+                                  <td className="text-right">{fmt(o.netTotal ?? o.total)} ₺</td>
+                                  <td className="text-right">
+                                    <a
+                                      className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                                      href={`/orders/${o.id}`}
+                                    >
+                                      Görüntüle
+                                    </a>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
+                )}
+              </section>
+            )
+          })}
       </div>
-    </div>
+    </main>
   )
-}
-
-function statusLabel(s: Status) {
-  switch (s) {
-    case 'pending':
-      return 'Beklemede'
-    case 'processing':
-      return 'İşlemde'
-    case 'completed':
-      return 'Tamamlandı'
-    case 'cancelled':
-      return 'İptal'
-    default:
-      return s
-  }
 }

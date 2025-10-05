@@ -1,36 +1,80 @@
-// app/layout.tsx
+// app/layout.tsx (LIGHT MODE)
 import "./globals.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import Providers from "./providers";
 import { UserMenu } from "./components/UserMenu";   // ✅ components
 import { AuthedNav } from "./components/AuthedNav"; // ✅ components
 
 export const metadata: Metadata = {
-  title: "PERDE KONAĞI",
+  title: {
+    default: "PERDE KONAĞI",
+    template: "%s — PERDE KONAĞI",
+  },
   description: "Kategori/Varyant + Sipariş",
+  metadataBase: new URL("https://perde-konagi.local"),
+  openGraph: {
+    title: "PERDE KONAĞI",
+    description: "Kategori/Varyant + Sipariş",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "PERDE KONAĞI",
+    description: "Kategori/Varyant + Sipariş",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+  colorScheme: "light",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="tr">
-      <body>
+      <body className="min-h-dvh bg-white text-neutral-900 antialiased">
         <Providers>
-          <header className="border-b border-gray-200 print:hidden">
-            <div className="container flex justify-between items-center gap-3 py-4">
-              <Link href="/" className="font-extrabold tracking-tight text-lg">
-                PERDE <span className="text-indigo-600">KONAĞI</span>
-              </Link>
+          {/* ======= Sticky App Header (Light) ======= */}
+          <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/70 backdrop-blur-md print:hidden">
+            <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+              <div className="flex h-16 items-center gap-3">
+                {/* Brand */}
+                <Link href="/" className="font-extrabold tracking-tight text-base sm:text-lg">
+                  PERDE <span className="text-indigo-600">KONAĞI</span>
+                </Link>
 
-              {/* Sağ taraf: nav + kullanıcı menüsü */}
-              <div className="ml-auto flex items-center gap-3">
-                <AuthedNav />
-                <UserMenu />
+                {/* Primary nav (authed routes) */}
+                <nav className="ml-6 hidden md:flex items-center gap-4 text-sm text-neutral-600">
+                  <AuthedNav />
+                </nav>
+
+                {/* Right side */}
+                <div className="ml-auto flex items-center gap-2">
+                  <UserMenu />
+                </div>
               </div>
             </div>
           </header>
 
-          <main className="container py-6">{children}</main>
+          {/* ======= Page Content ======= */}
+          <main id="content" className="relative min-h-[calc(100vh-135px)] p-8">
+            {children}
+          </main>
+
+          {/* ======= Footer (Light) ======= */}
+          <footer className="border-t border-neutral-200/80 bg-white/70 backdrop-blur print:hidden flex items-end">
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 text-sm text-neutral-600 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div>© {new Date().getFullYear()} Perde Konağı</div>
+              <div className="flex items-center gap-4">
+                <Link href="/login" className="hover:text-indigo-600">Giriş</Link>
+                <Link href="/register" className="hover:text-indigo-600">Kaydol</Link>
+                <a href="#ozellikler" className="hover:text-indigo-600">Özellikler</a>
+              </div>
+            </div>
+          </footer>
         </Providers>
       </body>
     </html>

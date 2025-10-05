@@ -1,9 +1,45 @@
-// app/api/auth/[...nextauth]/options.ts
+// /app/api/auth/[...nextauth]/options.ts (revize)
 import type { NextAuthOptions } from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import { prisma } from '@/app/lib/db'
 import bcrypt from 'bcryptjs'
+// Define UserRole and TenantRole enums manually if not exported from @prisma/client
+export enum UserRole {
+  OWNER = 'OWNER',
+  STAFF = 'STAFF',
+  SUPERADMIN = 'SUPERADMIN',
+  // Add other roles as needed
+}
+
+export enum TenantRole {
+  OWNER = 'OWNER',
+  MEMBER = 'MEMBER',
+  // Add other roles as needed
+}
+
+// ---- Tip güvenliği: Session/JWT genişletmeleri ----
+import type { DefaultSession } from 'next-auth'
+
+declare module 'next-auth' {
+  interface Session {
+    user?: DefaultSession['user'] & {
+      id: string
+      role: UserRole
+    }
+    tenantId?: string | null
+    tenantRole?: TenantRole | null
+  }
+}
+
+declare module 'next-auth/jwt' {
+  interface JWT {
+    id?: string
+    role?: UserRole
+    tenantId?: string | null
+    tenantRole?: TenantRole | null
+  }
+}
 
 // Varsayılan tenant seçimi (OWNER varsa onu, yoksa ilk membership)
 async function pickDefaultMembership(userId: string) {
@@ -38,7 +74,11 @@ export const authOptions: NextAuthOptions = {
         const password = String(credentials?.password || '')
         if (!email || !password) return null
 
-        const user = await prisma.user.findUnique({ where: { email } })
+        // Sadece gerekli alanları çekelim
+        const user = await prisma.user.findUnique({
+          where: { email },
+          select: { id: true, email: true, name: true, passwordHash: true, role: true },
+        })
         if (!user) return null
 
         const ok = await bcrypt.compare(password, user.passwordHash)
@@ -48,7 +88,7 @@ export const authOptions: NextAuthOptions = {
           id: user.id,
           email: user.email,
           name: user.name ?? '',
-          role: user.role,
+          role: user.role as UserRole,
         }
       },
     }),
@@ -58,27 +98,28 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.id = (user as any).id
-        token.role = (user as any).role
+        token.role = (user as any).role as UserRole
         const mem = await pickDefaultMembership((user as any).id)
         token.tenantId = mem?.tenantId || null
-        token.tenantRole = mem?.role || null
+        token.tenantRole = (mem?.role as TenantRole | undefined) ?? null
       }
 
+      // Token var ama tenant bilgisi düşmüşse tekrar getir
       if (!token.tenantId && token.id) {
         const mem = await pickDefaultMembership(String(token.id))
         token.tenantId = mem?.tenantId || null
-        token.tenantRole = mem?.role || null
+        token.tenantRole = (mem?.role as TenantRole | undefined) ?? null
       }
       return token
     },
 
     async session({ session, token }) {
       if (session.user) {
-        ;(session.user as any).id = token.id
-        ;(session.user as any).role = token.role
+        session.user.id = String(token.id)
+        session.user.role = (token.role ?? UserRole.STAFF) as UserRole
       }
-      ;(session as any).tenantId = token.tenantId
-      ;(session as any).tenantRole = token.tenantRole
+      session.tenantId = (token.tenantId as string | null) ?? null
+      session.tenantRole = (token.tenantRole as TenantRole | null) ?? null
       return session
     },
   },
