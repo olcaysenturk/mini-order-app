@@ -14,8 +14,8 @@ type LineItem = {
   variantId: string;
   qty: number;
   width: number; // cm
-  height: number; // cm (formülde kullanılmıyor ama UI'da dursun)
-  unitPrice: number; // snapshot
+  height: number; // cm
+  unitPrice: number;
   note?: string | null;
   fileDensity: number; // default 1.0
   subtotal: number; // unitPrice * ((width/100)*fileDensity || 1) * qty
@@ -35,6 +35,30 @@ type Order = {
 
 type InsertSlot = { title: string; index: number } | null;
 
+type Profile = {
+  companyName?: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  taxNumber?: string | null;
+  taxOffice?: string | null;
+  logoUrl?: string | null;
+  instagram?: string | null;
+  website?: string | null;
+};
+
+type Branch = {
+  id: string;
+  name: string;
+  code?: string | null;
+  isActive: boolean;
+  showOnHeader: boolean;
+  sortOrder: number;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+};
+
 /* ========= Helpers ========= */
 const uid = () => Math.random().toString(36).slice(2, 10);
 const fmt = (n: number) =>
@@ -49,7 +73,6 @@ const BOX_COUNTS: Record<string, number> = {
   "FON PERDE": 5,
   "GÜNEŞLİK": 5,
 };
-
 const normalize = (s: string) => s.trim().toLocaleUpperCase("tr-TR");
 const hasBoxCount = (name: string) =>
   Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name));
@@ -60,11 +83,43 @@ async function fetchCategories(): Promise<Category[]> {
   if (!res.ok) throw new Error("Kategoriler yüklenemedi");
   return res.json();
 }
-
 async function fetchOrderById(id: string): Promise<Order> {
   const res = await fetch(`/api/orders/${id}`, { cache: "no-store" });
   if (!res.ok) throw new Error("Sipariş yüklenemedi");
   return res.json();
+}
+async function fetchProfile(): Promise<Profile> {
+  const res = await fetch("/api/company-profile", { cache: "no-store" });
+  if (!res.ok) throw new Error("Profil alınamadı");
+  const j = await res.json();
+  return {
+    companyName: j?.profile?.companyName ?? "",
+    phone: j?.profile?.phone ?? null,
+    email: j?.profile?.email ?? null,
+    address: j?.profile?.address ?? null,
+    taxNumber: j?.profile?.taxNumber ?? null,
+    taxOffice: j?.profile?.taxOffice ?? null,
+    logoUrl: j?.profile?.logoUrl ?? null,
+    instagram: j?.profile?.instagram ?? null,
+    website: j?.profile?.website ?? null,
+  };
+}
+async function fetchBranches(): Promise<Branch[]> {
+  const res = await fetch("/api/branches?all=1", { cache: "no-store" });
+  if (!res.ok) throw new Error("Şubeler alınamadı");
+  const j = await res.json();
+  const arr = Array.isArray(j) ? j : (j?.items ?? []);
+  return arr.map((b: any) => ({
+    id: b.id,
+    name: b.name,
+    code: b.code ?? null,
+    isActive: !!b.isActive,
+    showOnHeader: !!b.showOnHeader,
+    sortOrder: Number.isFinite(b.sortOrder) ? b.sortOrder : 0,
+    phone: b.phone ?? null,
+    email: b.email ?? null,
+    address: b.address ?? null,
+  })) as Branch[];
 }
 
 /* ========= Page ========= */
@@ -75,6 +130,10 @@ export default function EditOrderPage() {
   // master data
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // company/header data
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [headerBranches, setHeaderBranches] = useState<Branch[]>([]);
 
   // order
   const [orderId, setOrderId] = useState<string>("");
@@ -108,13 +167,18 @@ export default function EditOrderPage() {
     (async () => {
       try {
         setLoading(true);
-        const [cats, ord] = await Promise.all([
+        const [cats, ord, prof, brs] = await Promise.all([
           fetchCategories(),
           fetchOrderById(id),
+          fetchProfile().catch(() => null),
+          fetchBranches().catch(() => []),
         ]);
         if (!alive) return;
 
+        // categories
         setCategories(cats);
+
+        // order
         setOrderId(ord.id);
         setCustomerName(ord.customerName || "");
         setCustomerPhone(ord.customerPhone || "");
@@ -122,7 +186,6 @@ export default function EditOrderPage() {
         setOrderSeq(typeof ord.seq === "number" ? ord.seq : ord.id);
         setStatus(ord.status ?? "pending");
 
-        // Normalize: yeni formülle subtotal (unitPrice * ((width/100)*density || 1) * qty)
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
           const width = Math.max(0, Number(i.width ?? 0));
@@ -144,11 +207,16 @@ export default function EditOrderPage() {
           };
         });
         setItems(normalized);
-
-        // DB’den gelen gerçek kalem id’leri
         existingDbItemIds.current = new Set(
           (ord.items || []).map((it: any) => it.id)
         );
+
+        // profile + header branches
+        setProfile(prof);
+        const hb = (brs || [])
+          .filter((b) => b.isActive && b.showOnHeader)
+          .sort((a, b) => a.sortOrder - b.sortOrder);
+        setHeaderBranches(hb);
       } catch (e: any) {
         setError(e?.message || "Bir şeyler ters gitti");
       } finally {
@@ -252,7 +320,6 @@ export default function EditOrderPage() {
     setEditingLineId(null);
   };
 
-  // ÖZEL: Belirli kategori adıyla hızlı + aç (STOR/AKSESUAR)
   const openQuickFor = (categoryName: string, index: number) => {
     const cat = categories.find(
       (c) => normalize(c.name) === normalize(categoryName)
@@ -279,8 +346,6 @@ export default function EditOrderPage() {
     const w = Math.max(0, Math.floor(width));
     const price = Number(selectedVariant.unitPrice) || 0;
     const d = Number(fileDensity) || 1;
-
-    // Yeni formül
     const sub = price * (((w / 100) * d) || 1) * q;
 
     if (editingLineId) {
@@ -317,7 +382,6 @@ export default function EditOrderPage() {
       };
       setItems((prev) => [...prev, line]);
     }
-
     closeDrawer();
   };
 
@@ -350,7 +414,7 @@ export default function EditOrderPage() {
     }
     setSaving(true);
     try {
-      // SADECE DB'de var olan id'leri gönder (upsert); yeni eklenenlerde id gönderme (create)
+      // SADECE DB'de var olan id'ler update edilsin; yeniler create olsun
       const payloadItems = items.map((i) => {
         const base = {
           categoryId: i.categoryId,
@@ -362,22 +426,16 @@ export default function EditOrderPage() {
           fileDensity: i.fileDensity,
           note: i.note ?? null,
         } as any;
-        if (existingDbItemIds.current.has(i.id)) {
-          base.id = i.id; // update
-        }
+        if (existingDbItemIds.current.has(i.id)) base.id = i.id;
         return base;
       });
 
-      // UI’dan silinenler
       const currentIds = new Set(items.map((i) => i.id));
       const deletedIds: string[] = [];
       existingDbItemIds.current.forEach((oldId) => {
         if (!currentIds.has(oldId)) deletedIds.push(oldId);
       });
-      const deleteOps = deletedIds.map((x) => ({
-        id: x,
-        _action: "delete" as const,
-      }));
+      const deleteOps = deletedIds.map((x) => ({ id: x, _action: "delete" as const }));
 
       const payload = {
         customerName,
@@ -406,7 +464,7 @@ export default function EditOrderPage() {
     }
   };
 
-  // Özel bölümlerde ilgili kategorinin mevcut satırlarını alalım
+  // Özel bölümler (satırları çek)
   const storItems = groupedByCategoryName.get("STOR PERDE") || [];
   const aksesuarItems = groupedByCategoryName.get("AKSESUAR") || [];
 
@@ -415,68 +473,44 @@ export default function EditOrderPage() {
 
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
-      {/* Toolbar (ekranda) */}
+      {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 mb-4 print:hidden p-3">
         <h1 className="text-xl font-semibold">Sipariş Düzenle</h1>
         <div className="flex justify-between gap-3">
-          <button className="btn" onClick={() => window.print()}>
-            🖨️ Yazdır
-          </button>
-          <button className="btn" onClick={() => router.push(`/orders/${orderId}/label`)}>
-            🖨️ Barkod Yazdır
-          </button>
-          <button
-            className="btn-secondary disabled:opacity-50"
-            disabled={saving}
-            onClick={saveOrder}
-          >
+          <button className="btn" onClick={() => window.print()}>🖨️ Yazdır</button>
+          <button className="btn" onClick={() => router.push(`/orders/${orderId}/label`)}>🖨️ Barkod Yazdır</button>
+          <button className="btn-secondary disabled:opacity-50" disabled={saving} onClick={saveOrder}>
             {saving ? "Kaydediliyor…" : "Değişiklikleri Kaydet"}
           </button>
-          <button className="btn-secondary" onClick={() => router.back()}>
-            Geri
-          </button>
+          <button className="btn-secondary" onClick={() => router.back()}>Geri</button>
         </div>
       </div>
 
       {/* A4 Alanı */}
       <div className="m-auto w-[210mm] min-h-[297mm] print:w-auto print:min-h-[auto]">
-        {/* Header */}
+        {/* Header – Dinamik profil + header şubeleri */}
         <Header
           orderSeq={orderSeq ?? "—"}
           customerName={customerName}
           customerPhone={customerPhone}
           status={status}
+          profile={profile}
+          headerBranches={headerBranches}
         />
 
-        {/* Müşteri Alanları (ekranda düzenlenebilir) */}
+        {/* Müşteri alanları (ekranda düzenlenebilir) */}
         <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
-          <div>
+          {/* <div>
             <label className="text-sm">Müşteri Adı</label>
-            <input
-              className="input mt-1"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              placeholder="Ad Soyad"
-            />
+            <input className="input mt-1" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ad Soyad" />
           </div>
           <div>
             <label className="text-sm">Telefon</label>
-            <input
-              className="input mt-1"
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
-              placeholder="05xx xxx xx xx"
-            />
-          </div>
-
-          {/* Durum seçimi */}
+            <input className="input mt-1" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="05xx xxx xx xx" />
+          </div> */}
           <div>
             <label className="text-sm">Durum</label>
-            <select
-              className="select mt-1"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as Status)}
-            >
+            <select className="select mt-1" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
               <option value="pending">Beklemede</option>
               <option value="processing">İşlemde</option>
               <option value="completed">Tamamlandı</option>
@@ -488,12 +522,9 @@ export default function EditOrderPage() {
         {/* Kategoriler (print grid düzeni) — sadece BOX_COUNTS’ta olanlar */}
         {sectionTitles.map((title) => {
           const key = normalize(title);
-          const visible = hasBoxCount(title);
-          if (!visible) return null;
-
+          if (!hasBoxCount(title)) return null;
           const boxCount = BOX_COUNTS[key];
           const lines = groupedByCategoryName.get(title) || [];
-
           return (
             <SectionEditable
               key={title}
@@ -512,7 +543,7 @@ export default function EditOrderPage() {
           );
         })}
 
-        {/* === ÖZEL BÖLÜM: STOR PERDE (input yerine +, doluysa özet) === */}
+        {/* Özel bölümler */}
         <SectionQuickPlus
           title="STOR PERDE"
           items={storItems}
@@ -523,8 +554,6 @@ export default function EditOrderPage() {
             if (line) editLine(line);
           }}
         />
-
-        {/* === ÖZEL BÖLÜM: AKSESUAR (STOR ile aynı davranış) === */}
         <SectionQuickPlus
           title="AKSESUAR"
           items={aksesuarItems}
@@ -564,61 +593,30 @@ export default function EditOrderPage() {
 
       {/* Drawer */}
       {slot && (
-        <div
-          className="fixed inset-0 bg-black/40 z-50 print:hidden"
-          onClick={closeDrawer}
-        >
-          <div
-            className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 bg-black/40 z-50 print:hidden" onClick={closeDrawer}>
+          <div className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-lg font-semibold">
-                {editingLineId
-                  ? "Satırı Düzenle"
-                  : `${slot.title} - Kutucuk #${slot.index + 1}`}
+                {editingLineId ? "Satırı Düzenle" : `${slot.title} - Kutucuk #${slot.index + 1}`}
               </div>
-              <button className="btn-secondary" onClick={closeDrawer}>
-                Kapat
-              </button>
+              <button className="btn-secondary" onClick={closeDrawer}>Kapat</button>
             </div>
 
             {/* Kategori & Varyant */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-sm">Kategori</label>
-                <select
-                  className="select mt-1"
-                  value={catId}
-                  onChange={(e) => setCatId(e.target.value)}
-                  disabled={loading}
-                >
-                  <option value="">{loading ? "Yükleniyor…" : "Seçin"}</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                <select className="select mt-1" value={catId} onChange={(e) => setCatId(e.target.value)}>
+                  <option value="">Seçin</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-sm">Varyant</label>
-                <select
-                  className="select mt-1"
-                  value={varId}
-                  onChange={(e) => setVarId(e.target.value)}
-                  disabled={!selectedCategory || loading}
-                >
+                <select className="select mt-1" value={varId} onChange={(e) => setVarId(e.target.value)} disabled={!selectedCategory}>
                   {!selectedCategory && <option>Önce kategori seçin</option>}
-                  {selectedCategory &&
-                    selectedCategory.variants.length === 0 && (
-                      <option>Varyant yok</option>
-                    )}
-                  {selectedCategory?.variants.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
+                  {selectedCategory && selectedCategory.variants.length === 0 && <option>Varyant yok</option>}
+                  {selectedCategory?.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
                 </select>
               </div>
             </div>
@@ -627,36 +625,15 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div>
                 <label className="text-sm">Adet</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={qty}
-                  onChange={(e) => setQty(parseInt(e.target.value || "1"))}
-                />
+                <input className="input mt-1 text-right" type="number" min={1} step={1} value={qty} onChange={(e) => setQty(parseInt(e.target.value || "1"))}/>
               </div>
               <div>
                 <label className="text-sm">En (cm)</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={width}
-                  onChange={(e) => setWidth(parseInt(e.target.value || "0"))}
-                />
+                <input className="input mt-1 text-right" type="number" min={0} step={1} value={width} onChange={(e) => setWidth(parseInt(e.target.value || "0"))}/>
               </div>
               <div>
                 <label className="text-sm">Boy (cm)</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={height}
-                  onChange={(e) => setHeight(parseInt(e.target.value || "0"))}
-                />
+                <input className="input mt-1 text-right" type="number" min={0} step={1} value={height} onChange={(e) => setHeight(parseInt(e.target.value || "0"))}/>
               </div>
             </div>
 
@@ -664,31 +641,14 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-sm">File Sıklığı</label>
-                <select
-                  className="select mt-1"
-                  value={String(fileDensity)}
-                  onChange={(e) => setFileDensity(parseFloat(e.target.value))}
-                >
-                  <option value="1">1.0x</option>
-                  <option value="1.5">1.5x</option>
-                  <option value="2">2.0x</option>
-                  <option value="2.5">2.5x</option>
-                  <option value="3">3.0x</option>
+                <select className="select mt-1" value={String(fileDensity)} onChange={(e) => setFileDensity(parseFloat(e.target.value))}>
+                  <option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option>
+                  <option value="2.5">2.5x</option><option value="3">3.0x</option>
                 </select>
               </div>
-
               <div>
                 <label className="text-sm">Birim Fiyat</label>
-                <input
-                  className="input mt-1 text-right"
-                  value={
-                    selectedVariant
-                      ? fmt(Number(selectedVariant.unitPrice))
-                      : ""
-                  }
-                  readOnly
-                  placeholder="—"
-                />
+                <input className="input mt-1 text-right" value={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : ""} readOnly placeholder="—" />
               </div>
             </div>
 
@@ -696,36 +656,18 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="text-sm">Ara Toplam</label>
-                <input
-                  className="input mt-1 text-right"
-                  value={selectedVariant ? fmt(previewSubtotal) : ""}
-                  readOnly
-                  placeholder="—"
-                />
+                <input className="input mt-1 text-right" value={selectedVariant ? fmt(previewSubtotal) : ""} readOnly placeholder="—" />
               </div>
               <div>
                 <label className="text-sm">Satır Notu</label>
-                <input
-                  className="input mt-1"
-                  value={lineNote}
-                  onChange={(e) => setLineNote(e.target.value)}
-                  placeholder="Bu satıra özel not…"
-                />
+                <input className="input mt-1" value={lineNote} onChange={(e) => setLineNote(e.target.value)} placeholder="Bu satıra özel not…" />
               </div>
             </div>
 
             <div className="flex gap-2">
-              <button className="btn" onClick={addOrUpdateLine}>
-                {editingLineId ? "Kaydet" : "Kutucuğa Ekle"}
-              </button>
+              <button className="btn" onClick={addOrUpdateLine}>{editingLineId ? "Kaydet" : "Kutucuğa Ekle"}</button>
               {editingLineId && (
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    if (editingLineId) removeLine(editingLineId);
-                    closeDrawer();
-                  }}
-                >
+                <button className="btn-secondary" onClick={() => { if (editingLineId) removeLine(editingLineId); closeDrawer(); }}>
                   Satırı Sil
                 </button>
               )}
@@ -737,39 +679,13 @@ export default function EditOrderPage() {
       {/* Print styles */}
       <style jsx global>{`
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-          html,
-          body {
-            background: white !important;
-          }
-          .btn,
-          .btn-secondary,
-          .print\\:hidden {
-            display: none !important;
-          }
-          input,
-          select,
-          textarea {
-            border: none !important;
-            outline: none !important;
-          }
+          @page { size: A4 portrait; margin: 0; }
+          html, body { background: white !important; }
+          .btn, .btn-secondary, .print\\:hidden { display: none !important; }
+          input, select, textarea { border: none !important; outline: none !important; }
         }
-        /* Focus/outline tamamen kapansın */
-        input,
-        select,
-        textarea {
-          outline: none !important;
-          box-shadow: none !important;
-        }
-        input:focus,
-        select:focus,
-        textarea:focus {
-          outline: none !important;
-          box-shadow: none !important;
-        }
+        input, select, textarea { outline: none !important; box-shadow: none !important; }
+        input:focus, select:focus, textarea:focus { outline: none !important; box-shadow: none !important; }
       `}</style>
     </div>
   );
@@ -782,11 +698,15 @@ function Header({
   customerName,
   customerPhone,
   status,
+  profile,
+  headerBranches,
 }: {
   orderSeq: number | string;
   customerName: string;
   customerPhone: string;
   status: Status;
+  profile: Profile | null;
+  headerBranches: Branch[];
 }) {
   const seqStr =
     typeof orderSeq === "number"
@@ -803,53 +723,59 @@ function Header({
   return (
     <div className="flex items-start justify-between">
       <div>
-        <h1 className="text-4xl font-bold tracking-wide">PERDEXA</h1>
-        <div className="text-xs leading-5 mt-1">
-          <div>
-            <b>Gaziosmanpaşa Şubesi:</b>
-            <br />
-            Bağlarbaşı Mah. Bağlarbaşı Cad. No: 80-82 G.O.Paşa / İST.
-          </div>
-          <div>Gsm: 0531 688 50 45</div>
-          <div className="mt-1">
-            <b>Sultangazi Şubesi:</b>
-            <br />
-            Uğur Mumcu Mah. Muhsin Yazıcıoğlu Cad. No: 56/A Sultangazi / İST.
-          </div>
-          <div>Gsm: 0533 702 04 88</div>
-          <div className="mt-1 flex items-center gap-1">Perdekonagi</div>
+        <div className="flex items-center gap-3">
+          
+          <h1 className="text-3xl font-bold tracking-wide">
+            {profile?.companyName || "—"}
+          </h1>
+        </div>
+
+        <div className="mt-2 text-xs leading-5">
+          {headerBranches.map((b) => (
+            <div key={b.id} className="mt-1">
+              <b>{b.code == 'MAIN' ? 'Merkez' : ''}:</b>
+              <br />
+              <span>{b.address || "—"}</span>
+              {b.phone ? <div><b>Gsm:</b> {b.phone}</div> : null}
+            </div>
+          ))}
+          {profile?.instagram && (
+            <div className="mt-1 flex items-center gap-1">
+              @{profile.instagram.replace(/^@/, "")}
+            </div>
+          )}
+          
         </div>
       </div>
+
       <div className="w-[300px] text-left">
         <div className="mb-3">
+          {/* Markanızın sabit görseli varsa /public/brillant.png gibi bırakabilirsiniz */}
           <img
-            src={"/brillant.png"}
-            alt="Brillant"
+            src={profile?.logoUrl || ""}
+            alt=""
             height={60}
-            style={{ width: "100%", height: "100px" }}
+            style={{ width: "100%", height: "150px" }}
           />
         </div>
         <div className="text-xs flex justify-between">
-          <b>Müşteri Adı:</b>{" "}
+          <b>Müşteri Adı:</b>
           <span className="inline-block min-w-[120px] text-right">
             {customerName || "—"}
           </span>
         </div>
         <div className="text-xs mt-1 flex justify-between">
-          <b>Telefon:</b>{" "}
+          <b>Telefon:</b>
           <span className="inline-block min-w-[140px] text-right">
             {customerPhone || "—"}
           </span>
         </div>
-
-        {/* Durum satırı */}
         <div className="text-xs mt-1 flex justify-between">
-          <b>Durum:</b>{" "}
+          <b>Durum:</b>
           <span className="inline-block min-w-[140px] text-right">
             {statusLabelMap[status]}
           </span>
         </div>
-
         <div className="mt-3 font-semibold">
           SIRA No:{" "}
           <span className="inline-block min-w-[80px] text-red-700">
@@ -869,7 +795,7 @@ function SectionEditable({
   onAddAt,
   onRemove,
   onEdit,
-  visible, // API uyumu için var; faydalı değilse kaldırabilirsiniz
+  visible,
 }: {
   title: string;
   items: LineItem[];
@@ -920,18 +846,11 @@ function SectionEditable({
                       Not: {it.note}
                     </div>
                   )}
-                  {/* Row actions (screen only) */}
                   <div className="absolute right-1 top-1 flex gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      className="px-1 py-0.5 text-[10px] border"
-                      onClick={() => onEdit(it.id)}
-                    >
+                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onEdit(it.id)}>
                       Düzenle
                     </button>
-                    <button
-                      className="px-1 py-0.5 text-[10px] border"
-                      onClick={() => onRemove(it.id)}
-                    >
+                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onRemove(it.id)}>
                       Sil
                     </button>
                   </div>
@@ -945,7 +864,6 @@ function SectionEditable({
   );
 }
 
-/* ===== Özel Bölüm: STOR / AKSESUAR (input yerine “+ Ekle”; doluysa özet) ===== */
 function SectionQuickPlus({
   title,
   items,
@@ -959,9 +877,7 @@ function SectionQuickPlus({
   onAddAt: (index: number) => void;
   onEdit: (id: string) => void;
 }) {
-  // İki sütunda 1-4, 2-5, 3-6
   const order = [0, 3, 1, 4, 2, 5];
-
   return (
     <div className="mt-5 break-inside-avoid">
       <div className="font-semibold uppercase mb-0">{title}</div>
@@ -969,28 +885,20 @@ function SectionQuickPlus({
         {order.map((i) => {
           const it = items[i];
           const variant = it ? variantById.get(it.variantId) : null;
-
           return (
             <div key={i} className="flex items-center gap-0">
               <div className="w-6 text-right text-xs">{i + 1}-</div>
               <button
                 type="button"
                 onClick={() => (it ? onEdit(it.id) : onAddAt(i))}
-                className="
-                  input flex-1 h-[23px]
-                  rounded-none border-0 border-b border-[#999]
-                  p-0 text-sm text-left pl-2
-                  appearance-none outline-none focus:outline-none focus-visible:outline-none
-                  focus:ring-0 focus:ring-transparent focus:shadow-none
-                  hover:bg-black/5
-                "
-                title={it ? "Düzenlemek için tıklayın" : "Ekle"}
+                className="input flex-1 h-[23px] rounded-none border-0 border-b border-[#999] p-0 text-sm text-left pl-2 hover:bg-black/5"
+                title={it ? "Düzenle" : "Ekle"}
               >
                 {it
                   ? `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${
                       it.height
                     } cm • ${fmt(it.subtotal)}`
-                  : <span className="only-screen print:hidden">+ Ekle</span>}
+                  : <span className="print:hidden">+ Ekle</span>}
               </button>
             </div>
           );

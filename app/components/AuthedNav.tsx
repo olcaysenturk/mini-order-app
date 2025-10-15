@@ -64,7 +64,7 @@ export function AuthedNav() {
     },
     {
       href: '/customers',
-      label: 'Kullanıcılar',
+      label: 'Müşteriler',
       icon: (
         <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 12a5 5 0 1 0-5-5a5 5 0 0 0 5 5m0 2c-4 0-8 2-8 5v2h16v-2c0-3-4-5-8-5"/></svg>
       ),

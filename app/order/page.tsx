@@ -37,11 +37,11 @@ async function getBaseUrl() {
 
 async function getJSON<T>(path: string): Promise<T> {
   const base = await getBaseUrl()
-  const init: RequestInit = {
+  const cookieStore = await cookies()              // ⬅️ await ekle
+  const res = await fetch(`${base}${path}`, {
     cache: 'no-store',
-    headers: { cookie: cookies().toString() },
-  }
-  const res = await fetch(`${base}${path}`, init)
+    headers: { cookie: cookieStore.toString() },  // ⬅️ artık güvenli
+  })
   if (!res.ok) throw new Error(`${path} failed ${res.status}`)
   return res.json()
 }

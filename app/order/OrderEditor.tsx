@@ -7,6 +7,7 @@ import { useOrderSetupStore } from '@/app/lib/orderSetupStore'
 
 /* ========= Types ========= */
 type Status = 'pending' | 'processing' | 'completed' | 'cancelled'
+type PaymentMethod = 'CASH' | 'TRANSFER' | 'CARD'
 
 type Profile = {
   companyName: string
@@ -64,8 +65,8 @@ async function fetchCategories(): Promise<Category[]> {
 
 export default function OrderEditor({
   profile,
-  branches,          // gerekirse dealerName fallback için
-  headerBranches,    // başlıkta gösterilecek şubeler
+  branches,
+  headerBranches,
 }: {
   profile: Profile
   branches: Branch[]
@@ -92,9 +93,13 @@ export default function OrderEditor({
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
 
-  // discount
+  // discount + payment
   const [discountPercent, setDiscountPercent] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
+
+  // 💳 ödeme
+  const [paidAmount, setPaidAmount] = useState(0) // alınan ödeme
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH')
 
   // drawer
   const [slot, setSlot] = useState<InsertSlot>(null)
@@ -110,7 +115,6 @@ export default function OrderEditor({
   /* ==== setup’dan prefill ==== */
   useEffect(() => {
     if (!setup) {
-      // doğrudan gelindiyse setup ekranına
       router.replace('/order/new')
       return
     }
@@ -124,6 +128,7 @@ export default function OrderEditor({
     setCustomerName(setup.customerName || '')
     setCustomerPhone(setup.customerPhone || '')
     setOrderNote(setup.note || '')
+    // setup'ta bir ön ödeme/metot tutuyorsan burada setPaidAmount / setPaymentMethod yapabilirsin.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setup])
 
@@ -194,6 +199,12 @@ export default function OrderEditor({
   }, [subTotal, discountPercent, discountAmount])
   const grandTotal = useMemo(() => Math.max(0, subTotal - computedDiscount), [subTotal, computedDiscount])
 
+  // 💳 kalan borç
+  const remaining = useMemo(
+    () => Math.max(0, grandTotal - (Number(paidAmount) || 0)),
+    [grandTotal, paidAmount]
+  )
+
   /* ==== actions ==== */
   const openAddAt = (title: string, index: number) => {
     setSlot({ title, index })
@@ -241,11 +252,10 @@ export default function OrderEditor({
     setSavingOrder(true)
     try {
       const payload: any = {
-        // dealerId gerekiyorsa aç:
-        dealerId: dealerId,
+        dealerId: dealerId,                  // backend Branch doğrulaması yapıyor
         customerId: selectedCustomerId ?? undefined,
         customerName, customerPhone,
-        note: orderNote || '',
+        note: (orderNote || ''),
         status,
         discount: computedDiscount,
         items: items.map(i => ({
@@ -254,8 +264,38 @@ export default function OrderEditor({
           note: i.note ?? null, fileDensity: i.fileDensity,
         })),
       }
-      const res = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(payload) })
-      if (!res.ok) { console.error('POST /api/orders failed:', await res.text().catch(()=>'')); alert('Sipariş kaydedilemedi'); return }
+
+      // 1) Siparişi oluştur
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        console.error('POST /api/orders failed:', await res.text().catch(()=>'')); 
+        alert('Sipariş kaydedilemedi')
+        return
+      }
+      const created = await res.json()
+
+      // 2) Ön ödeme varsa — ayrı endpoint ile kaydet
+      if ((Number(paidAmount) || 0) > 0) {
+        const payRes = await fetch(`/api/orders/${created.id}/payments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            amount: Number(paidAmount),
+            method: paymentMethod, // 'CASH' | 'TRANSFER' | 'CARD'
+          }),
+        })
+        if (!payRes.ok) {
+          console.error('POST /api/orders/:id/payments failed:', await payRes.text().catch(()=>'')) 
+          alert('Sipariş oluşturuldu, ancak ödeme kaydı eklenemedi. Ödemeyi sipariş detayından ekleyebilirsiniz.')
+        }
+      }
+
       alert('Sipariş kaydedildi!')
       clearSetup()
       router.push('/orders')
@@ -345,6 +385,11 @@ export default function OrderEditor({
             setDiscountAmount={setDiscountAmount}
             computedDiscount={computedDiscount}
             grandTotal={grandTotal}
+            paidAmount={paidAmount}
+            setPaidAmount={setPaidAmount}
+            paymentMethod={paymentMethod}
+            setPaymentMethod={setPaymentMethod}
+            remaining={remaining}
           />
         </div>
 
@@ -476,11 +521,11 @@ function Header({
         <div className="mt-2 text-xs leading-5">
           {headerBranches.map(b => (
             <div key={b.id} className="mt-1">
-              <b>{b.code} Şubesi:</b>
+              <b>{b.code == 'MAIN' ? 'Merkez' : ''} Şubesi:</b>
               <br />
               {b.address}
               <br />
-                GSM: {b.phone}
+              GSM: {b.phone}
             </div>
           ))}
           {profile.instagram && <div className="mt-1 flex items-center gap-1">@{profile.instagram.replace(/^@/,'')}</div>}
@@ -491,9 +536,6 @@ function Header({
           {profile.logoUrl && (
             <Image src={profile.logoUrl} alt="Brillant" width={300} height={80} priority style={{ width: '100%', height: 'auto' }} />
           )}
-        </div>
-        <div className="text-xs flex justify-between">
-          {/* <b>Bayi:</b> <span className="inline-block min-w-[120px] text-right">{dealerName || '—'}</span> */}
         </div>
         <div className="text-xs mt-1 flex justify-between">
           <b>Müşteri Adı:</b>{' '}
@@ -538,7 +580,10 @@ function SectionEditable({ title, items, boxCount, variantById, onAddAt, onRemov
           return (
             <div key={i} className="relative min-h-[80px] border border-black/70 border-l-0 border-b-0 p-2 group">
               {!it ? (
-                <button className="absolute inset-0 flex h-full w-full items-center justify-center text-sm text-gray-600 hover:bg-black/5 hover:text-black print:hidden" onClick={() => onAddAt(i)}>
+                <button
+                  className="absolute inset-0 flex h-full w-full items-center justify-center text-sm text-gray-600 hover:bg-black/5 hover:text-black print:hidden"
+                  onClick={() => onAddAt(i)}
+                >
                   + Ekle
                 </button>
               ) : (
@@ -601,32 +646,86 @@ function NumberField({ label, value, setValue, min=0, step=1 }: {
   return (
     <div>
       <label className="text-sm">{label}</label>
-      <input className="input mt-1 text-right" type="number" min={min} step={step} value={value} onChange={(e)=>setValue(parseInt(e.target.value || '0'))}/>
+      <input className="input mt-1 text-right" type="number" min={min} step={step} value={Number.isFinite(value) ? value : 0} onChange={(e)=>setValue(parseFloat(e.target.value || '0'))}/>
     </div>
   )
 }
 
 function Totals({
-  subTotal, discountPercent, setDiscountPercent, discountAmount, setDiscountAmount, computedDiscount, grandTotal,
+  subTotal,
+  discountPercent, setDiscountPercent,
+  discountAmount, setDiscountAmount,
+  computedDiscount,
+  grandTotal,
+  paidAmount, setPaidAmount,
+  paymentMethod, setPaymentMethod,
+  remaining,
 }: {
-  subTotal: number; discountPercent: number; setDiscountPercent: (v:number)=>void;
-  discountAmount: number; setDiscountAmount: (v:number)=>void; computedDiscount: number; grandTotal: number;
+  subTotal: number
+  discountPercent: number; setDiscountPercent: (v:number)=>void
+  discountAmount: number; setDiscountAmount: (v:number)=>void
+  computedDiscount: number
+  grandTotal: number
+  paidAmount: number; setPaidAmount: (v:number)=>void
+  paymentMethod: PaymentMethod; setPaymentMethod: (m: PaymentMethod)=>void
+  remaining: number
 }) {
   return (
     <div className="text-sm space-y-2">
-      <div className="flex items-center justify-between"><div>Ara Toplam</div><div className="font-medium">{fmt(subTotal)}</div></div>
+      <div className="flex items-center justify-between">
+        <div>Ara Toplam</div><div className="font-medium">{fmt(subTotal)}</div>
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs">İskonto %</label>
-          <input className="input mt-1 text-right" type="number" min={0} max={100} step="0.01" value={discountPercent} onChange={(e)=>setDiscountPercent(parseFloat(e.target.value || '0'))}/>
+          <input className="input mt-1 text-right" type="number" min={0} max={100} step="0.01"
+            value={discountPercent} onChange={(e)=>setDiscountPercent(parseFloat(e.target.value || '0'))}/>
         </div>
         <div>
           <label className="text-xs">İskonto (₺)</label>
-          <input className="input mt-1 text-right" type="number" min={0} step="0.01" value={discountAmount} onChange={(e)=>setDiscountAmount(parseFloat(e.target.value || '0'))}/>
+          <input className="input mt-1 text-right" type="number" min={0} step="0.01"
+            value={discountAmount} onChange={(e)=>setDiscountAmount(parseFloat(e.target.value || '0'))}/>
         </div>
       </div>
-      <div className="flex items-center justify-between"><div>Uygulanan İskonto</div><div className="font-medium">- {fmt(computedDiscount)}</div></div>
-      <div className="flex items-center justify-between border-t pt-2"><div className="font-semibold">GENEL TOPLAM</div><div className="text-base font-bold">{fmt(grandTotal)}</div></div>
+
+      <div className="flex items-center justify-between">
+        <div>Uygulanan İskonto</div><div className="font-medium">- {fmt(computedDiscount)}</div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div>Genel Toplam</div><div className="font-semibold">{fmt(grandTotal)}</div>
+      </div>
+
+      {/* 💳 ÖDEME ALANI */}
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-xs">Alınan Ödeme (₺)</label>
+          <input
+            className="input mt-1 text-right"
+            type="number" min={0} step="0.01"
+            value={Number.isFinite(paidAmount) ? paidAmount : 0}
+            onChange={(e)=>setPaidAmount(parseFloat(e.target.value || '0'))}
+          />
+        </div>
+        <div>
+          <label className="text-xs">Ödeme Şekli</label>
+          <select
+            className="select mt-1 w-full"
+            value={paymentMethod}
+            onChange={(e)=>setPaymentMethod(e.target.value as PaymentMethod)}
+          >
+            <option value="CASH">Nakit</option>
+            <option value="TRANSFER">Havale / EFT</option>
+            <option value="CARD">Kredi Kartı</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between border-t pt-2">
+        <div className="font-semibold">Kalan Borç</div>
+        <div className="text-base font-bold">{fmt(remaining)}</div>
+      </div>
     </div>
   )
 }
