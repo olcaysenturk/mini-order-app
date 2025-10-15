@@ -16,7 +16,7 @@ const ItemSchema = z.object({
   variantId: z.string(),
   qty: z.number().int().positive(),
   width: z.number().int().nonnegative(),
-  height: z.number().int().nonnegative(), // UI için tutuluyor (formülde yok)
+  height: z.number().int().nonnegative(), // UI için tutuluyor
   unitPrice: z.union([z.number(), z.string()]).transform((v) => {
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'))
     return Number.isFinite(n) && n >= 0 ? n : 0
@@ -25,21 +25,30 @@ const ItemSchema = z.object({
   note: z.string().nullable().optional(),
 })
 
+/**
+ * Geriye dönük uyumluluk:
+ * - Yeni istemci branchId gönderir.
+ * - Eski istemci dealerId gönderiyorsa da kabul edip branchId olarak kullanırız.
+ */
 const BodySchema = z.object({
-  // müşteri bağlama / snapshot
+  branchId: z.string().min(1).optional(),
+  dealerId: z.string().min(1).optional(), // legacy
   customerId: z.string().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
-
   note: z.string().nullable().optional(),
   status: StatusSchema.default('pending'),
   discount: z.union([z.number(), z.string()]).optional(), // TL
-
   items: z.array(ItemSchema).min(1),
+}).refine((d) => !!(d.branchId || d.dealerId), {
+  message: 'branchId (veya legacy dealerId) zorunlu',
+  path: ['branchId'],
 })
 
 /* =================== GET /api/orders ===================
 Query:
+  - branchId: string (yeni)
+  - dealerId: string (legacy) — branchId yerine de çalışır
   - customerId: string
   - status: pending|processing|completed|cancelled (tek veya virgülle birden çok)
   - q: string (id, not, müşteri adı/telefonu + kalem kategori/varyant/not’ta arar)
@@ -56,6 +65,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url)
     const sp = url.searchParams
 
+    const branchIdParam = sp.get('branchId') || sp.get('dealerId') || undefined // dealerId → branchId alias
     const customerIdParam = sp.get('customerId') || undefined
     const q = (sp.get('q') || '').trim()
     const statusParam = (sp.get('status') || '').trim()
@@ -70,9 +80,8 @@ export async function GET(req: NextRequest) {
     const takeRaw = Number(sp.get('take') || '100')
     const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 100
 
-    const where: Prisma.OrderWhereInput = {
-      tenantId, // <<< çoklu-tenant şart
-    }
+    const where: Prisma.OrderWhereInput = { tenantId }
+    if (branchIdParam) (where as any).branchId = branchIdParam
     if (customerIdParam) where.customerId = customerIdParam
     if (inList.length) where.status = { in: inList as any }
 
@@ -104,19 +113,25 @@ export async function GET(req: NextRequest) {
         items: {
           include: {
             category: { select: { name: true } },
-            variant: { select: { name: true} },
+            variant: { select: { name: true } },
           },
           orderBy: { id: 'asc' },
         },
         customer: { select: { id: true, name: true, phone: true } },
+        branch: { select: { id: true, name: true } }, // ✅ doğru relation
       },
     })
 
+    // UI payload
     const payload = orders.map((o) => ({
       id: o.id,
       createdAt: o.createdAt,
       note: o.note,
       status: o.status,
+      // ✅ yeni alan
+      branch: o.branch,
+      // 🔁 legacy alias (eski UI "dealer" bekliyorsa kırılmasın)
+      dealer: o.branch,
       customerName: o.customerName,
       customerPhone: o.customerPhone,
       customer: o.customer,
@@ -165,7 +180,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const { customerId, customerName, customerPhone, note, status, discount, items } = parsed.data
+    const {
+      branchId: branchIdRaw,
+      dealerId: dealerIdRaw, // legacy
+      customerId,
+      customerName,
+      customerPhone,
+      note,
+      status,
+      discount,
+      items,
+    } = parsed.data
+
+    // ✅ Tek giriş değişkeni: branchIdInput
+    const branchIdInput = branchIdRaw ?? dealerIdRaw!
+
+    // --- ŞUBE doğrulama (Branch tablosu) ---
+    const branch = await prisma.branch.findFirst({
+      where: { id: branchIdInput, tenantId, isActive: true },
+      select: { id: true, name: true },
+    })
+    if (!branch) {
+      return NextResponse.json({ error: 'invalid_branch' }, { status: 400 })
+    }
 
     // --- Müşteri belirleme (tenant seviyesinde) - transaction DIŞINDA ---
     let linkedCustomerId: string | null = null
@@ -199,7 +236,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Kalemleri ÖNCE hesapla + toplamlara hazırlan ---
+    // --- Kalemleri hazırla (formül: unitPrice * max(1, (width/100)*density) * qty ) ---
     const prepared = items.map(it => {
       const qty       = Math.max(1, Math.trunc(Number(it.qty)))
       const width     = Math.max(0, Math.trunc(Number(it.width)))
@@ -207,7 +244,6 @@ export async function POST(req: NextRequest) {
       const unitPrice = new Prisma.Decimal(it.unitPrice)
       const density   = new Prisma.Decimal(Number(it.fileDensity) || 1)
 
-      // Formül: unitPrice * max(1, (width/100)*density) * qty
       const wmt       = new Prisma.Decimal(width).div(100)
       const meterPart = Prisma.Decimal.max(new Prisma.Decimal(1), wmt.mul(density))
       const subtotal  = unitPrice.mul(meterPart).mul(qty)
@@ -217,7 +253,7 @@ export async function POST(req: NextRequest) {
         variantId:  it.variantId,
         qty,
         width,
-        height,         // UI’da gösterim için saklıyoruz
+        height,
         unitPrice,
         fileDensity: density,
         subtotal,
@@ -225,7 +261,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    // Güvenlik: tüm categoryId/variantId'ler bu tenant'a ait mi?
+    // Güvenlik: ilgili tenant'a ait kategori & varyantlar mı?
     const catIds = Array.from(new Set(prepared.map(p => p.categoryId)))
     const varIds = Array.from(new Set(prepared.map(p => p.variantId)))
 
@@ -237,7 +273,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'forbidden_category_or_variant' }, { status: 403 })
     }
 
-    // Toplam hesapları
+    // Toplamlar
     let total = prepared.reduce((acc, p) => acc.add(p.subtotal), new Prisma.Decimal(0))
     const discReq = new Prisma.Decimal(Number(discount ?? 0) || 0)
     const discountClamped = Prisma.Decimal.max(
@@ -246,10 +282,11 @@ export async function POST(req: NextRequest) {
     )
     const net = total.sub(discountClamped)
 
-    // --- TEK SORGU: order + nested items.create ---
+    // --- Create (order + nested items) ---
     const created = await prisma.order.create({
       data: {
         tenantId,
+        branchId: branch.id,                 // ✅ artık branchId
         createdById: userId ?? null,
         note: note ?? null,
         status,
@@ -267,12 +304,15 @@ export async function POST(req: NextRequest) {
           orderBy: { id: 'asc' },
         },
         customer: { select: { id: true, name: true, phone: true } },
+        branch:  { select: { id: true, name: true } }, // ✅ doğru relation
       },
     })
 
-    // Sayılara cast (UI için)
+    // Sayılara cast (UI için) + legacy alias
     const payload = {
       ...created,
+      branch: created.branch,
+      dealer: created.branch, // legacy alias
       total:    Number(created.total),
       discount: Number(created.discount),
       netTotal: Number(created.netTotal),

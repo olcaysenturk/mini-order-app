@@ -1,26 +1,24 @@
-// /app/api/auth/[...nextauth]/options.ts (revize)
-import type { NextAuthOptions } from 'next-auth'
+// app/api/auth/[...nextauth]/options.ts
+import type { NextAuthOptions, DefaultSession } from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import { prisma } from '@/app/lib/db'
 import bcrypt from 'bcryptjs'
-// Define UserRole and TenantRole enums manually if not exported from @prisma/client
+
+// ---- Enum'ları (tip güvenliği için) tanımla
 export enum UserRole {
-  OWNER = 'OWNER',
+  ADMIN = 'ADMIN',
   STAFF = 'STAFF',
   SUPERADMIN = 'SUPERADMIN',
-  // Add other roles as needed
 }
 
 export enum TenantRole {
   OWNER = 'OWNER',
-  MEMBER = 'MEMBER',
-  // Add other roles as needed
+  ADMIN = 'ADMIN',
+  STAFF = 'STAFF',
 }
 
-// ---- Tip güvenliği: Session/JWT genişletmeleri ----
-import type { DefaultSession } from 'next-auth'
-
+// ---- next-auth module augment (session/jwt alanlarını genişlet)
 declare module 'next-auth' {
   interface Session {
     user?: DefaultSession['user'] & {
@@ -41,20 +39,63 @@ declare module 'next-auth/jwt' {
   }
 }
 
-// Varsayılan tenant seçimi (OWNER varsa onu, yoksa ilk membership)
-async function pickDefaultMembership(userId: string) {
-  const owner = await prisma.membership.findFirst({
-    where: { userId, role: 'OWNER' },
-    select: { tenantId: true, role: true },
-  })
-  if (owner) return owner
-
-  const any = await prisma.membership.findFirst({
+// Kullanıcıya ait en az bir tenant olmasını garanti eder, yoksa (SUPERADMIN ise) oluşturur.
+async function ensureTenantForUser(userId: string, role?: UserRole) {
+  // 1) Zaten bir membership varsa onu kullan
+  const existing = await prisma.membership.findFirst({
     where: { userId },
     orderBy: { createdAt: 'asc' },
     select: { tenantId: true, role: true },
   })
-  return any // yoksa null
+  if (existing) {
+    return { tenantId: existing.tenantId, tenantRole: existing.role as TenantRole }
+  }
+
+  // 2) SUPERADMIN ise: var olan ilk tenant'a OWNER olarak ekle, yoksa sıfırdan kur
+  if (role === UserRole.SUPERADMIN) {
+    const anyTenant = await prisma.tenant.findFirst({
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    })
+
+    if (anyTenant) {
+      await prisma.membership.upsert({
+        where: { userId_tenantId: { userId, tenantId: anyTenant.id } },
+        update: { role: 'OWNER' },
+        create: { userId, tenantId: anyTenant.id, role: 'OWNER' },
+      })
+      return { tenantId: anyTenant.id, tenantRole: TenantRole.OWNER }
+    }
+
+    // hiç tenant yoksa: tenant + OWNER membership + default branch ("Merkez")
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    })
+
+    const { tenantId } = await prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.create({
+        data: { name: `${u?.name || 'Admin'}'s workspace`, createdById: userId },
+        select: { id: true },
+      })
+
+      await tx.membership.create({
+        data: { userId, tenantId: tenant.id, role: 'OWNER' },
+      })
+
+      // default branch
+      await tx.branch.create({
+        data: { tenantId: tenant.id, name: 'Merkez', isActive: true },
+      })
+
+      return { tenantId: tenant.id }
+    })
+
+    return { tenantId, tenantRole: TenantRole.OWNER }
+  }
+
+  // 3) Normal kullanıcı & membership yok → boş dön (ilk üyelik oluşana kadar)
+  return { tenantId: null, tenantRole: null }
 }
 
 export const authOptions: NextAuthOptions = {
@@ -74,7 +115,6 @@ export const authOptions: NextAuthOptions = {
         const password = String(credentials?.password || '')
         if (!email || !password) return null
 
-        // Sadece gerekli alanları çekelim
         const user = await prisma.user.findUnique({
           where: { email },
           select: { id: true, email: true, name: true, passwordHash: true, role: true },
@@ -95,20 +135,24 @@ export const authOptions: NextAuthOptions = {
   ],
 
   callbacks: {
+    // JWT: login anında ve her istek öncesi çalışır
     async jwt({ token, user }) {
+      // İlk login anı: user dolu gelir
       if (user) {
         token.id = (user as any).id
         token.role = (user as any).role as UserRole
-        const mem = await pickDefaultMembership((user as any).id)
-        token.tenantId = mem?.tenantId || null
-        token.tenantRole = (mem?.role as TenantRole | undefined) ?? null
+
+        const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
+        token.tenantId = ensured.tenantId
+        token.tenantRole = ensured.tenantRole
+        return token
       }
 
-      // Token var ama tenant bilgisi düşmüşse tekrar getir
+      // Sonradan tenantId düşmüşse yeniden garanti altına al
       if (!token.tenantId && token.id) {
-        const mem = await pickDefaultMembership(String(token.id))
-        token.tenantId = mem?.tenantId || null
-        token.tenantRole = (mem?.role as TenantRole | undefined) ?? null
+        const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
+        token.tenantId = ensured.tenantId
+        token.tenantRole = ensured.tenantRole
       }
       return token
     },

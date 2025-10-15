@@ -803,7 +803,7 @@ function Header({
   return (
     <div className="flex items-start justify-between">
       <div>
-        <h1 className="text-4xl font-bold tracking-wide">PERDE KONAĞI</h1>
+        <h1 className="text-4xl font-bold tracking-wide">PERDEXA</h1>
         <div className="text-xs leading-5 mt-1">
           <div>
             <b>Gaziosmanpaşa Şubesi:</b>

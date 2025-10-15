@@ -1,5 +1,14 @@
 -- CreateEnum
-CREATE TYPE "public"."UserRole" AS ENUM ('ADMIN', 'STAFF');
+CREATE TYPE "public"."UserRole" AS ENUM ('ADMIN', 'STAFF', 'SUPERADMIN');
+
+-- CreateEnum
+CREATE TYPE "public"."Plan" AS ENUM ('FREE', 'PRO');
+
+-- CreateEnum
+CREATE TYPE "public"."SubscriptionStatus" AS ENUM ('trialing', 'active', 'past_due', 'canceled');
+
+-- CreateEnum
+CREATE TYPE "public"."InvoiceStatus" AS ENUM ('open', 'paid', 'failed', 'voided', 'refunded');
 
 -- CreateEnum
 CREATE TYPE "public"."TenantRole" AS ENUM ('OWNER', 'ADMIN', 'STAFF');
@@ -52,10 +61,74 @@ CREATE TABLE "public"."User" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "name" TEXT,
     "email" VARCHAR(191) NOT NULL,
+    "username" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "role" "public"."UserRole" NOT NULL DEFAULT 'STAFF',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "mustChangePassword" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."Subscription" (
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "plan" "public"."Plan" NOT NULL DEFAULT 'FREE',
+    "status" "public"."SubscriptionStatus" NOT NULL DEFAULT 'trialing',
+    "provider" TEXT NOT NULL DEFAULT 'manual',
+    "providerCustomerId" TEXT,
+    "providerSubId" TEXT,
+    "currentPeriodStart" TIMESTAMP(3),
+    "currentPeriodEnd" TIMESTAMP(3),
+    "cancelAtPeriodEnd" BOOLEAN NOT NULL DEFAULT false,
+    "seats" INTEGER NOT NULL DEFAULT 1,
+    "seatLimit" INTEGER,
+    "trialEndsAt" TIMESTAMP(3),
+    "graceUntil" TIMESTAMP(3),
+
+    CONSTRAINT "Subscription_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."Invoice" (
+    "id" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "tenantId" TEXT NOT NULL,
+    "subscriptionId" TEXT,
+    "status" "public"."InvoiceStatus" NOT NULL DEFAULT 'open',
+    "amount" DECIMAL(12,2) NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'TRY',
+    "provider" TEXT NOT NULL DEFAULT 'manual',
+    "providerInvoiceId" TEXT,
+    "raw" JSONB,
+    "paidAt" TIMESTAMP(3),
+    "dueAt" TIMESTAMP(3),
+
+    CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."Dealer" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "name" TEXT NOT NULL,
+    "code" TEXT,
+    "phone" TEXT,
+    "email" VARCHAR(191),
+    "address" TEXT,
+    "taxNumber" TEXT,
+    "taxOffice" TEXT,
+    "contactName" TEXT,
+    "contactPhone" TEXT,
+    "notes" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+
+    CONSTRAINT "Dealer_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -74,9 +147,41 @@ CREATE TABLE "public"."Membership" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "userId" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
-    "role" "public"."TenantRole" NOT NULL DEFAULT 'OWNER',
+    "role" "public"."TenantRole" NOT NULL DEFAULT 'STAFF',
 
     CONSTRAINT "Membership_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."CompanyProfile" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "companyName" TEXT NOT NULL,
+    "taxNumber" TEXT,
+    "taxOffice" TEXT,
+    "phone" TEXT,
+    "email" TEXT,
+    "address" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "CompanyProfile_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."Branch" (
+    "id" TEXT NOT NULL,
+    "tenantId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "code" TEXT,
+    "phone" TEXT,
+    "email" VARCHAR(191),
+    "address" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Branch_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -118,6 +223,7 @@ CREATE TABLE "public"."Variant" (
 CREATE TABLE "public"."Order" (
     "id" TEXT NOT NULL,
     "tenantId" TEXT NOT NULL,
+    "branchId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "note" TEXT,
@@ -131,6 +237,7 @@ CREATE TABLE "public"."Order" (
     "createdById" TEXT,
     "storLines" JSONB,
     "accessoryLines" JSONB,
+    "deletedAt" TIMESTAMP(3),
 
     CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
 );
@@ -189,10 +296,43 @@ CREATE UNIQUE INDEX "VerificationToken_identifier_token_key" ON "public"."Verifi
 CREATE UNIQUE INDEX "User_email_key" ON "public"."User"("email");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "User_username_key" ON "public"."User"("username");
+
+-- CreateIndex
 CREATE INDEX "User_email_idx" ON "public"."User"("email");
 
 -- CreateIndex
 CREATE INDEX "User_role_idx" ON "public"."User"("role");
+
+-- CreateIndex
+CREATE INDEX "User_username_idx" ON "public"."User"("username");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Subscription_tenantId_key" ON "public"."Subscription"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "Subscription_tenantId_status_idx" ON "public"."Subscription"("tenantId", "status");
+
+-- CreateIndex
+CREATE INDEX "Subscription_currentPeriodEnd_idx" ON "public"."Subscription"("currentPeriodEnd");
+
+-- CreateIndex
+CREATE INDEX "Invoice_tenantId_createdAt_idx" ON "public"."Invoice"("tenantId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "Invoice_status_idx" ON "public"."Invoice"("status");
+
+-- CreateIndex
+CREATE INDEX "Dealer_tenantId_idx" ON "public"."Dealer"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "Dealer_tenantId_isActive_idx" ON "public"."Dealer"("tenantId", "isActive");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Dealer_tenantId_name_key" ON "public"."Dealer"("tenantId", "name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Dealer_tenantId_code_key" ON "public"."Dealer"("tenantId", "code");
 
 -- CreateIndex
 CREATE INDEX "Tenant_createdById_idx" ON "public"."Tenant"("createdById");
@@ -201,7 +341,22 @@ CREATE INDEX "Tenant_createdById_idx" ON "public"."Tenant"("createdById");
 CREATE INDEX "Membership_tenantId_idx" ON "public"."Membership"("tenantId");
 
 -- CreateIndex
+CREATE INDEX "Membership_tenantId_role_idx" ON "public"."Membership"("tenantId", "role");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Membership_userId_tenantId_key" ON "public"."Membership"("userId", "tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CompanyProfile_tenantId_key" ON "public"."CompanyProfile"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "CompanyProfile_tenantId_idx" ON "public"."CompanyProfile"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "Branch_tenantId_idx" ON "public"."Branch"("tenantId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Branch_tenantId_name_key" ON "public"."Branch"("tenantId", "name");
 
 -- CreateIndex
 CREATE INDEX "Customer_tenantId_idx" ON "public"."Customer"("tenantId");
@@ -231,7 +386,7 @@ CREATE INDEX "Variant_name_idx" ON "public"."Variant"("name");
 CREATE UNIQUE INDEX "Variant_categoryId_name_key" ON "public"."Variant"("categoryId", "name");
 
 -- CreateIndex
-CREATE INDEX "Order_tenantId_createdAt_idx" ON "public"."Order"("tenantId", "createdAt");
+CREATE INDEX "Order_tenantId_branchId_createdAt_idx" ON "public"."Order"("tenantId", "branchId", "createdAt");
 
 -- CreateIndex
 CREATE INDEX "Order_tenantId_status_createdAt_idx" ON "public"."Order"("tenantId", "status", "createdAt");
@@ -247,6 +402,9 @@ CREATE INDEX "Order_tenantId_customerPhone_idx" ON "public"."Order"("tenantId", 
 
 -- CreateIndex
 CREATE INDEX "Order_tenantId_createdById_idx" ON "public"."Order"("tenantId", "createdById");
+
+-- CreateIndex
+CREATE INDEX "Order_tenantId_deletedAt_idx" ON "public"."Order"("tenantId", "deletedAt");
 
 -- CreateIndex
 CREATE INDEX "OrderItem_orderId_idx" ON "public"."OrderItem"("orderId");
@@ -267,6 +425,18 @@ ALTER TABLE "public"."Account" ADD CONSTRAINT "Account_userId_fkey" FOREIGN KEY 
 ALTER TABLE "public"."Session" ADD CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "public"."Subscription" ADD CONSTRAINT "Subscription_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Invoice" ADD CONSTRAINT "Invoice_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Invoice" ADD CONSTRAINT "Invoice_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "public"."Subscription"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Dealer" ADD CONSTRAINT "Dealer_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "public"."Tenant" ADD CONSTRAINT "Tenant_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "public"."User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -274,6 +444,12 @@ ALTER TABLE "public"."Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "public"."Membership" ADD CONSTRAINT "Membership_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."CompanyProfile" ADD CONSTRAINT "CompanyProfile_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Branch" ADD CONSTRAINT "Branch_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Customer" ADD CONSTRAINT "Customer_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -289,6 +465,9 @@ ALTER TABLE "public"."Variant" ADD CONSTRAINT "Variant_categoryId_fkey" FOREIGN 
 
 -- AddForeignKey
 ALTER TABLE "public"."Order" ADD CONSTRAINT "Order_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "public"."Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Order" ADD CONSTRAINT "Order_branchId_fkey" FOREIGN KEY ("branchId") REFERENCES "public"."Branch"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Order" ADD CONSTRAINT "Order_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "public"."Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;

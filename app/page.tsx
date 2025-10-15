@@ -22,7 +22,7 @@ export default async function Home() {
       {/* ======= HERO ======= */}
       <section className="relative z-10 mt-[-32px]">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-10 sm:pt-16 pb-10">
-          <div className="grid lg:grid-cols-2 gap-10 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
             {/* Text */}
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200/60 bg-white/60 px-3 py-1 text-xs font-medium text-indigo-700 shadow-sm backdrop-blur">

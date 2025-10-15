@@ -5,9 +5,15 @@ import { useEffect, useMemo, useState } from 'react'
 type Variant = { id: string; name: string; unitPrice: number }
 type Category = { id: string; name: string; variants: Variant[] }
 
+const DEFAULT_CATEGORIES = ['TÜL PERDE', 'FON PERDE', 'GÜNEŞLİK', 'STOR PERDE', 'AKSESUAR'] as const
+const ORDER = new Map(DEFAULT_CATEGORIES.map((n, i) => [n, i]))
+
+function ciEq(a: string, b: string) {
+  return a.trim().toLocaleUpperCase('tr-TR') === b.trim().toLocaleUpperCase('tr-TR')
+}
+
 export default function AdminPage() {
   const [categories, setCategories] = useState<Category[]>([])
-  const [catName, setCatName] = useState('')
   const [loading, setLoading] = useState(false)
 
   // varId -> draft
@@ -30,33 +36,48 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/categories', { cache: 'no-store' })
       const data: Category[] = await res.json()
-      setCategories(data)
+      setCategories(sortFixed(data))
     } finally {
       setLoading(false)
     }
   }
-  useEffect(() => { fetchCategories() }, [])
 
-  const addCategory = async () => {
-    const name = catName.trim()
-    if (!name) return
-    const res = await fetch('/api/categories', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    if (res.ok) {
-      setCatName('')
-      fetchCategories()
-    }
+  // Eksik varsayılan kategori varsa oluştur (idempotent)
+  const ensureDefaults = async (list: Category[]) => {
+    const existingNames = list.map(c => c.name)
+    const missing = DEFAULT_CATEGORIES.filter(def => !existingNames.some(n => ciEq(n, def)))
+    if (missing.length === 0) return
+
+    // sırayla oluştur (POST /api/categories {name})
+    await Promise.all(
+      missing.map(async (name) => {
+        await fetch('/api/categories', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        })
+      })
+    )
   }
 
-  const removeCategory = async (id: string) => {
-    if (!confirm('Kategori ve içindeki tüm varyantlar silinsin mi?')) return
-    await fetch(`/api/categories/${id}`, { method: 'DELETE' })
-    setCategories(prev => prev.filter(c => c.id !== id))
-    setExpanded(prev => {
-      const next = new Set(prev); next.delete(id); return next
+  // ilk yükleme: getir -> eksikse oluştur -> tekrar getir
+  useEffect(() => {
+    (async () => {
+      await fetchCategories()
+      await ensureDefaults(categories)
+      await fetchCategories()
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const sortFixed = (arr: Category[]) => {
+    const getOrder = (name: string) => ORDER.get(
+      DEFAULT_CATEGORIES.find(def => ciEq(def, name)) || ''
+    )
+    return [...arr].sort((a, b) => {
+      const ao = getOrder(a.name) ?? Number.MAX_SAFE_INTEGER
+      const bo = getOrder(b.name) ?? Number.MAX_SAFE_INTEGER
+      return ao - bo
     })
   }
 
@@ -72,7 +93,7 @@ export default function AdminPage() {
         c.id === catId ? { ...c, variants: [...c.variants, v] } : c
       ))
       setEditing(prev => ({ ...prev, [v.id]: v })) // direkt edite al
-      setExpanded(prev => new Set(prev).add(catId)) // paneli açık tut
+      setExpanded(prev => new Set(prev).add(catId)) // panel açık kalsın
     }
   }
 
@@ -131,20 +152,12 @@ export default function AdminPage() {
 
   return (
     <div className="card">
-      <h1 className="text-xl font-semibold mb-4">Admin: Kategori & Varyant</h1>
-
-      {/* Kategori ekleme */}
-      <div className="flex gap-2 mb-6">
-        <input
-          className="input"
-          placeholder="Kategori adı"
-          value={catName}
-          onChange={e => setCatName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && addCategory()}
-        />
-        <button className="btn" onClick={addCategory} disabled={loading}>Ekle</button>
-        {loading && <span className="text-sm text-gray-500 self-center">Yükleniyor…</span>}
-      </div>
+      <h1 className="text-xl font-semibold mb-2">Kategori & Varyant</h1>
+      <p className="text-sm text-gray-600 mb-6">
+        Kategoriler sabittir (<b>{DEFAULT_CATEGORIES.join(', ')}</b>). Yeni kategori eklenemez, silinemez.
+        Sadece <b>varyant</b> ekleyebilir/düzenleyebilirsiniz.
+        {loading && <span className="ml-2 text-gray-400">Yükleniyor…</span>}
+      </p>
 
       {/* Akordeon liste */}
       <div className="space-y-4">
@@ -180,12 +193,10 @@ export default function AdminPage() {
                 </button>
 
                 <div className="flex gap-2">
-                  <button className="btn-secondary" onClick={() => addVariant(cat.id)}>
+                  <button className="btn" onClick={() => addVariant(cat.id)}>
                     + Varyant
                   </button>
-                  <button className="btn-secondary" onClick={() => removeCategory(cat.id)}>
-                    Kategoriyi Sil
-                  </button>
+                  {/* KATEGORİ SİL/ADD YOK — politika gereği */}
                 </div>
               </div>
 

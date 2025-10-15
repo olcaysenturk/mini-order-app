@@ -8,19 +8,19 @@ import { AuthedNav } from "./components/AuthedNav"; // ✅ components
 
 export const metadata: Metadata = {
   title: {
-    default: "PERDE KONAĞI",
-    template: "%s — PERDE KONAĞI",
+    default: "PERDEXA",
+    template: "%s — PERDEXA",
   },
   description: "Kategori/Varyant + Sipariş",
   metadataBase: new URL("https://perde-konagi.local"),
   openGraph: {
-    title: "PERDE KONAĞI",
+    title: "PERDEXA",
     description: "Kategori/Varyant + Sipariş",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "PERDE KONAĞI",
+    title: "PERDEXA",
     description: "Kategori/Varyant + Sipariş",
   },
 };
@@ -43,7 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="flex h-16 items-center gap-3">
                 {/* Brand */}
                 <Link href="/" className="font-extrabold tracking-tight text-base sm:text-lg">
-                  PERDE <span className="text-indigo-600">KONAĞI</span>
+                  PERDE<span className="text-indigo-600">XA</span>
                 </Link>
 
                 {/* Primary nav (authed routes) */}
