@@ -7,6 +7,9 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 
 export const runtime = 'nodejs'
+// (opsiyonel) cache davranışı:
+export const dynamic = 'force-dynamic'
+
 const MAX_SIZE = 5 * 1024 * 1024 // 5MB
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']
 
@@ -16,10 +19,17 @@ function ensureUploadsDir() {
 }
 
 // POST /api/dealers/:id/logo  (form-data: file)
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, context: any) {
   try {
     const tenantId = await requireTenantId()
-    const dealer = await prisma.dealer.findFirst({ where: { id: params.id, tenantId }, select: { id: true, logoKey: true } })
+
+    const id = context?.params?.id as string | undefined
+    if (!id) return jsonError('missing_id', 400)
+
+    const dealer = await prisma.dealer.findFirst({
+      where: { id, tenantId },
+      select: { id: true, logoKey: true },
+    })
     if (!dealer) return jsonError('not_found', 404)
 
     const fd = await req.formData()
@@ -29,12 +39,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (file.size > MAX_SIZE) return jsonError('too_large', 413)
 
     const buf = Buffer.from(await file.arrayBuffer())
-    const ext = (() => {
-      const map: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/svg+xml': 'svg' }
-      return map[file.type] || 'bin'
-    })()
+    const extMap: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'image/svg+xml': 'svg',
+    }
+    const ext = extMap[file.type] || 'bin'
 
     const dir = await ensureUploadsDir()
+
     // eski dosyayı sil
     if (dealer.logoKey) {
       const oldPath = path.join(dir, dealer.logoKey)
@@ -42,7 +57,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     }
 
     // yeni isim
-    const key = `${params.id}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`
+    const key = `${id}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`
     const full = path.join(dir, key)
     await fs.writeFile(full, buf)
 
@@ -60,10 +75,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 }
 
 // DELETE /api/dealers/:id/logo
-export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+export async function DELETE(_req: Request, context: any) {
   try {
     const tenantId = await requireTenantId()
-    const dealer = await prisma.dealer.findFirst({ where: { id: params.id, tenantId }, select: { id: true, logoKey: true } })
+
+    const id = context?.params?.id as string | undefined
+    if (!id) return jsonError('missing_id', 400)
+
+    const dealer = await prisma.dealer.findFirst({
+      where: { id, tenantId },
+      select: { id: true, logoKey: true },
+    })
     if (!dealer) return jsonError('not_found', 404)
 
     if (dealer.logoKey) {
@@ -72,7 +94,11 @@ export async function DELETE(_: Request, { params }: { params: { id: string } })
       await fs.unlink(full).catch(() => {})
     }
 
-    await prisma.dealer.update({ where: { id: dealer.id }, data: { logoUrl: null, logoKey: null } })
+    await prisma.dealer.update({
+      where: { id: dealer.id },
+      data: { logoUrl: null, logoKey: null },
+    })
+
     return NextResponse.json({ ok: true })
   } catch (e: any) {
     if (e?.message === 'NO_TENANT') return jsonError('unauthorized', 401)

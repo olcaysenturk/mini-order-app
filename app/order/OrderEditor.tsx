@@ -21,6 +21,8 @@ type Profile = {
 }
 
 type Branch = {
+  phone: string
+  address: string
   id: string
   name: string
   code?: string | null
@@ -479,8 +481,6 @@ function Header({
               {b.address}
               <br />
                 GSM: {b.phone}
-              {/* Adres/telefon kolonları eklediğinde burada göster */}
-              {console.log(b)}
             </div>
           ))}
           {profile.instagram && <div className="mt-1 flex items-center gap-1">@{profile.instagram.replace(/^@/,'')}</div>}
@@ -488,7 +488,9 @@ function Header({
       </div>
       <div className="w-[320px] text-left">
         <div className="mb-3">
-          <Image src={profile.logoUrl} alt="Brillant" width={300} height={80} priority style={{ width: '100%', height: 'auto' }} />
+          {profile.logoUrl && (
+            <Image src={profile.logoUrl} alt="Brillant" width={300} height={80} priority style={{ width: '100%', height: 'auto' }} />
+          )}
         </div>
         <div className="text-xs flex justify-between">
           {/* <b>Bayi:</b> <span className="inline-block min-w-[120px] text-right">{dealerName || '—'}</span> */}

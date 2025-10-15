@@ -153,7 +153,6 @@ export default function NewOrderView() {
         customerId: customerPayload?.id ?? null,
         customerName: customerPayload!.name,
         customerPhone: customerPayload!.phone,
-        customerEmail: customerPayload!.email,
         note: note.trim() || '',
       })
 

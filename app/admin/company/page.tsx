@@ -747,8 +747,8 @@ function Textarea({
 function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <th className={`p-3 text-xs font-semibold uppercase tracking-wide text-gray-500 ${className}`}>{children}</th>
 }
-function Td({ children, className = '', colSpan }: { children: React.ReactNode; className?: string; colSpan?: number }) {
-  return <td colSpan={colSpan} className={`p-3 align-middle ${className}`}>{children}</td>
+function Td({ children, className = '', colSpan, title }: { children: React.ReactNode; className?: string; colSpan?: number; title?: string }) {
+  return <td colSpan={colSpan} className={`p-3 align-middle ${className}`} title={title}>{children}</td>
 }
 
 /* ======= ultra tiny toast ======= */

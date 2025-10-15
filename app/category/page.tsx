@@ -71,9 +71,10 @@ export default function AdminPage() {
   }, [])
 
   const sortFixed = (arr: Category[]) => {
-    const getOrder = (name: string) => ORDER.get(
-      DEFAULT_CATEGORIES.find(def => ciEq(def, name)) || ''
-    )
+    const getOrder = (name: string) => {
+      const def = DEFAULT_CATEGORIES.find(def => ciEq(def, name))
+      return def ? ORDER.get(def) : undefined
+    }
     return [...arr].sort((a, b) => {
       const ao = getOrder(a.name) ?? Number.MAX_SAFE_INTEGER
       const bo = getOrder(b.name) ?? Number.MAX_SAFE_INTEGER
