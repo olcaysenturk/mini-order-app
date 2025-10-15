@@ -10,7 +10,7 @@ async function main() {
       console.log(`Tenant ${t.name}: şube oluşturuldu -> ${branch.id}`)
     }
     const upd = await prisma.order.updateMany({
-      where: { tenantId: t.id, branchId: null },
+      where: { tenantId: t.id, branchId: { equals: undefined } },
       data: { branchId: branch.id },
     })
     if (upd.count) console.log(`Tenant ${t.name}: ${upd.count} sipariş bağlandı`)

@@ -1,3 +1,4 @@
+// prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,6 +9,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+/* ============ Auth ============ */
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -45,6 +47,7 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+/* ============ Core ============ */
 model User {
   id                 String       @id @default(cuid())
   createdAt          DateTime     @default(now())
@@ -56,6 +59,7 @@ model User {
   role               UserRole     @default(STAFF)
   isActive           Boolean      @default(true)
   mustChangePassword Boolean      @default(true)
+
   accounts           Account[]
   memberships        Membership[]
   orders             Order[]      @relation("OrderCreatedBy")
@@ -65,6 +69,42 @@ model User {
   @@index([email])
   @@index([role])
   @@index([username])
+}
+
+model Membership {
+  id        String     @id @default(cuid())
+  createdAt DateTime   @default(now())
+  userId    String
+  tenantId  String
+  role      TenantRole @default(STAFF)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+  @@index([tenantId, role])
+}
+
+model Tenant {
+  id             String          @id @default(cuid())
+  createdAt      DateTime        @default(now())
+  name           String
+  createdById    String
+  createdBy      User            @relation("TenantCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  branches       Branch[]
+  categories     Category[]
+  companyProfile CompanyProfile?
+  customers      Customer[]
+  dealers        Dealer[]
+  invoices       Invoice[]
+  memberships    Membership[]
+  orders         Order[]
+  variants       Variant[]
+  subscriptions  Subscription?
+
+  @@index([createdById])
 }
 
 model Subscription {
@@ -84,8 +124,9 @@ model Subscription {
   seatLimit          Int?
   trialEndsAt        DateTime?
   graceUntil         DateTime?
-  invoices           Invoice[]
+
   tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices           Invoice[]
 
   @@index([tenantId, status])
   @@index([currentPeriodEnd])
@@ -104,6 +145,7 @@ model Invoice {
   raw               Json?
   paidAt            DateTime?
   dueAt             DateTime?
+
   subscription      Subscription? @relation(fields: [subscriptionId], references: [id])
   tenant            Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -111,70 +153,7 @@ model Invoice {
   @@index([status])
 }
 
-model Dealer {
-  id            String    @id @default(cuid())
-  tenantId      String
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  name          String
-  code          String?
-  phone         String?
-  email         String?   @db.VarChar(191)
-  address       String?
-  taxNumber     String?
-  taxOffice     String?
-  contactName   String?
-  contactPhone  String?
-  notes         String?
-  isActive      Boolean   @default(true)
-  logoHeight    Int?
-  logoKey       String?   @db.VarChar(191)
-  logoUpdatedAt DateTime?
-  logoUrl       String?
-  logoWidth     Int?
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@unique([tenantId, name])
-  @@unique([tenantId, code])
-  @@index([tenantId])
-  @@index([tenantId, isActive])
-  Order Order[]
-}
-
-model Tenant {
-  id             String          @id @default(cuid())
-  createdAt      DateTime        @default(now())
-  name           String
-  createdById    String
-  branches       Branch[]
-  categories     Category[]
-  companyProfile CompanyProfile?
-  customers      Customer[]
-  dealers        Dealer[]
-  invoices       Invoice[]
-  memberships    Membership[]
-  orders         Order[]
-  subscriptions  Subscription?
-  createdBy      User            @relation("TenantCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-  variants       Variant[]
-
-  @@index([createdById])
-}
-
-model Membership {
-  id        String     @id @default(cuid())
-  createdAt DateTime   @default(now())
-  userId    String
-  tenantId  String
-  role      TenantRole @default(STAFF)
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, tenantId])
-  @@index([tenantId])
-  @@index([tenantId, role])
-}
-
+/* ============ Company / Branch / Dealer ============ */
 model CompanyProfile {
   id          String   @id @default(cuid())
   tenantId    String   @unique
@@ -188,10 +167,9 @@ model CompanyProfile {
   email       String?
   address     String?
 
-  // NEW
-  logoUrl     String?      // header’da logo
-  instagram   String?      // @perdekonagi gibi
-  website     String?      // opsiyonel
+  logoUrl     String?
+  instagram   String?
+  website     String?
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -200,31 +178,67 @@ model CompanyProfile {
 }
 
 model Branch {
-  id        String   @id @default(cuid())
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  name      String
-  code      String?
-  phone     String?
-  email     String?
-  address   String?
+  name         String
+  code         String?
+  phone        String?
+  email        String?
+  address      String?
 
-  // yeni / gerekli
-  showOnHeader Boolean @default(false)
-  sortOrder    Int     @default(0)
+  showOnHeader Boolean  @default(false)
+  sortOrder    Int      @default(0)
 
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  orders    Order[]
+  // back-relation to Order.branch
+  orders       Order[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
   @@index([tenantId, showOnHeader, sortOrder])
 }
 
+model Dealer {
+  id            String    @id @default(cuid())
+  tenantId      String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  name          String
+  code          String?
+  phone         String?
+  email         String?   @db.VarChar(191)
+  address       String?
+  taxNumber     String?
+  taxOffice     String?
+  contactName   String?
+  contactPhone  String?
+  notes         String?
+  isActive      Boolean   @default(true)
+
+  logoHeight    Int?
+  logoKey       String?   @db.VarChar(191)
+  logoUpdatedAt DateTime?
+  logoUrl       String?
+  logoWidth     Int?
+
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // ⚠️ Burada Order ile ilişki YOK. (Sipariş artık Branch’e bağlı.)
+  // Daha önce eklediğiniz `Order Order[]` satırını KALDIRDIK.
+
+  @@unique([tenantId, name])
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([tenantId, isActive])
+}
+
+/* ============ Customer / Catalog ============ */
 model Customer {
   id        String   @id @default(cuid())
   tenantId  String
@@ -235,6 +249,7 @@ model Customer {
   email     String?  @db.VarChar(191)
   address   String?
   note      String?
+
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   orders    Order[]
 
@@ -247,6 +262,7 @@ model Category {
   id         String      @id @default(cuid())
   tenantId   String
   name       String
+
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
   variants   Variant[]
@@ -261,9 +277,10 @@ model Variant {
   name       String
   unitPrice  Decimal     @default(0) @db.Decimal(12, 2)
   categoryId String
-  orderItems OrderItem[]
+
   category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
 
   @@unique([categoryId, name])
   @@index([tenantId])
@@ -271,36 +288,34 @@ model Variant {
   @@index([name])
 }
 
+/* ============ Orders ============ */
 model Order {
-  id            String      @id @default(cuid())
-  tenantId      String
-  branchId      String
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  note          String?
-  total         Decimal     @default(0) @db.Decimal(12, 2)
-  discount      Decimal     @default(0) @db.Decimal(12, 2)
-  netTotal      Decimal     @default(0) @db.Decimal(12, 2)
-  customerName  String      @default("")
-  customerPhone String      @default("")
-  status        OrderStatus @default(pending)
-  customerId    String?
-  createdById   String?
-  storLines     Json?
+  id             String      @id @default(cuid())
+  tenantId       String
+  branchId       String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  note           String?
+  total          Decimal     @default(0) @db.Decimal(12, 2)
+  discount       Decimal     @default(0) @db.Decimal(12, 2)
+  netTotal       Decimal     @default(0) @db.Decimal(12, 2)
+  customerName   String      @default("")
+  customerPhone  String      @default("")
+  status         OrderStatus @default(pending)
+  customerId     String?
+  createdById    String?
+  storLines      Json?
   accessoryLines Json?
-  deletedAt     DateTime?
+  deletedAt      DateTime?
 
-  // ✅ Doğru ilişki
-  branch        Branch      @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  customer      Customer?   @relation(fields: [customerId], references: [id])
-  createdBy     User?       @relation("OrderCreatedBy", fields: [createdById], references: [id])
-  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  extras        OrderExtra[]
-  items         OrderItem[]
+  // ✅ only Branch relation (no Dealer)
+  branch      Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  createdBy   User?     @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  // ❌ LEGACY (kaldır)
-  // dealerId String?
-  // dealer   Dealer? @relation(fields: [dealerId], references: [id], onDelete: Restrict)
+  extras      OrderExtra[]
+  items       OrderItem[]
 
   @@index([tenantId, branchId, createdAt])
   @@index([tenantId, status, createdAt])
@@ -323,8 +338,9 @@ model OrderItem {
   fileDensity Decimal  @default(1) @db.Decimal(3, 1)
   subtotal    Decimal  @default(0) @db.Decimal(12, 2)
   note        String?
-  category    Category @relation(fields: [categoryId], references: [id])
+
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  category    Category @relation(fields: [categoryId], references: [id])
   variant     Variant  @relation(fields: [variantId], references: [id])
 
   @@index([orderId])
@@ -342,11 +358,13 @@ model OrderExtra {
   subtotal  Decimal   @default(0) @db.Decimal(12, 2)
   note      String?
   createdAt DateTime  @default(now())
+
   order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, type])
 }
 
+/* ============ Enums ============ */
 enum UserRole {
   ADMIN
   STAFF
