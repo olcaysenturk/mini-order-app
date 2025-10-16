@@ -42,19 +42,20 @@ export function AuthedNav() {
 
   const items: NavItem[] = [
     {
+      href: '/admin/company',
+      label: 'Şirketim',
+      icon: (
+        <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>
+      ),
+    },
+    {
       href: '/category',
       label: 'Kategori',
       icon: (
         <svg viewBox="0 0 24 24"><path fill="currentColor" d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/></svg>
       ),
     },
-    {
-      href: '/order/new',
-      label: 'Yeni Sipariş',
-      icon: (
-        <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>
-      ),
-    },
+    
     {
       href: '/orders',
       label: 'Siparişler',

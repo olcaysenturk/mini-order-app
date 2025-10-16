@@ -522,7 +522,7 @@ export default function OrdersPage() {
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                 <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
               </svg>
-              Yeni
+              Yeni Sipariş
             </a>
           </div>
         </div>
