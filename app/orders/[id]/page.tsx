@@ -1,12 +1,13 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { toast } from 'sonner'
 
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
 type Category = { id: string; name: string; variants: Variant[] };
-type Status = "pending" | "processing" | "completed" | "cancelled";
+type Status = 'pending' | 'processing' | 'completed' | 'cancelled';
 
 type LineItem = {
   id: string;
@@ -19,6 +20,8 @@ type LineItem = {
   note?: string | null;
   fileDensity: number; // default 1.0
   subtotal: number; // unitPrice * ((width/100)*fileDensity || 1) * qty
+  slotIndex: number | null; // gridli kategoriler için
+  lineStatus: Status;       // ✅ eklendi (UI + PATCH payload)
 };
 
 type Order = {
@@ -62,38 +65,47 @@ type Branch = {
 /* ========= Helpers ========= */
 const uid = () => Math.random().toString(36).slice(2, 10);
 const fmt = (n: number) =>
-  new Intl.NumberFormat("tr-TR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(n);
+  new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
 // Sadece bu kategoriler gridte görünsün
 const BOX_COUNTS: Record<string, number> = {
-  "TÜL PERDE": 10,
-  "FON PERDE": 5,
-  "GÜNEŞLİK": 5,
+  'TÜL PERDE': 10,
+  'FON PERDE': 5,
+  'GÜNEŞLİK': 5,
 };
-const normalize = (s: string) => s.trim().toLocaleUpperCase("tr-TR");
-const hasBoxCount = (name: string) =>
-  Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name));
+const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR');
+const hasBoxCount = (name: string) => Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name));
+
+const statusLabelMap: Record<Status, string> = {
+  pending: 'Beklemede',
+  processing: 'İşlemde',
+  completed: 'Tamamlandı',
+  cancelled: 'İptal',
+};
+const statusDot: Record<Status, string> = {
+  pending: 'bg-amber-500',
+  processing: 'bg-blue-500',
+  completed: 'bg-emerald-600',
+  cancelled: 'bg-rose-600',
+};
 
 /* ========= API ========= */
 async function fetchCategories(): Promise<Category[]> {
-  const res = await fetch("/api/categories", { cache: "no-store" });
-  if (!res.ok) throw new Error("Kategoriler yüklenemedi");
+  const res = await fetch('/api/categories', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Kategoriler yüklenemedi');
   return res.json();
 }
 async function fetchOrderById(id: string): Promise<Order> {
-  const res = await fetch(`/api/orders/${id}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Sipariş yüklenemedi");
+  const res = await fetch(`/api/orders/${id}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error('Sipariş yüklenemedi');
   return res.json();
 }
 async function fetchProfile(): Promise<Profile> {
-  const res = await fetch("/api/company-profile", { cache: "no-store" });
-  if (!res.ok) throw new Error("Profil alınamadı");
+  const res = await fetch('/api/company-profile', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Profil alınamadı');
   const j = await res.json();
   return {
-    companyName: j?.profile?.companyName ?? "",
+    companyName: j?.profile?.companyName ?? '',
     phone: j?.profile?.phone ?? null,
     email: j?.profile?.email ?? null,
     address: j?.profile?.address ?? null,
@@ -105,8 +117,8 @@ async function fetchProfile(): Promise<Profile> {
   };
 }
 async function fetchBranches(): Promise<Branch[]> {
-  const res = await fetch("/api/branches?all=1", { cache: "no-store" });
-  if (!res.ok) throw new Error("Şubeler alınamadı");
+  const res = await fetch('/api/branches?all=1', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Şubeler alınamadı');
   const j = await res.json();
   const arr = Array.isArray(j) ? j : (j?.items ?? []);
   return arr.map((b: any) => ({
@@ -136,30 +148,32 @@ export default function EditOrderPage() {
   const [headerBranches, setHeaderBranches] = useState<Branch[]>([]);
 
   // order
-  const [orderId, setOrderId] = useState<string>("");
+  const [orderId, setOrderId] = useState<string>('');
   const [items, setItems] = useState<LineItem[]>([]);
-  const [orderNote, setOrderNote] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [orderSeq, setOrderSeq] = useState<number | string>("—");
-  const [status, setStatus] = useState<Status>("pending");
+  const [orderNote, setOrderNote] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [orderSeq, setOrderSeq] = useState<number | string>('—');
+  const [status, setStatus] = useState<Status>('pending');
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // PATCH’te “sadece DB’de var olan” item id’lerini göndermek için
+  // PATCH’te sadece DB’de var olan item id’lerini update etmek için
   const existingDbItemIds = useRef<Set<string>>(new Set());
 
   // drawer (inline editor)
   const [slot, setSlot] = useState<InsertSlot>(null);
-  const [catId, setCatId] = useState("");
-  const [varId, setVarId] = useState("");
+  const [catId, setCatId] = useState('');
+  const [varId, setVarId] = useState('');
   const [qty, setQty] = useState(1);
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
-  const [lineNote, setLineNote] = useState("");
+  const [lineNote, setLineNote] = useState('');
   const [fileDensity, setFileDensity] = useState(1.0); // default 1.0
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
+  const [targetSlotIndex, setTargetSlotIndex] = useState<number | null>(null);
+  const [lineStatus, setLineStatus] = useState<Status>('pending'); // ✅ drawer için
 
   /* ==== Load ==== */
   useEffect(() => {
@@ -180,11 +194,11 @@ export default function EditOrderPage() {
 
         // order
         setOrderId(ord.id);
-        setCustomerName(ord.customerName || "");
-        setCustomerPhone(ord.customerPhone || "");
-        setOrderNote(ord.note || "");
-        setOrderSeq(typeof ord.seq === "number" ? ord.seq : ord.id);
-        setStatus(ord.status ?? "pending");
+        setCustomerName(ord.customerName || '');
+        setCustomerPhone(ord.customerPhone || '');
+        setOrderNote(ord.note || '');
+        setOrderSeq(typeof ord.seq === 'number' ? ord.seq : ord.id);
+        setStatus(ord.status ?? 'pending');
 
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
@@ -193,6 +207,11 @@ export default function EditOrderPage() {
           const unitPrice = Number(i.unitPrice ?? 0);
           const density = Number(i.fileDensity ?? 1);
           const sub = unitPrice * (((width / 100) * density) || 1) * qty;
+          const ls: Status =
+            (i.lineStatus as Status) ||
+            // çok eski verilerde lineStatus yoksa sipariş durumuna düş:
+            (ord.status as Status) ||
+            'pending';
           return {
             id: i.id || uid(),
             categoryId: i.categoryId,
@@ -204,12 +223,12 @@ export default function EditOrderPage() {
             fileDensity: density,
             note: i.note ?? null,
             subtotal: sub,
+            slotIndex: Number.isFinite(i.slotIndex) ? Number(i.slotIndex) : null,
+            lineStatus: ls, // ✅
           };
         });
         setItems(normalized);
-        existingDbItemIds.current = new Set(
-          (ord.items || []).map((it: any) => it.id)
-        );
+        existingDbItemIds.current = new Set((ord.items || []).map((it: any) => it.id));
 
         // profile + header branches
         setProfile(prof);
@@ -218,7 +237,7 @@ export default function EditOrderPage() {
           .sort((a, b) => a.sortOrder - b.sortOrder);
         setHeaderBranches(hb);
       } catch (e: any) {
-        setError(e?.message || "Bir şeyler ters gitti");
+        setError(e?.message || 'Bir şeyler ters gitti');
       } finally {
         setLoading(false);
       }
@@ -241,7 +260,7 @@ export default function EditOrderPage() {
 
   useEffect(() => {
     if (!selectedCategory) {
-      setVarId("");
+      setVarId('');
       return;
     }
     if (variants.length > 0 && !variants.find((v) => v.id === varId)) {
@@ -270,20 +289,58 @@ export default function EditOrderPage() {
     return m;
   }, [categories]);
 
-  // Grouping (print düzeniyle aynı)
+  // Tüm kalemleri kategori adına grupla
   const groupedByCategoryName = useMemo(() => {
     const g = new Map<string, LineItem[]>();
     for (const it of items) {
-      const catName = catById.get(it.categoryId)?.name?.trim() || "Kategori";
+      const catName = catById.get(it.categoryId)?.name?.trim() || 'Kategori';
       if (!g.has(catName)) g.set(catName, []);
       g.get(catName)!.push(it);
     }
     return g;
   }, [items, catById]);
 
+  // Slotted kategoriler: kutulara yerleştir
+  const slottedByCategoryName = useMemo(() => {
+    const m = new Map<string, (LineItem | undefined)[]>();
+
+    for (const titleRaw of Object.keys(BOX_COUNTS)) {
+      m.set(titleRaw, Array(BOX_COUNTS[titleRaw]).fill(undefined));
+    }
+
+    for (const it of items) {
+      const catName = catById.get(it.categoryId)?.name?.trim() || 'Kategori';
+      const key = Object.keys(BOX_COUNTS).find((k) => normalize(k) === normalize(catName));
+      if (!key) continue; // slotted değilse atla
+
+      const arr = m.get(key)!;
+
+      // hedef slot uygunsa oraya, doluysa ilk boş
+      let target =
+        Number.isFinite(it.slotIndex) && it.slotIndex !== null
+          ? Math.max(0, Math.min(arr.length - 1, Number(it.slotIndex)))
+          : -1;
+
+      if (target >= 0 && arr[target] === undefined) {
+        arr[target] = it;
+        continue;
+      }
+
+      const firstEmpty = arr.findIndex((x) => x === undefined);
+      if (firstEmpty !== -1) {
+        arr[firstEmpty] = it;
+        continue;
+      }
+
+      // tüm kutular doluysa: şimdilik taşma yapmıyoruz
+    }
+
+    return m;
+  }, [items, catById]);
+
   const sectionTitles = useMemo(() => {
     const arr = Array.from(groupedByCategoryName.keys());
-    const priority = ["TÜL PERDE", "FON PERDE", "GÜNEŞLİK"];
+    const priority = ['TÜL PERDE', 'FON PERDE', 'GÜNEŞLİK'];
     const sorted: string[] = [];
     for (const p of priority) {
       if (!arr.find((a) => a.toLowerCase() === p.toLowerCase())) {
@@ -292,10 +349,8 @@ export default function EditOrderPage() {
         sorted.push(arr.find((a) => a.toLowerCase() === p.toLowerCase())!);
       }
     }
-    const others = arr.filter(
-      (a) => !priority.find((p) => p.toLowerCase() === a.toLowerCase())
-    );
-    others.sort((a, b) => a.localeCompare(b, "tr"));
+    const others = arr.filter((a) => !priority.find((p) => p.toLowerCase() === a.toLowerCase()));
+    others.sort((a, b) => a.localeCompare(b, 'tr'));
     return [...sorted, ...others];
   }, [groupedByCategoryName]);
 
@@ -304,35 +359,44 @@ export default function EditOrderPage() {
     [items]
   );
 
+  function LegendDot({ c, label }: { c: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`inline-block h-2.5 w-2.5 rounded-full ${c}`} />
+      {label}
+    </span>
+  )
+}
+
   /* ===== actions ===== */
   const openAddAt = (title: string, index: number) => {
     setSlot({ title, index });
-    const match = categories.find(
-      (c) => normalize(c.name) === normalize(title)
-    );
-    setCatId(match?.id || "");
+    const match = categories.find((c) => normalize(c.name) === normalize(title));
+    setCatId(match?.id || '');
     if (match?.variants?.length) setVarId(match.variants[0].id);
     setQty(1);
     setWidth(0);
     setHeight(0);
-    setLineNote("");
-    setFileDensity(1.0); // reset default 1.0
+    setLineNote('');
+    setFileDensity(1.0);
     setEditingLineId(null);
+    setTargetSlotIndex(index); // hedef kutu
+    setLineStatus('pending');  // ✅ varsayılan
   };
 
   const openQuickFor = (categoryName: string, index: number) => {
-    const cat = categories.find(
-      (c) => normalize(c.name) === normalize(categoryName)
-    );
+    const cat = categories.find((c) => normalize(c.name) === normalize(categoryName));
     setSlot({ title: categoryName, index });
-    setCatId(cat?.id || "");
+    setCatId(cat?.id || '');
     if (cat?.variants?.length) setVarId(cat.variants[0].id);
     setQty(1);
     setWidth(0);
     setHeight(0);
-    setLineNote("");
+    setLineNote('');
     setFileDensity(1.0);
     setEditingLineId(null);
+    setTargetSlotIndex(null); // slotted olmayan
+    setLineStatus('pending');  // ✅ varsayılan
   };
 
   const closeDrawer = () => {
@@ -347,6 +411,9 @@ export default function EditOrderPage() {
     const price = Number(selectedVariant.unitPrice) || 0;
     const d = Number(fileDensity) || 1;
     const sub = price * (((w / 100) * d) || 1) * q;
+
+    const selectedCatName = catById.get(selectedCategory.id)?.name || '';
+    const isSlotted = BOX_COUNTS[normalize(selectedCatName)] != null;
 
     if (editingLineId) {
       setItems((prev) =>
@@ -363,6 +430,8 @@ export default function EditOrderPage() {
                 note: lineNote || null,
                 fileDensity: d,
                 subtotal: sub,
+                slotIndex: isSlotted ? (targetSlotIndex ?? it.slotIndex ?? 0) : null,
+                lineStatus, // ✅ güncelle
               }
             : it
         )
@@ -379,19 +448,20 @@ export default function EditOrderPage() {
         note: lineNote || undefined,
         fileDensity: d,
         subtotal: sub,
+        slotIndex: isSlotted ? (targetSlotIndex ?? 0) : null,
+        lineStatus, // ✅
       };
       setItems((prev) => [...prev, line]);
     }
     closeDrawer();
   };
 
-  const removeLine = (id: string) =>
-    setItems((prev) => prev.filter((i) => i.id !== id));
+  const removeLine = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id));
 
   const editLine = (line: LineItem) => {
     setEditingLineId(line.id);
     setSlot({
-      title: catById.get(line.categoryId)?.name || "Kategori",
+      title: catById.get(line.categoryId)?.name || 'Kategori',
       index: 0,
     });
     setCatId(line.categoryId);
@@ -399,24 +469,45 @@ export default function EditOrderPage() {
     setQty(line.qty);
     setWidth(line.width);
     setHeight(line.height);
-    setLineNote(line.note || "");
+    setLineNote(line.note || '');
     setFileDensity(line.fileDensity || 1.0);
+    setTargetSlotIndex(Number.isFinite(line.slotIndex as any) ? (line.slotIndex as number) : null);
+    setLineStatus(line.lineStatus || 'pending'); // ✅
   };
+
+  // Aynı kategori içinde slot değiş-tokuşu (drag & drop)
+  const swapInCategory = (title: string, from: number, to: number) => {
+    setItems((prev) => {
+      const slots = slottedByCategoryName.get(title) || [];
+      const a = slots[from];
+      const b = slots[to];
+      return prev.map((it) => {
+        if (a && it.id === a.id) return { ...it, slotIndex: to };
+        if (b && it.id === b.id) return { ...it, slotIndex: from };
+        return it;
+      });
+    });
+  };
+
+  // ✅ kart içinden hızlı durum değiştirme
+  const updateLineStatus = (id: string, s: Status) =>
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, lineStatus: s } : it)));
 
   const saveOrder = async () => {
     if (!customerName.trim() || !customerPhone.trim()) {
-      alert("Müşteri adı ve telefon zorunlu.");
+      toast.error('Müşteri adı ve telefon zorunlu.');
       return;
     }
     if (items.length === 0) {
-      alert("En az bir satır ekleyin.");
+      toast.error('En az bir satır ekleyin.');
+
       return;
     }
     setSaving(true);
     try {
       // SADECE DB'de var olan id'ler update edilsin; yeniler create olsun
       const payloadItems = items.map((i) => {
-        const base = {
+        const base: any = {
           categoryId: i.categoryId,
           variantId: i.variantId,
           qty: i.qty,
@@ -425,7 +516,9 @@ export default function EditOrderPage() {
           unitPrice: i.unitPrice,
           fileDensity: i.fileDensity,
           note: i.note ?? null,
-        } as any;
+          slotIndex: Number.isFinite(i.slotIndex as any) ? i.slotIndex : null,
+          lineStatus: i.lineStatus, // ✅ PATCH payload’a ekle
+        };
         if (existingDbItemIds.current.has(i.id)) base.id = i.id;
         return base;
       });
@@ -435,7 +528,7 @@ export default function EditOrderPage() {
       existingDbItemIds.current.forEach((oldId) => {
         if (!currentIds.has(oldId)) deletedIds.push(oldId);
       });
-      const deleteOps = deletedIds.map((x) => ({ id: x, _action: "delete" as const }));
+      const deleteOps = deletedIds.map((x) => ({ id: x, _action: 'delete' as const }));
 
       const payload = {
         customerName,
@@ -446,27 +539,27 @@ export default function EditOrderPage() {
       };
 
       const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        console.error("PATCH /api/orders/:id failed:", txt);
-        alert("Değişiklikler kaydedilemedi.");
+        const txt = await res.text().catch(() => '');
+        console.error('PATCH /api/orders/:id failed:', txt);
+        toast.error('Değişiklikler kaydedilemedi.');
         return;
       }
 
-      alert("Sipariş güncellendi!");
+      toast.success('Sipariş güncellendi!');
       router.refresh?.();
     } finally {
       setSaving(false);
     }
   };
 
-  // Özel bölümler (satırları çek)
-  const storItems = groupedByCategoryName.get("STOR PERDE") || [];
-  const aksesuarItems = groupedByCategoryName.get("AKSESUAR") || [];
+  // Özel bölümler (slotted olmayan)
+  const storItems = useMemo(() => groupedByCategoryName.get('STOR PERDE') || [], [groupedByCategoryName]);
+  const aksesuarItems = useMemo(() => groupedByCategoryName.get('AKSESUAR') || [], [groupedByCategoryName]);
 
   if (loading) return <div className="p-6">Yükleniyor…</div>;
   if (error) return <div className="p-6 text-red-600">Hata: {error}</div>;
@@ -480,7 +573,7 @@ export default function EditOrderPage() {
           <button className="btn" onClick={() => window.print()}>🖨️ Yazdır</button>
           <button className="btn" onClick={() => router.push(`/orders/${orderId}/label`)}>🖨️ Barkod Yazdır</button>
           <button className="btn-secondary disabled:opacity-50" disabled={saving} onClick={saveOrder}>
-            {saving ? "Kaydediliyor…" : "Değişiklikleri Kaydet"}
+            {saving ? 'Kaydediliyor…' : 'Değişiklikleri Kaydet'}
           </button>
           <button className="btn-secondary" onClick={() => router.back()}>Geri</button>
         </div>
@@ -490,7 +583,7 @@ export default function EditOrderPage() {
       <div className="m-auto w-[210mm] min-h-[297mm] print:w-auto print:min-h-[auto]">
         {/* Header – Dinamik profil + header şubeleri */}
         <Header
-          orderSeq={orderSeq ?? "—"}
+          orderSeq={orderSeq ?? '—'}
           customerName={customerName}
           customerPhone={customerPhone}
           status={status}
@@ -499,15 +592,7 @@ export default function EditOrderPage() {
         />
 
         {/* Müşteri alanları (ekranda düzenlenebilir) */}
-        <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
-          {/* <div>
-            <label className="text-sm">Müşteri Adı</label>
-            <input className="input mt-1" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Ad Soyad" />
-          </div>
-          <div>
-            <label className="text-sm">Telefon</label>
-            <input className="input mt-1" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="05xx xxx xx xx" />
-          </div> */}
+        <div className="grid grid-cols-2 gap-3 my-4 print:hidden">
           <div>
             <label className="text-sm">Durum</label>
             <select className="select mt-1" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
@@ -517,38 +602,47 @@ export default function EditOrderPage() {
               <option value="cancelled">İptal</option>
             </select>
           </div>
+          <div className="mt-4 text-[10px] flex gap-4 print:hidden justify-end">
+            <LegendDot c={statusDot.pending} label="Beklemede" />
+            <LegendDot c={statusDot.processing} label="İşlemde" />
+            <LegendDot c={statusDot.completed} label="Tamamlandı" />
+            <LegendDot c={statusDot.cancelled} label="İptal" />
+          </div>
         </div>
 
-        {/* Kategoriler (print grid düzeni) — sadece BOX_COUNTS’ta olanlar */}
-        {sectionTitles.map((title) => {
+        {/* Kategoriler (slotted grid) — sadece BOX_COUNTS’ta olanlar */}
+        {Object.keys(BOX_COUNTS).map((title) => {
           const key = normalize(title);
-          if (!hasBoxCount(title)) return null;
           const boxCount = BOX_COUNTS[key];
-          const lines = groupedByCategoryName.get(title) || [];
+          const slots = slottedByCategoryName.get(title) || Array(boxCount).fill(undefined);
           return (
             <SectionEditable
               key={title}
               title={title}
-              items={lines}
+              slots={slots}
               boxCount={boxCount}
-              visible={lines.length > 0}
               variantById={variantById}
               onAddAt={(idx) => openAddAt(title, idx)}
               onRemove={(id) => removeLine(id)}
               onEdit={(id) => {
                 const line = items.find((x) => x.id === id);
-                if (line) editLine(line);
+                if (line) {
+                  setTargetSlotIndex(Number.isFinite(line.slotIndex as any) ? (line.slotIndex as number) : null);
+                  editLine(line);
+                }
               }}
+              onSwapSlots={(from, to) => swapInCategory(title, from, to)}
+              onStatusChange={updateLineStatus}   // ✅ inline durum
             />
           );
         })}
 
-        {/* Özel bölümler */}
+        {/* Özel bölümler (slotted olmayan) */}
         <SectionQuickPlus
           title="STOR PERDE"
           items={storItems}
           variantById={variantById}
-          onAddAt={(i) => openQuickFor("STOR PERDE", i)}
+          onAddAt={(i) => openQuickFor('STOR PERDE', i)}
           onEdit={(id) => {
             const line = items.find((x) => x.id === id);
             if (line) editLine(line);
@@ -558,7 +652,7 @@ export default function EditOrderPage() {
           title="AKSESUAR"
           items={aksesuarItems}
           variantById={variantById}
-          onAddAt={(i) => openQuickFor("AKSESUAR", i)}
+          onAddAt={(i) => openQuickFor('AKSESUAR', i)}
           onEdit={(id) => {
             const line = items.find((x) => x.id === id);
             if (line) editLine(line);
@@ -594,12 +688,17 @@ export default function EditOrderPage() {
       {/* Drawer */}
       {slot && (
         <div className="fixed inset-0 bg-black/40 z-50 print:hidden" onClick={closeDrawer}>
-          <div className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between mb-3">
               <div className="text-lg font-semibold">
-                {editingLineId ? "Satırı Düzenle" : `${slot.title} - Kutucuk #${slot.index + 1}`}
+                {editingLineId ? 'Satırı Düzenle' : `${slot.title} - Kutucuk #${slot.index + 1}`}
               </div>
-              <button className="btn-secondary" onClick={closeDrawer}>Kapat</button>
+              <button className="btn-secondary" onClick={closeDrawer}>
+                Kapat
+              </button>
             </div>
 
             {/* Kategori & Varyant */}
@@ -608,15 +707,28 @@ export default function EditOrderPage() {
                 <label className="text-sm">Kategori</label>
                 <select className="select mt-1" value={catId} onChange={(e) => setCatId(e.target.value)}>
                   <option value="">Seçin</option>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
                 <label className="text-sm">Varyant</label>
-                <select className="select mt-1" value={varId} onChange={(e) => setVarId(e.target.value)} disabled={!selectedCategory}>
+                <select
+                  className="select mt-1"
+                  value={varId}
+                  onChange={(e) => setVarId(e.target.value)}
+                  disabled={!selectedCategory}
+                >
                   {!selectedCategory && <option>Önce kategori seçin</option>}
                   {selectedCategory && selectedCategory.variants.length === 0 && <option>Varyant yok</option>}
-                  {selectedCategory?.variants.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  {selectedCategory?.variants.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -625,15 +737,36 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div>
                 <label className="text-sm">Adet</label>
-                <input className="input mt-1 text-right" type="number" min={1} step={1} value={qty} onChange={(e) => setQty(parseInt(e.target.value || "1"))}/>
+                <input
+                  className="input mt-1 text-right"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={qty}
+                  onChange={(e) => setQty(parseInt(e.target.value || '1'))}
+                />
               </div>
               <div>
                 <label className="text-sm">En (cm)</label>
-                <input className="input mt-1 text-right" type="number" min={0} step={1} value={width} onChange={(e) => setWidth(parseInt(e.target.value || "0"))}/>
+                <input
+                  className="input mt-1 text-right"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={width}
+                  onChange={(e) => setWidth(parseInt(e.target.value || '0'))}
+                />
               </div>
               <div>
                 <label className="text-sm">Boy (cm)</label>
-                <input className="input mt-1 text-right" type="number" min={0} step={1} value={height} onChange={(e) => setHeight(parseInt(e.target.value || "0"))}/>
+                <input
+                  className="input mt-1 text-right"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={height}
+                  onChange={(e) => setHeight(parseInt(e.target.value || '0'))}
+                />
               </div>
             </div>
 
@@ -641,33 +774,78 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-sm">File Sıklığı</label>
-                <select className="select mt-1" value={String(fileDensity)} onChange={(e) => setFileDensity(parseFloat(e.target.value))}>
-                  <option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option>
-                  <option value="2.5">2.5x</option><option value="3">3.0x</option>
+                <select
+                  className="select mt-1"
+                  value={String(fileDensity)}
+                  onChange={(e) => setFileDensity(parseFloat(e.target.value))}
+                >
+                  <option value="1">1.0x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2.0x</option>
+                  <option value="2.5">2.5x</option>
+                  <option value="3">3.0x</option>
                 </select>
               </div>
               <div>
                 <label className="text-sm">Birim Fiyat</label>
-                <input className="input mt-1 text-right" value={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : ""} readOnly placeholder="—" />
+                <input
+                  className="input mt-1 text-right"
+                  value={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : ''}
+                  readOnly
+                  placeholder="—"
+                />
               </div>
+            </div>
+
+            {/* ✅ Satır Durumu */}
+            <div className="mb-4">
+              <label className="text-sm">Satır Durumu</label>
+              <select
+                className="select mt-1 w-full"
+                value={lineStatus}
+                onChange={(e) => setLineStatus(e.target.value as Status)}
+              >
+                <option value="pending">Beklemede</option>
+                <option value="processing">İşlemde</option>
+                <option value="completed">Tamamlandı</option>
+                <option value="cancelled">İptal</option>
+              </select>
             </div>
 
             {/* Ara Toplam + Not */}
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="text-sm">Ara Toplam</label>
-                <input className="input mt-1 text-right" value={selectedVariant ? fmt(previewSubtotal) : ""} readOnly placeholder="—" />
+                <input
+                  className="input mt-1 text-right"
+                  value={selectedVariant ? fmt(previewSubtotal) : ''}
+                  readOnly
+                  placeholder="—"
+                />
               </div>
               <div>
                 <label className="text-sm">Satır Notu</label>
-                <input className="input mt-1" value={lineNote} onChange={(e) => setLineNote(e.target.value)} placeholder="Bu satıra özel not…" />
+                <input
+                  className="input mt-1"
+                  value={lineNote}
+                  onChange={(e) => setLineNote(e.target.value)}
+                  placeholder="Bu satıra özel not…"
+                />
               </div>
             </div>
 
             <div className="flex gap-2">
-              <button className="btn" onClick={addOrUpdateLine}>{editingLineId ? "Kaydet" : "Kutucuğa Ekle"}</button>
+              <button className="btn" onClick={addOrUpdateLine}>
+                {editingLineId ? 'Kaydet' : 'Kutucuğa Ekle'}
+              </button>
               {editingLineId && (
-                <button className="btn-secondary" onClick={() => { if (editingLineId) removeLine(editingLineId); closeDrawer(); }}>
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    if (editingLineId) removeLine(editingLineId);
+                    closeDrawer();
+                  }}
+                >
                   Satırı Sil
                 </button>
               )}
@@ -679,13 +857,38 @@ export default function EditOrderPage() {
       {/* Print styles */}
       <style jsx global>{`
         @media print {
-          @page { size: A4 portrait; margin: 0; }
-          html, body { background: white !important; }
-          .btn, .btn-secondary, .print\\:hidden { display: none !important; }
-          input, select, textarea { border: none !important; outline: none !important; }
+          @page {
+            size: A4 portrait;
+            margin: 0;
+          }
+          html,
+          body {
+            background: white !important;
+          }
+          .btn,
+          .btn-secondary,
+          .print\\:hidden {
+            display: none !important;
+          }
+          input,
+          select,
+          textarea {
+            border: none !important;
+            outline: none !important;
+          }
         }
-        input, select, textarea { outline: none !important; box-shadow: none !important; }
-        input:focus, select:focus, textarea:focus { outline: none !important; box-shadow: none !important; }
+        input,
+        select,
+        textarea {
+          outline: none !important;
+          box-shadow: none !important;
+        }
+        input:focus,
+        select:focus,
+        textarea:focus {
+          outline: none !important;
+          box-shadow: none !important;
+        }
       `}</style>
     </div>
   );
@@ -708,79 +911,52 @@ function Header({
   profile: Profile | null;
   headerBranches: Branch[];
 }) {
-  const seqStr =
-    typeof orderSeq === "number"
-      ? orderSeq.toString().padStart(6, "0")
-      : orderSeq.toString();
-
-  const statusLabelMap: Record<Status, string> = {
-    pending: "Beklemede",
-    processing: "İşlemde",
-    completed: "Tamamlandı",
-    cancelled: "İptal",
-  };
+  const seqStr = typeof orderSeq === 'number' ? orderSeq.toString().padStart(6, '0') : orderSeq.toString();
 
   return (
     <div className="flex items-start justify-between">
       <div>
         <div className="flex items-center gap-3">
-          
-          <h1 className="text-3xl font-bold tracking-wide">
-            {profile?.companyName || "—"}
-          </h1>
+          <h1 className="text-3xl font-bold tracking-wide">{profile?.companyName || '—'}</h1>
         </div>
 
         <div className="mt-2 text-xs leading-5">
           {headerBranches.map((b) => (
             <div key={b.id} className="mt-1">
-              <b>{b.code == 'MAIN' ? 'Merkez' : ''}:</b>
+              <b>{b.code == 'MAIN' ? 'Merkez' : b.code}:</b>
               <br />
-              <span>{b.address || "—"}</span>
-              {b.phone ? <div><b>Gsm:</b> {b.phone}</div> : null}
+              <span>{b.address || '—'}</span>
+              {b.phone ? (
+                <div>
+                  <b>Gsm:</b> {b.phone}
+                </div>
+              ) : null}
             </div>
           ))}
           {profile?.instagram && (
-            <div className="mt-1 flex items-center gap-1">
-              @{profile.instagram.replace(/^@/, "")}
-            </div>
+            <div className="mt-1 flex items-center gap-1">@{profile.instagram.replace(/^@/, '')}</div>
           )}
-          
         </div>
       </div>
 
       <div className="w-[300px] text-left">
         <div className="mb-3">
-          {/* Markanızın sabit görseli varsa /public/brillant.png gibi bırakabilirsiniz */}
-          <img
-            src={profile?.logoUrl || ""}
-            alt=""
-            height={60}
-            style={{ width: "100%", height: "150px" }}
-          />
+          <img src={profile?.logoUrl || ''} alt="" height={60} style={{ width: '100%', height: '150px' }} />
         </div>
         <div className="text-xs flex justify-between">
           <b>Müşteri Adı:</b>
-          <span className="inline-block min-w-[120px] text-right">
-            {customerName || "—"}
-          </span>
+          <span className="inline-block min-w-[120px] text-right">{customerName || '—'}</span>
         </div>
         <div className="text-xs mt-1 flex justify-between">
           <b>Telefon:</b>
-          <span className="inline-block min-w-[140px] text-right">
-            {customerPhone || "—"}
-          </span>
+          <span className="inline-block min-w-[140px] text-right">{customerPhone || '—'}</span>
         </div>
         <div className="text-xs mt-1 flex justify-between">
           <b>Durum:</b>
-          <span className="inline-block min-w-[140px] text-right">
-            {statusLabelMap[status]}
-          </span>
+          <span className="inline-block min-w-[140px] text-right">{statusLabelMap[status]}</span>
         </div>
         <div className="mt-3 font-semibold">
-          SIRA No:{" "}
-          <span className="inline-block min-w-[80px] text-red-700">
-            {seqStr}
-          </span>
+          SIRA No: <span className="inline-block min-w-[80px] text-red-700">{seqStr}</span>
         </div>
       </div>
     </div>
@@ -789,35 +965,54 @@ function Header({
 
 function SectionEditable({
   title,
-  items,
+  slots, // (LineItem | undefined)[]
   boxCount,
   variantById,
   onAddAt,
   onRemove,
   onEdit,
-  visible,
+  onSwapSlots,
+  onStatusChange,
 }: {
   title: string;
-  items: LineItem[];
+  slots: (LineItem | undefined)[];
   boxCount: number;
   variantById: Map<string, Variant>;
   onAddAt: (index: number) => void;
   onRemove: (id: string) => void;
   onEdit: (id: string) => void;
-  visible: boolean;
+  onSwapSlots: (from: number, to: number) => void;
+  onStatusChange: (id: string, s: Status) => void;
 }) {
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+
+  const handleDragStart = (i: number) => () => setDragIdx(i);
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+  const handleDrop = (i: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === i) return;
+    onSwapSlots(dragIdx, i);
+    setDragIdx(null);
+  };
+
   return (
     <div className="mt-5 break-inside-avoid">
       <div className="font-semibold mb-2 uppercase">{title}</div>
-      <div className={`grid grid-cols-5 gap-x-6 gap-y-3`}>
+      <div className="grid grid-cols-5 gap-x-6 gap-y-3">
         {Array.from({ length: boxCount }).map((_, i) => {
-          const it = items[i];
+          const it = slots[i];
           const variant = it ? variantById.get(it.variantId) : null;
 
           return (
             <div
               key={i}
-              className="min-h-[60px] border border-black/70 p-2 border-l-0 border-b-0 relative group"
+              className={`min-h-[60px] border border-black/70 p-2 border-l-0 border-b-0 relative group ${
+                dragIdx === i ? 'bg-black/5' : ''
+              }`}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop(i)}
             >
               {!it ? (
                 <button
@@ -827,13 +1022,32 @@ function SectionEditable({
                   + Ekle
                 </button>
               ) : (
-                <div className="text-[8px] leading-3">
-                  <div className="font-medium">
-                    <b>Tür :</b> {variant?.name || "—"}
+                <div
+                  className={`text-[8px] leading-3 ${statusDot[it.lineStatus]}`}
+                  draggable
+                  onDragStart={handleDragStart(i)}
+                  title="Sürükleyip başka kutuya bırakın"
+                >
+                  {/* Sağ üstte durum göstergesi + hızlı değişim */}
+                  <div className="absolute right-1 top-1 flex items-center gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot[it.lineStatus]}`} />
+                    <select
+                      className="border text-[10px] rounded px-1 py-0.5 bg-white"
+                      value={it.lineStatus}
+                      onChange={(e) => onStatusChange(it.id, e.target.value as Status)}
+                    >
+                      <option value="pending">Beklemede</option>
+                      <option value="processing">İşlemde</option>
+                      <option value="completed">Tamamlandı</option>
+                      <option value="cancelled">İptal</option>
+                    </select>
                   </div>
+
+                  
                   <div>
-                    <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×
-                    {it.height} cm
+                    <b>Tür :</b> {variant?.name || '—'}
+                    <br />
+                    <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×{it.height} cm
                     <br />
                     <b>File Sıklığı :</b> {it.fileDensity}x
                     <br />
@@ -841,16 +1055,12 @@ function SectionEditable({
                     <br />
                     <b>Tutar :</b> {fmt(Number(it.subtotal))}
                   </div>
-                  {it.note && (
-                    <div className="text-[10px] text-gray-700 mt-1">
-                      Not: {it.note}
-                    </div>
-                  )}
-                  <div className="absolute right-1 top-1 flex gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
-                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onEdit(it.id)}>
+                  {it.note && <div className="text-[10px] text-gray-700 mt-1">Not: {it.note}</div>}
+                  <div className="absolute right-1 bottom-1 flex gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
+                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onEdit(it.id)}>
                       Düzenle
                     </button>
-                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onRemove(it.id)}>
+                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onRemove(it.id)}>
                       Sil
                     </button>
                   </div>
@@ -892,12 +1102,10 @@ function SectionQuickPlus({
                 type="button"
                 onClick={() => (it ? onEdit(it.id) : onAddAt(i))}
                 className="input flex-1 h-[23px] rounded-none border-0 border-b border-[#999] p-0 text-sm text-left pl-2 hover:bg-black/5"
-                title={it ? "Düzenle" : "Ekle"}
+                title={it ? 'Düzenle' : 'Ekle'}
               >
                 {it
-                  ? `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${
-                      it.height
-                    } cm • ${fmt(it.subtotal)}`
+                  ? `${variant?.name ?? '—'} • ${it.qty} adet • ${it.width}×${it.height} cm • ${fmt(it.subtotal)}`
                   : <span className="print:hidden">+ Ekle</span>}
               </button>
             </div>

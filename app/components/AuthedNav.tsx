@@ -42,7 +42,7 @@ export function AuthedNav() {
 
   const items: NavItem[] = [
     {
-      href: '/admin/company',
+      href: '/company',
       label: 'Şirketim',
       icon: (
         <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>
@@ -99,12 +99,12 @@ export function AuthedNav() {
         <NavButton key={it.href} item={it} active={pathname.startsWith(it.href)} />
       ))}
 
-      {/* {isSuperAdmin && (
+      {isSuperAdmin && (
         <>
           <span className="hidden sm:inline text-neutral-300">·</span>
           <NavButton item={adminItem} active={pathname.startsWith('/admin')} />
         </>
-      )} */}
+      ) }
     </nav>
   )
 }

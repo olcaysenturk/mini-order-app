@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 
 type Dealer = {
   id: string
@@ -102,7 +103,7 @@ export default function DealersView({
         return { ...d, items: d.items.map(it => it.id === id ? { ...it, isActive: !current } : it) }
       })
     } catch {
-      alert('İşlem başarısız')
+      toast.error('İşlem başarısız')
     }
   }
 
@@ -121,7 +122,7 @@ export default function DealersView({
           defaultValue={q}
           onChange={(e) => onSearchChange(e.target.value)}
           className="border rounded-lg px-3 py-2 w-full md:w-80"
-          placeholder="Ara: ad, kod, telefon, e-posta"
+          placeholder="Arama yap"
         />
         <select
           value={active}

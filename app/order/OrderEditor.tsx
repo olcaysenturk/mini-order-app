@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { useOrderSetupStore } from '@/app/lib/orderSetupStore'
+import { toast } from 'sonner'
 
 /* ========= Types ========= */
-type Status = 'pending' | 'processing' | 'completed' | 'cancelled'
+type Status = 'processing' | 'pending' | 'completed' | 'cancelled'
 type PaymentMethod = 'CASH' | 'TRANSFER' | 'CARD'
 
 type Profile = {
@@ -34,6 +35,10 @@ type Branch = {
 
 type Variant = { id: string; name: string; unitPrice: number }
 type Category = { id: string; name: string; variants: Variant[] }
+
+/** 🔔 slotIndex YOK — sadece UI sırası / ekleme sırası
+ * lineStatus: satırın görsel durumu (API'ye de gidiyor)
+ */
 type LineItem = {
   id: string
   categoryId: string
@@ -45,16 +50,32 @@ type LineItem = {
   note?: string | null
   fileDensity: number
   subtotal: number
+  lineStatus: Status
 }
+
 type InsertSlot = { title: string; index: number } | null
 
 /* ========= Helpers ========= */
 const uid = () => Math.random().toString(36).slice(2, 10)
 const fmt = (n: number) =>
   new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+
 const BOX_COUNTS: Record<string, number> = { 'TÜL PERDE': 10, 'FON PERDE': 5, 'GÜNEŞLİK': 5 }
 const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR')
 const hasBoxCount = (name: string) => Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name))
+
+const statusLabel: Record<Status, string> = {
+  processing: 'İşlemde',
+  pending: 'Beklemede',
+  completed: 'Tamamlandı',
+  cancelled: 'İptal',
+}
+const statusDot: Record<Status, string> = {
+  pending: 'bg-amber-500',
+  processing: 'bg-blue-500',
+  completed: 'bg-emerald-600',
+  cancelled: 'bg-rose-600',
+}
 
 /* ========= API ========= */
 async function fetchCategories(): Promise<Category[]> {
@@ -63,6 +84,7 @@ async function fetchCategories(): Promise<Category[]> {
   return res.json()
 }
 
+/* ========= Component ========= */
 export default function OrderEditor({
   profile,
   branches,
@@ -83,7 +105,7 @@ export default function OrderEditor({
   // order state
   const [items, setItems] = useState<LineItem[]>([])
   const [orderNote, setOrderNote] = useState('')
-  const [status, setStatus] = useState<Status>('pending')
+  const [status, setStatus] = useState<Status>('processing')
 
   // selection (setup → store’dan)
   const [dealerId, setDealerId] = useState('')
@@ -98,7 +120,7 @@ export default function OrderEditor({
   const [discountAmount, setDiscountAmount] = useState(0)
 
   // 💳 ödeme
-  const [paidAmount, setPaidAmount] = useState(0) // alınan ödeme
+  const [paidAmount, setPaidAmount] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH')
 
   // drawer
@@ -111,6 +133,7 @@ export default function OrderEditor({
   const [lineNote, setLineNote] = useState('')
   const [fileDensity, setFileDensity] = useState(1.0)
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
+  const [lineStatus, setLineStatus] = useState<Status>('processing')
 
   /* ==== setup’dan prefill ==== */
   useEffect(() => {
@@ -128,7 +151,6 @@ export default function OrderEditor({
     setCustomerName(setup.customerName || '')
     setCustomerPhone(setup.customerPhone || '')
     setOrderNote(setup.note || '')
-    // setup'ta bir ön ödeme/metot tutuyorsan burada setPaidAmount / setPaymentMethod yapabilirsin.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setup])
 
@@ -161,12 +183,8 @@ export default function OrderEditor({
   }, [selectedVariant, qty, width, fileDensity])
 
   const catById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories])
-  const variantById = useMemo(() => {
-    const m = new Map<string, Variant>()
-    for (const c of categories) for (const v of c.variants) m.set(v.id, v)
-    return m
-  }, [categories])
 
+  // Grup: kategori adına göre; render sırası eklenme sırası
   const groupedByCategoryName = useMemo(() => {
     const g = new Map<string, LineItem[]>()
     for (const it of items) {
@@ -182,10 +200,10 @@ export default function OrderEditor({
     const priority = ['TÜL PERDE', 'FON PERDE', 'GÜNEŞLİK']
     const sorted: string[] = []
     for (const p of priority) {
-      const hit = arr.find(a => a.toLowerCase() === p.toLowerCase())
+      const hit = arr.find(a => normalize(a) === normalize(p))
       sorted.push(hit ?? p)
     }
-    const others = arr.filter(a => !priority.some(p => p.toLowerCase() === a.toLowerCase()))
+    const others = arr.filter(a => !priority.some(p => normalize(p) === normalize(a)))
     others.sort((a, b) => a.localeCompare(b, 'tr'))
     return [...sorted, ...others]
   }, [groupedByCategoryName])
@@ -199,7 +217,6 @@ export default function OrderEditor({
   }, [subTotal, discountPercent, discountAmount])
   const grandTotal = useMemo(() => Math.max(0, subTotal - computedDiscount), [subTotal, computedDiscount])
 
-  // 💳 kalan borç
   const remaining = useMemo(
     () => Math.max(0, grandTotal - (Number(paidAmount) || 0)),
     [grandTotal, paidAmount]
@@ -207,17 +224,21 @@ export default function OrderEditor({
 
   /* ==== actions ==== */
   const openAddAt = (title: string, index: number) => {
+    // index sadece başlıkta gösteriliyor
     setSlot({ title, index })
-    const match = categories.find(c => c.name.toLowerCase() === title.toLowerCase())
+    const match = categories.find(c => normalize(c.name) === normalize(title))
     setCatId(match?.id || '')
     if (match?.variants?.length) setVarId(match.variants[0].id)
-    setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0); setEditingLineId(null)
+    setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0)
+    setEditingLineId(null); setLineStatus('processing')
   }
   const openQuickFor = (categoryName: string, index: number) => {
-    const cat = categories.find(c => c.name.trim().toLowerCase() === categoryName.trim().toLowerCase())
+    const cat = categories.find(c => normalize(c.name) === normalize(categoryName))
     setSlot({ title: categoryName, index })
-    setCatId(cat?.id || ''); if (cat?.variants?.length) setVarId(cat.variants[0].id)
-    setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0); setEditingLineId(null)
+    setCatId(cat?.id || '')
+    if (cat?.variants?.length) setVarId(cat.variants[0].id)
+    setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0)
+    setEditingLineId(null); setLineStatus('processing')
   }
   const closeDrawer = () => { setSlot(null); setEditingLineId(null) }
 
@@ -228,83 +249,50 @@ export default function OrderEditor({
     const price = Number(selectedVariant.unitPrice) || 0
     const d = Number(fileDensity) || 1
     const sub = price * ((w / 100) * d || 1) * q
+
     if (editingLineId) {
       setItems(prev => prev.map(it => it.id === editingLineId
-        ? { ...it, categoryId: selectedCategory.id, variantId: selectedVariant.id, qty: q, width: w, height, unitPrice: price, note: lineNote || null, fileDensity: d, subtotal: sub }
+        ? {
+            ...it,
+            categoryId: selectedCategory.id,
+            variantId: selectedVariant.id,
+            qty: q, width: w, height,
+            unitPrice: price, note: lineNote || null, fileDensity: d, subtotal: sub,
+            lineStatus,
+          }
         : it))
     } else {
-      setItems(prev => [...prev, { id: uid(), categoryId: selectedCategory.id, variantId: selectedVariant.id, qty: q, width: w, height, unitPrice: price, note: lineNote || undefined, fileDensity: d, subtotal: sub }])
+      const newItem: LineItem = {
+        id: uid(),
+        categoryId: selectedCategory.id,
+        variantId: selectedVariant.id,
+        qty: q, width: w, height,
+        unitPrice: price, note: lineNote || undefined, fileDensity: d, subtotal: sub,
+        lineStatus,
+      }
+      setItems(prev => [...prev, newItem])
     }
     closeDrawer()
   }
 
   const removeLine = (id: string) => setItems(prev => prev.filter(i => i.id !== id))
   const editLine = (line: LineItem) => {
-    setEditingLineId(line.id); setSlot({ title: catById.get(line.categoryId)?.name || 'Kategori', index: 0 })
+    setEditingLineId(line.id)
+    setSlot({
+      title: catById.get(line.categoryId)?.name || 'Kategori',
+      index: 0, // sadece görsel
+    })
     setCatId(line.categoryId); setVarId(line.variantId); setQty(line.qty); setWidth(line.width); setHeight(line.height)
-    setLineNote(line.note || ''); setFileDensity(line.fileDensity || 1.0)
+    setLineNote(line.note || ''); setFileDensity(line.fileDensity || 1.0); setLineStatus(line.lineStatus || 'processing')
   }
 
-  const [savingOrder, setSavingOrder] = useState(false)
-  const saveOrder = async () => {
-    if (!customerName.trim() || !customerPhone.trim()) { alert('Müşteri adı ve telefon zorunlu.'); return }
-    if (items.length === 0) { alert('En az bir satır ekleyin.'); return }
-    setSavingOrder(true)
-    try {
-      const payload: any = {
-        dealerId: dealerId,                  // backend Branch doğrulaması yapıyor
-        customerId: selectedCustomerId ?? undefined,
-        customerName, customerPhone,
-        note: (orderNote || ''),
-        status,
-        discount: computedDiscount,
-        items: items.map(i => ({
-          categoryId: i.categoryId, variantId: i.variantId, qty: i.qty,
-          width: i.width, height: i.height, unitPrice: i.unitPrice,
-          note: i.note ?? null, fileDensity: i.fileDensity,
-        })),
-      }
+  // satır durumunu inline güncelle (kutucuğun içindeki select’ten)
+  const updateLineStatus = (id: string, s: Status) =>
+    setItems(prev => prev.map(it => (it.id === id ? { ...it, lineStatus: s } : it)))
 
-      // 1) Siparişi oluştur
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        console.error('POST /api/orders failed:', await res.text().catch(()=>'')); 
-        alert('Sipariş kaydedilemedi')
-        return
-      }
-      const created = await res.json()
-
-      // 2) Ön ödeme varsa — ayrı endpoint ile kaydet
-      if ((Number(paidAmount) || 0) > 0) {
-        const payRes = await fetch(`/api/orders/${created.id}/payments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            amount: Number(paidAmount),
-            method: paymentMethod, // 'CASH' | 'TRANSFER' | 'CARD'
-          }),
-        })
-        if (!payRes.ok) {
-          console.error('POST /api/orders/:id/payments failed:', await payRes.text().catch(()=>'')) 
-          alert('Sipariş oluşturuldu, ancak ödeme kaydı eklenemedi. Ödemeyi sipariş detayından ekleyebilirsiniz.')
-        }
-      }
-
-      alert('Sipariş kaydedildi!')
-      clearSetup()
-      router.push('/orders')
-    } finally { setSavingOrder(false) }
-  }
-
-  // özel bölümler
-  const storItems = groupedByCategoryName.get('STOR PERDE') || []
-  const aksesuarItems = groupedByCategoryName.get('AKSESUAR') || []
+  // özel bölümler (kutusuz)
+  const storItems = items.filter(i => normalize(catById.get(i.categoryId)?.name || '') === 'STOR PERDE')
+  const aksesuarItems = items.filter(i => normalize(catById.get(i.categoryId)?.name || '') === 'AKSESUAR')
 
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
@@ -334,48 +322,56 @@ export default function OrderEditor({
           headerBranches={headerBranches}
         />
 
-        {/* Kategoriler */}
+        {/* Kategoriler (kutulu) — eklenme sırasına göre doldur */}
         {sectionTitles.map((title) => {
           const key = normalize(title)
           const visible = hasBoxCount(title)
           if (!visible) return null
+
           const boxCount = BOX_COUNTS[key]
-          const lines = groupedByCategoryName.get(title) || []
+          const lines = (groupedByCategoryName.get(title) || []) as LineItem[]
+          const catIdForTitle =
+            lines[0]?.categoryId ??
+            categories.find(c => normalize(c.name) === key)?.id ??
+            ''
+
           return (
             <SectionEditable
               key={title}
               title={title}
+              categoryId={catIdForTitle}
               items={lines}
               boxCount={boxCount}
-              variantById={variantById}
+              catById={catById}
               onAddAt={(i) => openAddAt(title, i)}
               onRemove={removeLine}
               onEdit={(id) => { const line = items.find(x => x.id === id); if (line) editLine(line) }}
+              onStatusChange={updateLineStatus}
             />
           )
         })}
 
-        {/* STOR / AKSESUAR */}
+        {/* STOR / AKSESUAR (satır mantığı—kutusuz; eklenme sırasına göre) */}
         <SectionQuickPlus
           title="STOR PERDE"
           items={storItems}
-          variantById={variantById}
+          catById={catById}
           onAddAt={(i) => openQuickFor('STOR PERDE', i)}
           onEdit={(id) => { const line = items.find(x => x.id === id); if (line) editLine(line) }}
         />
         <SectionQuickPlus
           title="AKSESUAR"
           items={aksesuarItems}
-          variantById={variantById}
+          catById={catById}
           onAddAt={(i) => openQuickFor('AKSESUAR', i)}
           onEdit={(id) => { const line = items.find(x => x.id === id); if (line) editLine(line) }}
         />
 
         {/* Not & Toplamlar */}
-        <div className="grid grid-cols-3 gap-4 mt-6">
-          <div className="col-span-2">
+        <div className="grid grid-cols-2 gap-4 mt-6">
+          <div className="col-span-1">
             <div className="text-sm font-semibold">Sipariş Notu</div>
-            <textarea className="input mt-1 min-h-[125px] w-full" value={orderNote} onChange={(e) => setOrderNote(e.target.value)} />
+            <textarea className="input mt-1 min-h-[227px] w-full" value={orderNote} onChange={(e) => setOrderNote(e.target.value)} />
           </div>
           <Totals
             subTotal={subTotal}
@@ -398,6 +394,14 @@ export default function OrderEditor({
           ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>. MÜŞTERİDEN
           KAYNAKLI HATALI ÖLÇÜLERDE <b>TERZİ ÜCRETİ ALINMAKTADIR</b>.
         </div>
+
+        {/* Durum efsanesi (legend) */}
+        <div className="mt-4 text-[10px] flex gap-4 print:hidden">
+          <LegendDot c={statusDot.pending} label="Beklemede" />
+          <LegendDot c={statusDot.processing} label="İşlemde" />
+          <LegendDot c={statusDot.completed} label="Tamamlandı" />
+          <LegendDot c={statusDot.cancelled} label="İptal" />
+        </div>
       </div>
 
       {/* Drawer */}
@@ -405,7 +409,9 @@ export default function OrderEditor({
         <div className="fixed inset-0 bg-black/40 z-50 print:hidden" onClick={closeDrawer}>
           <div className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto" onClick={(e)=>e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <div className="text-lg font-semibold">{editingLineId ? 'Satırı Düzenle' : `${slot.title} - Kutucuk #${slot.index + 1}`}</div>
+              <div className="text-lg font-semibold">
+                {editingLineId ? 'Satırı Düzenle' : `${slot.title} - Kutucuk #${slot.index + 1}`}
+              </div>
               <button className="btn-secondary" onClick={closeDrawer}>Kapat</button>
             </div>
 
@@ -450,6 +456,17 @@ export default function OrderEditor({
               </div>
             </div>
 
+            {/* Satır Durumu */}
+            <div className="mb-4">
+              <label className="text-sm">Satır Durumu</label>
+              <select className="select mt-1 w-full" value={lineStatus} onChange={(e)=>setLineStatus(e.target.value as Status)}>
+                <option value="pending">Beklemede</option>
+                <option value="processing">İşlemde</option>
+                <option value="completed">Tamamlandı</option>
+                <option value="cancelled">İptal</option>
+              </select>
+            </div>
+
             {/* Ara Toplam + Not */}
             <div className="mb-4 grid grid-cols-2 gap-3">
               <div>
@@ -475,8 +492,63 @@ export default function OrderEditor({
       )}
 
       <div className="print:hidden mt-4 mb-4 px-4 py-4 flex items-center justify-end gap-3">
-        <button className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700" disabled={savingOrder} onClick={saveOrder}>
-          {savingOrder ? 'Kaydediliyor…' : 'Siparişi Kaydet'}
+        <button
+          className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
+          disabled={false}
+          onClick={async () => {
+            // ✅ Kaydet
+            if (!customerName.trim() || !customerPhone.trim()) { toast.error("Müşteri adı ve telefon zorunlu."); return }
+            if (items.length === 0) { toast.error("En az bir satır ekleyin."); return }
+
+            // payload — lineStatus artık gönderiliyor
+            const payload: any = {
+              dealerId, // (veya branchId kullanıyorsanız ona geçin)
+              customerId: selectedCustomerId ?? undefined,
+              customerName, customerPhone, note: (orderNote || ''), status,
+              discount: computedDiscount,
+              items: items.map(i => ({
+                categoryId: i.categoryId,
+                variantId: i.variantId,
+                qty: i.qty,
+                width: i.width,
+                height: i.height,
+                unitPrice: i.unitPrice,
+                note: i.note ?? null,
+                fileDensity: i.fileDensity,
+                lineStatus: i.lineStatus, // ✅ <-- GÖNDER
+              })),
+            }
+
+            try {
+              const res = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(payload)
+              })
+              if (!res.ok) {
+                console.error('POST /api/orders failed:', await res.text().catch(()=>'')); 
+                toast.error('Sipariş kaydedilemedi')
+                return
+              }
+              const created = await res.json()
+
+              if ((Number(paidAmount) || 0) > 0) {
+                const payRes = await fetch(`/api/orders/${created.id}/payments`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                  body: JSON.stringify({ amount: Number(paidAmount), method: paymentMethod }),
+                })
+                if (!payRes.ok) {
+                  console.error('POST /api/orders/:id/payments failed:', await payRes.text().catch(()=>'')) 
+                  toast.error('Sipariş oluşturuldu, ancak ödeme kaydı eklenemedi. Ödemeyi sipariş detayından ekleyebilirsiniz.')
+                }
+              }
+              toast.success('Sipariş kaydedildi')
+              clearSetup(); router.push('/orders')
+            } catch { toast.error('Sunucu hatası') }
+          }}
+        >
+          Siparişi Kaydet
         </button>
       </div>
 
@@ -567,36 +639,82 @@ function Header({
   )
 }
 
-function SectionEditable({ title, items, boxCount, variantById, onAddAt, onRemove, onEdit }: {
-  title: string; items: LineItem[]; boxCount: number; variantById: Map<string, Variant>;
-  onAddAt: (index: number) => void; onRemove: (id: string) => void; onEdit: (id: string) => void;
+function LegendDot({ c, label }: { c: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`inline-block h-2.5 w-2.5 rounded-full ${c}`} />
+      {label}
+    </span>
+  )
+}
+
+/** Kutulu bölüm: eklenme sırası + inline durum */
+function SectionEditable({
+  title, categoryId, items, boxCount, catById,
+  onAddAt, onRemove, onEdit, onStatusChange,
+}: {
+  title: string
+  categoryId: string
+  items: LineItem[]
+  boxCount: number
+  catById: Map<string, Category>
+  onAddAt: (index: number) => void
+  onRemove: (id: string) => void
+  onEdit: (id: string) => void
+  onStatusChange: (id: string, s: Status) => void
 }) {
+  // eklenme sırasına göre ilk boxCount kadarını al
+  const ordered = items.slice(0, boxCount)
+
   return (
     <div className="mt-5 break-inside-avoid">
       <div className="mb-2 font-semibold uppercase">{title}</div>
       <div className="grid grid-cols-5 gap-x-6 gap-y-3">
         {Array.from({ length: boxCount }).map((_, i) => {
-          const it = items[i]; const variant = it ? variantById.get(it.variantId) : null
+          const it = ordered[i] || null
+          const variantName = it
+            ? (catById.get(it.categoryId)?.variants?.find(v => v.id === it.variantId)?.name ?? '—')
+            : null
+
           return (
-            <div key={i} className="relative min-h-[80px] border border-black/70 border-l-0 border-b-0 p-2 group">
+            <div
+              key={i}
+              className="relative min-h-[86px] border border-black/70 border-l-0 border-b-0 p-2 group"
+            >
               {!it ? (
                 <button
                   className="absolute inset-0 flex h-full w-full items-center justify-center text-sm text-gray-600 hover:bg-black/5 hover:text-black print:hidden"
                   onClick={() => onAddAt(i)}
+                  title="Bu kutuya ekle"
                 >
                   + Ekle
                 </button>
               ) : (
-                <div className="text-[8px] leading-3">
-                  <div className="font-medium"><b>Tür :</b> {variant?.name || '—'}</div>
+                <div className="text-[9px] leading-3">
+                  {/* Üst sağ: durum rozeti + hızlı select */}
+                  <div className="absolute right-1 top-1 flex items-center gap-1 print:hidden">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot[it.lineStatus]}`} />
+                    <select
+                      className="border text-[10px] rounded px-1 py-0.5 bg-white"
+                      value={it.lineStatus}
+                      onChange={(e)=>onStatusChange(it.id, e.target.value as Status)}
+                    >
+                      <option value="pending">Beklemede</option>
+                      <option value="processing">İşlemde</option>
+                      <option value="completed">Tamamlandı</option>
+                      <option value="cancelled">İptal</option>
+                    </select>
+                  </div>
+
+                  <div className="font-medium pr-24"><b>Tür :</b> {variantName}</div>
                   <div>
                     <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×{it.height} cm<br/>
-                    <b>File Sıklığı :</b> {it.fileDensity}x<br/>
-                    <b>Birim :</b> {fmt(Number(it.unitPrice))}<br/>
+                    <b>File :</b> {it.fileDensity}x · <b>Birim :</b> {fmt(Number(it.unitPrice))}<br/>
                     <b>Tutar :</b> {fmt(Number(it.subtotal))}
                   </div>
                   {it.note && <div className="mt-1 text-[10px] text-gray-700">Not: {it.note}</div>}
-                  <div className="absolute right-1 top-1 flex opacity-0 transition group-hover:opacity-100 print:hidden">
+
+                  <div className="absolute right-1 bottom-1 flex opacity-0 transition group-hover:opacity-100 print:hidden">
                     <button className="px-1 py-0.5 text-[10px] border" onClick={() => onEdit(it.id)}>Düzenle</button>
                     <button className="ml-1 px-1 py-0.5 text-[10px] border" onClick={() => onRemove(it.id)}>Sil</button>
                   </div>
@@ -610,27 +728,35 @@ function SectionEditable({ title, items, boxCount, variantById, onAddAt, onRemov
   )
 }
 
-function SectionQuickPlus({ title, items, variantById, onAddAt, onEdit }: {
-  title: string; items: LineItem[]; variantById: Map<string, Variant>;
+/** Hızlı liste alanları (STOR/AKSESUAR) — eklenme sırası */
+function SectionQuickPlus({ title, items, catById, onAddAt, onEdit }: {
+  title: string; items: LineItem[]; catById: Map<string, Category>;
   onAddAt: (index: number) => void; onEdit: (id: string) => void;
 }) {
-  const order = [0,3,1,4,2,5]
+  const order = [0,3,1,4,2,5] // görsel sıra (sadece satır numaralandırma için)
+  const visibleRows = Array.from({ length: order.length }).map((_, idx) => items[idx] || null)
+
   return (
     <div className="mt-6 break-inside-avoid">
       <div className="mb-0 font-semibold uppercase">{title}</div>
       <div className="grid grid-cols-2 gap-0">
-        {order.map(i => {
-          const it = items[i]; const variant = it ? variantById.get(it.variantId) : null
+        {order.map((rowNumber, visIndex) => {
+          const it = visibleRows[visIndex]
+          const variantName = it
+            ? (catById.get(it.categoryId)?.variants?.find(v => v.id === it.variantId)?.name ?? '—')
+            : null
           return (
-            <div key={i} className="flex items-center gap-0">
-              <div className="w-6 text-right text-xs">{i + 1}-</div>
+            <div key={rowNumber} className="flex items-center gap-0">
+              <div className="w-6 text-right text-xs">{visIndex + 1}-</div>
               <button
                 type="button"
-                onClick={() => (it ? onEdit(it.id) : onAddAt(i))}
+                onClick={() => (it ? onEdit(it.id) : onAddAt(rowNumber))}
                 className="input h-[23px] flex-1 rounded-none border-0 border-b border-[#999] p-0 pl-2 text-left text-sm hover:bg-black/5"
                 title={it ? 'Düzenle' : 'Ekle'}
               >
-                {it ? `${variant?.name ?? '—'} • ${it.qty} adet • ${it.width}×${it.height} cm • ${fmt(it.subtotal)}` : <span className="print:hidden">+ Ekle</span>}
+                {it
+                  ? `${variantName ?? '—'} • ${it.qty} adet • ${it.width}×${it.height} cm • ${fmt(it.subtotal)}`
+                  : <span className="print:hidden">+ Ekle</span>}
               </button>
             </div>
           )

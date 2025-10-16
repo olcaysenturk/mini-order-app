@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 type Status = 'pending' | 'processing' | 'completed' | 'cancelled'
 
@@ -338,7 +339,7 @@ export default function CustomersPage() {
         body: JSON.stringify(draft),
       })
       if (!res.ok) {
-        alert('Güncelleme başarısız.')
+        toast.error('Güncelleme başarısız.')
         return
       }
       const updated: Customer = await res.json()
@@ -355,11 +356,11 @@ export default function CustomersPage() {
     try {
       const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' })
       if (res.status === 400) {
-        alert('Bu müşteriye bağlı siparişler var, silinemez.')
+        toast.error('Bu müşteriye bağlı siparişler var, silinemez.')
         return
       }
       if (!res.ok) {
-        alert('Silme başarısız.')
+        toast.error('Silme başarısız.')
         return
       }
       setItems((prev) => prev.filter((c) => c.id !== id))
@@ -437,7 +438,7 @@ export default function CustomersPage() {
               </svg>
               <input
                 className="h-9 w-full rounded-xl border border-neutral-200 bg-white pl-8 pr-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                placeholder="Ara: ad, telefon, e-posta, adres, not…"
+                placeholder="Arama yap"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 aria-label="Müşterilerde ara"

@@ -357,6 +357,10 @@ model OrderItem {
   category Category @relation(fields: [categoryId], references: [id])
   variant  Variant  @relation(fields: [variantId], references: [id])
 
+  slotIndex   Int?     // nullable; UI kutusu yoksa null
+
+  lineStatus  OrderLineStatus  @default(processing)
+
   @@index([orderId])
   @@index([categoryId])
   @@index([variantId])
@@ -452,4 +456,11 @@ enum OrderStatus {
 enum ExtraType {
   STOR
   ACCESSORY
+}
+
+enum OrderLineStatus {
+  pending
+  processing
+  completed
+  cancelled
 }

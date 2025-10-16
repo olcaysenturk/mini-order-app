@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 /* ========= Types ========= */
 type Status = "pending" | "processing" | "completed" | "cancelled";
@@ -218,7 +219,8 @@ export default function OrdersPage() {
         return next;
       });
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "Silmede hata");
+      toast.error(e instanceof Error ? e.message : "Silmede hata");
+
     } finally {
       setDeletingId(null);
     }
@@ -285,7 +287,7 @@ export default function OrdersPage() {
     const amountStr = (payAmount[id] ?? "").trim();
     const amount = parseFloat(amountStr.replace(",", "."));
     if (!Number.isFinite(amount) || amount <= 0) {
-      alert("Geçerli bir ödeme tutarı girin.");
+      toast.error("Geçerli bir ödeme tutarı girin.");
       return;
     }
     const method = payMethod[id] ?? "CASH";
@@ -306,7 +308,7 @@ export default function OrdersPage() {
       setPayAmount((m) => ({ ...m, [id]: "" }));
       setPayNote((m) => ({ ...m, [id]: "" }));
     } catch (e: any) {
-      alert(e?.message || "Ödeme kaydedilemedi");
+      toast.error(e?.message || "Ödeme kaydedilemedi");
     } finally {
       setPaySaving((s) => ({ ...s, [id]: false }));
     }
@@ -342,40 +344,14 @@ export default function OrdersPage() {
       <div className="mt-4 rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
         {/* Üst satır: durum chip’leri + responsive arama + panel butonu */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex w-full gap-2 overflow-x-auto sm:w-auto sm:flex-nowrap">
-            {[
-              { v: "all", label: "Tümü" },
-              { v: "pending", label: "Beklemede" },
-              { v: "processing", label: "İşlemde" },
-              { v: "completed", label: "Tamamlandı" },
-              { v: "cancelled", label: "İptal" },
-            ].map((b) => {
-              const active = statusFilter === (b.v as any);
-              return (
-                <button
-                  key={b.v}
-                  type="button"
-                  onClick={() => setStatusFilter(b.v as any)}
-                  className={[
-                    "h-9 shrink-0 rounded-xl border px-3 text-sm",
-                    active
-                      ? "border-neutral-900 bg-neutral-900 text-white"
-                      : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
-                  ].join(" ")}
-                  aria-pressed={active}
-                >
-                  {b.label}
-                </button>
-              );
-            })}
-          </div>
+         
 
           <div className="ms-auto flex w-full items-center gap-2 sm:w-auto">
             {/* Arama (mobile full width) */}
             <div className="relative grow sm:grow-0">
               <input
                 className="h-9 w-full sm:w-80 rounded-xl border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                placeholder="Ara: müşteri, tel, not, kategori/varyant…"
+                placeholder="Arama yap"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 aria-label="Siparişlerde ara"
@@ -414,6 +390,18 @@ export default function OrdersPage() {
               Filtreler
             </button>
 
+            <button
+              type="button"
+              onClick={() => {
+                setQ("");
+                setPaymentStatus("all");
+                setMethodFilters([]);
+              }}
+              className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
+            >
+              Temizle
+            </button>
+
             {/* Yenile */}
             <button
               type="button"
@@ -421,11 +409,22 @@ export default function OrdersPage() {
               className="hidden sm:inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
               title="Listeyi yenile"
             >
+              
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                 <path fill="currentColor" d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z" />
               </svg>
               Yenile
             </button>
+
+            <a
+              href="/order"
+              className="h-9 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+            >
+              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
+              </svg>
+              Yeni Sipariş
+            </a>
           </div>
         </div>
 
@@ -502,29 +501,40 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          {/* Aksiyonlar */}
-          <div className="flex items-end justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setQ("");
-                setPaymentStatus("all");
-                setMethodFilters([]);
-              }}
-              className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
-            >
-              Temizle
-            </button>
-            <a
-              href="/order"
-              className="h-9 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
-            >
-              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
-              </svg>
-              Yeni Sipariş
-            </a>
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <div className="mb-2 text-xs font-semibold text-neutral-500">
+              Sipariş Durumu
+            </div>
+            <div className="flex flex-wrap gap-2">
+               {[
+              { v: "all", label: "Tümü" },
+              { v: "pending", label: "Beklemede" },
+              { v: "processing", label: "İşlemde" },
+              { v: "completed", label: "Tamamlandı" },
+              { v: "cancelled", label: "İptal" },
+            ].map((b) => {
+              const active = statusFilter === (b.v as any);
+              return (
+                <button
+                  key={b.v}
+                  type="button"
+                  onClick={() => setStatusFilter(b.v as any)}
+                  className={[
+                    "h-9 shrink-0 rounded-xl border px-3 text-sm",
+                    active
+                      ? "border-neutral-900 bg-neutral-900 text-white"
+                      : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
+                  ].join(" ")}
+                  aria-pressed={active}
+                >
+                  {b.label}
+                </button>
+              );
+            })}
+            </div>
           </div>
+
+          
         </div>
       </div>
 

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { z } from 'zod'
+import { toast } from 'sonner'
 
 type Dealer = {
   id: string
@@ -175,7 +176,8 @@ export default function DealerDetailPage() {
       if (!del.ok || !dj?.ok) throw new Error(dj?.error || 'Logo silinemedi')
       setLogoPreview(null)
     } catch (e: any) {
-      alert(e.message || 'Logo silinemedi')
+      toast.error(e.message || 'Logo silinemedi')
+
     } finally {
       setLogoBusy(false)
     }
@@ -195,7 +197,7 @@ export default function DealerDetailPage() {
       setDealer(d => d ? { ...d, isActive: !d.isActive } as Dealer : d)
       setForm(f => ({ ...f, isActive: !dealer.isActive }))
     } catch (e: any) {
-      alert(e.message || 'İşlem başarısız')
+      toast.error(e.message || 'İşlem başarısız')
     }
   }
 

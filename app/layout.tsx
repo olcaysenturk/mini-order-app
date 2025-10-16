@@ -5,6 +5,7 @@ import Link from "next/link";
 import Providers from "./providers";
 import { UserMenu } from "./components/UserMenu";   // ✅ components
 import { AuthedNav } from "./components/AuthedNav"; // ✅ components
+import { Toaster } from 'sonner'
 
 export const metadata: Metadata = {
   title: {
@@ -62,6 +63,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* ======= Page Content ======= */}
           <main id="content" className="relative min-h-[calc(100vh-135px)] p-8">
             {children}
+            <Toaster 
+              richColors        // daha canlı renkler
+              position="bottom-right"
+              theme="system"    // 'light' | 'dark' | 'system'
+              closeButton
+              expand            // aynı tip toasları gruplayıp genişletir
+              duration={3000}   // varsayılan süre
+            />
           </main>
 
           {/* ======= Footer (Light) ======= */}

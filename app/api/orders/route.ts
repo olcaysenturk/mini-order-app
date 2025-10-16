@@ -23,6 +23,10 @@ const ItemSchema = z.object({
   }),
   fileDensity: z.number().positive().default(1),
   note: z.string().nullable().optional(),
+  // ✅ kutucuk/sıra bilgisi (STOR/AKSESUAR gibi kutusuz alanlarda null olabilir)
+  slotIndex: z.number().int().min(0).nullable().optional(),
+  // ✅ satır durumu
+  lineStatus: StatusSchema.default('pending').optional(),
 })
 
 /**
@@ -115,7 +119,8 @@ export async function GET(req: NextRequest) {
             category: { select: { name: true } },
             variant: { select: { name: true } },
           },
-          orderBy: { id: 'asc' },
+          // ✅ kutulu alanlarda sıralama: kategori → slotIndex (null last) → id
+          orderBy: [{ categoryId: 'asc' }, { slotIndex: 'asc' as const }, { id: 'asc' }],
         },
         customer: { select: { id: true, name: true, phone: true } },
         branch: { select: { id: true, name: true } }, // ✅ doğru relation
@@ -128,10 +133,8 @@ export async function GET(req: NextRequest) {
       createdAt: o.createdAt,
       note: o.note,
       status: o.status,
-      // ✅ yeni alan
-      branch: o.branch,
-      // 🔁 legacy alias (eski UI "dealer" bekliyorsa kırılmasın)
-      dealer: o.branch,
+      branch: o.branch,     // ✅ yeni alan
+      dealer: o.branch,     // 🔁 legacy alias (eski UI için)
       customerName: o.customerName,
       customerPhone: o.customerPhone,
       customer: o.customer,
@@ -147,6 +150,8 @@ export async function GET(req: NextRequest) {
         fileDensity: Number(it.fileDensity),
         subtotal: Number(it.subtotal),
         note: it.note,
+        slotIndex: it.slotIndex ?? null,            // ✅
+        lineStatus: (it as any).lineStatus ?? 'pending', // ✅
         category: { name: it.category.name },
         variant: { name: it.variant.name },
       })),
@@ -258,6 +263,8 @@ export async function POST(req: NextRequest) {
         fileDensity: density,
         subtotal,
         note: it.note ?? null,
+        slotIndex: typeof it.slotIndex === 'number' ? it.slotIndex : null,      // ✅
+        lineStatus: (it as any).lineStatus ?? 'pending',                         // ✅
       }
     })
 
@@ -301,7 +308,7 @@ export async function POST(req: NextRequest) {
       include: {
         items: {
           include: { category: true, variant: true },
-          orderBy: { id: 'asc' },
+          orderBy: [{ categoryId: 'asc' }, { slotIndex: 'asc' as const }, { id: 'asc' }],
         },
         customer: { select: { id: true, name: true, phone: true } },
         branch:  { select: { id: true, name: true } }, // ✅ doğru relation
@@ -317,10 +324,20 @@ export async function POST(req: NextRequest) {
       discount: Number(created.discount),
       netTotal: Number(created.netTotal),
       items: created.items.map(it => ({
-        ...it,
+        id: it.id,
+        categoryId: it.categoryId,
+        variantId: it.variantId,
+        qty: it.qty,
+        width: it.width,
+        height: it.height,
         unitPrice:   Number(it.unitPrice),
         fileDensity: Number(it.fileDensity),
         subtotal:    Number(it.subtotal),
+        note: it.note,
+        slotIndex: it.slotIndex ?? null,                 // ✅
+        lineStatus: (it as any).lineStatus ?? 'processing', // ✅
+        category: { name: it.category.name },
+        variant: { name: it.variant.name },
       })),
     }
 
