@@ -346,9 +346,6 @@ export default function OrdersPage() {
         <div className="flex flex-wrap items-center gap-2">
          
 
-          <div className="ms-auto flex w-full items-center gap-2 sm:w-auto">
-            {/* Arama (mobile full width) */}
-            <div className="relative grow sm:grow-0">
               <input
                 className="h-9 w-full sm:w-80 rounded-xl border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 placeholder="Arama yap"
@@ -356,26 +353,9 @@ export default function OrdersPage() {
                 onChange={(e) => setQ(e.target.value)}
                 aria-label="Siparişlerde ara"
               />
-              {q && (
-                <button
-                  type="button"
-                  onClick={() => setQ("")}
-                  className="absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-md text-neutral-500 hover:bg-neutral-100"
-                  aria-label="Aramayı temizle"
-                  title="Temizle"
-                >
-                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                    <path
-                      fill="currentColor"
-                      d="M18 6L6 18M6 6l12 12"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-              )}
-            </div>
+          <div className="ms-auto flex w-full justify-between gap-2 sm:w-auto">
+            {/* Arama (mobile full width) */}
+            
 
             {/* Gelişmiş filtre paneli aç/kapat (mobile visible) */}
             <button
@@ -390,7 +370,7 @@ export default function OrdersPage() {
               Filtreler
             </button>
 
-            <button
+            {/* <button
               type="button"
               onClick={() => {
                 setQ("");
@@ -400,7 +380,7 @@ export default function OrdersPage() {
               className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
             >
               Temizle
-            </button>
+            </button> */}
 
             {/* Yenile */}
             <button

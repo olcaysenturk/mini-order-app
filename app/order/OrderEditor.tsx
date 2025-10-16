@@ -297,7 +297,7 @@ export default function OrderEditor({
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
       {/* Toolbar */}
-      <div className="print:hidden mt-4 mb-4 px-4 py-4 flex items-center justify-between gap-3">
+      <div className=" m-auto w-[210mm] print:w-auto print:min-h-[auto] flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
         <div className="flex items-center gap-2">
           {profile.logoUrl ? (

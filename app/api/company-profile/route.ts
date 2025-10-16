@@ -94,7 +94,7 @@ export async function PATCH(req: NextRequest) {
         phone: profile.phone || null,
         email: profile.email || null,
         address: profile.address || null,
-        code: 'MAIN',           // opsiyonel: kısa kod
+        code: 'MERKEZ',           // opsiyonel: kısa kod
         showOnHeader: true,
         sortOrder: 0,
         isActive: true,

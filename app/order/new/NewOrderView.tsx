@@ -111,7 +111,7 @@ export default function NewOrderView() {
                 Aktif şubeniz yok. Şirket Ayarları → Şubeler’den ekledikten sonra bu sayfaya dönün.
               </p>
               <div className="mt-4 flex items-center gap-3">
-                <a href="/settings/company" className="inline-flex items-center rounded-xl bg-black px-4 py-2 text-white">
+                <a href="/company" className="inline-flex items-center rounded-xl bg-black px-4 py-2 text-white">
                   Şirket Ayarları
                 </a>
                 <button onClick={() => router.refresh()} className="rounded-xl border px-4 py-2">

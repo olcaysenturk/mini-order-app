@@ -41,21 +41,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* ======= Sticky App Header (Light) ======= */}
           <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/70 backdrop-blur-md print:hidden">
             <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-              <div className="flex h-16 items-center gap-3">
+              <div className="flex h-16 items-center gap-3 justify-between ">
                 {/* Brand */}
                 <Link href="/" className="font-extrabold tracking-tight text-base sm:text-lg">
                   PERDE<span className="text-indigo-600">XA</span>
                 </Link>
 
+              <div className="flex">
+
                 {/* Primary nav (authed routes) */}
-                <nav className="ml-6 hidden md:flex items-center gap-4 text-sm text-neutral-600">
-                  <AuthedNav />
+                <nav className="ml-6 md:flex items-center gap-4 text-sm text-neutral-600">
+                  <AuthedNav  />
                 </nav>
 
                 {/* Right side */}
-                <div className="ml-auto flex items-center gap-2">
+                <div className="ml-2 flex items-center gap-2">
                   <UserMenu />
                 </div>
+              </div>
               </div>
             </div>
           </header>

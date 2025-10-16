@@ -81,14 +81,13 @@ export function UserMenu() {
       >
         {/* Avatar */}
         <span className="grid size-6 place-items-center rounded-full bg-neutral-200 text-[10px] font-bold text-neutral-700">
-          {initials}
+          {initials} 
         </span>
+        <span>Hesabım</span>
         {/* İsim */}
-        <span className="hidden md:block max-w-[14ch] truncate text-neutral-700">
-          {name}
-        </span>
+       
         {/* Rozetler */}
-        <span className="hidden md:flex items-center gap-1">
+        {/* <span className="hidden md:flex items-center gap-1">
           {isPro ? (
             <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
               PRO
@@ -103,7 +102,7 @@ export function UserMenu() {
               {role}
             </span>
           )}
-        </span>
+        </span> */}
         {/* Caret */}
         <svg
           className={`size-4 text-neutral-400 transition-transform ${open ? 'rotate-180' : ''}`}
