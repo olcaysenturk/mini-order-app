@@ -82,14 +82,13 @@ export async function GET(req: NextRequest) {
       )
       const map = new Map<string, number>()
       for (const r of rows) {
-        const yyyy = r.d.getFullYear(); const mm = String(r.d.getMonth()+1).padStart(2,'0'); const dd = String(r.d.getDate()).padStart(2,'0')
-        map.set(`${yyyy}-${mm}-${dd}`, Number(r.total ?? 0))
+        const key = r.d.toISOString().slice(0,10)
+        map.set(key, Number(r.total ?? 0))
       }
       const series: { date: string; total: number }[] = []
       for (let i = 30 - 1; i >= 0; i--) {
         const d = new Date(now); d.setDate(d.getDate() - i)
-        const yyyy = d.getFullYear(); const mm = String(d.getMonth()+1).padStart(2,'0'); const dd = String(d.getDate()).padStart(2,'0')
-        const key = `${yyyy}-${mm}-${dd}`
+        const key = d.toISOString().slice(0,10)
         series.push({ date: key, total: map.get(key) ?? 0 })
       }
 
@@ -138,7 +137,7 @@ export async function GET(req: NextRequest) {
       )
       const s = summary[0] ?? { paid_amount: 0, paid_count: 0, unpaid_amount: 0, unpaid_count: 0 }
 
-      // Ödeme yöntemi dağılımı (sadece filtrelenen siparişlere bağlı ödemeler)
+      // Ödeme yöntemi dağılımı
       const methods = await prisma.$queryRaw<{ method: string; amount: number; count: number }[]>(
         Prisma.sql`
           SELECT op."method"::text as method,
@@ -154,7 +153,7 @@ export async function GET(req: NextRequest) {
         `
       )
 
-      // Son 30 gün kümülatif: (orders netTotal by createdAt) & (payments by paidAt)
+      // Son 30 gün kümülatif (netTotal vs paid)
       const days = 30
       const since = startOfDay(new Date(now))
       since.setDate(since.getDate() - (days - 1))
@@ -186,13 +185,9 @@ export async function GET(req: NextRequest) {
         `
       )
       const mOrders = new Map<string, number>()
-      for (const r of byOrder) {
-        const k = r.d.toISOString().slice(0,10); mOrders.set(k, Number(r.total ?? 0))
-      }
+      for (const r of byOrder) mOrders.set(r.d.toISOString().slice(0,10), Number(r.total ?? 0))
       const mPaid = new Map<string, number>()
-      for (const r of byPay) {
-        const k = r.d.toISOString().slice(0,10); mPaid.set(k, Number(r.paid ?? 0))
-      }
+      for (const r of byPay) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
       const cumulative: { date: string; paid: number; unpaid: number }[] = []
       let accOrders = 0, accPaid = 0
       for (let i = days - 1; i >= 0; i--) {
@@ -209,6 +204,86 @@ export async function GET(req: NextRequest) {
         methods,
         last30dCumulative: cumulative,
       }, { headers: { 'Cache-Control': 'private, max-age=60' } })
+    }
+
+    if (section === 'items_agg') {
+  const rows = await prisma.$queryRaw<
+    { group: string | null; qty: number | null; amount: number | null; total_width_cm: number | null; total_height_cm: number | null }[]
+  >(Prisma.sql`
+    SELECT
+      COALESCE(c."name", 'Ürün') AS group,
+      COALESCE(SUM(oi."qty"), 0)::int AS qty,
+      COALESCE(SUM(oi."subtotal"), 0)::float AS amount,
+      COALESCE(SUM((oi."width") * (oi."qty")), 0)::float  AS total_width_cm,
+      COALESCE(SUM((oi."height") * (oi."qty")), 0)::float AS total_height_cm
+    FROM "OrderItem" oi
+    JOIN "Order" o ON o."id" = oi."orderId"
+    LEFT JOIN "Category" c ON c."id" = oi."categoryId"
+    WHERE o."tenantId" = ${tenantId}
+      AND o."status" = ANY(${statusArray})
+    GROUP BY 1
+    ORDER BY amount DESC
+  `)
+
+  return NextResponse.json({
+    byProduct: rows.map(r => ({
+      group: r.group ?? 'Ürün',
+      qty: Number(r.qty ?? 0),
+      amount: Number(r.amount ?? 0),
+      totalWidthCm: Number(r.total_width_cm ?? 0),
+      totalHeightCm: Number(r.total_height_cm ?? 0),
+    })),
+  }, { headers: { 'Cache-Control': 'private, max-age=120' } })
+}
+
+    /* ======= SECTION: DAILY (NEW) ======= */
+    if (section === 'daily') {
+      const days = 30
+      const since = startOfDay(new Date(now))
+      since.setDate(since.getDate() - (days - 1))
+
+      // Günlük ciro (netTotal) — createdAt
+      const byOrder = await prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(
+        Prisma.sql`
+          SELECT DATE_TRUNC('day', o."createdAt")::date AS d,
+                 COALESCE(SUM(o."netTotal"), 0)::float  AS revenue
+          FROM "Order" o
+          WHERE o."tenantId" = ${tenantId}
+            AND o."createdAt" >= ${since} AND o."createdAt" <= ${eod}
+            AND o."status" = ANY(${statusArray})
+          GROUP BY 1
+          ORDER BY 1 ASC
+        `
+      )
+      // Günlük tahsilat — paidAt
+      const byPay = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
+        Prisma.sql`
+          SELECT DATE_TRUNC('day', op."paidAt")::date AS d,
+                 COALESCE(SUM(op."amount"), 0)::float  AS paid
+          FROM "OrderPayment" op
+          JOIN "Order" o ON o."id" = op."orderId"
+          WHERE op."tenantId" = ${tenantId}
+            AND o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            AND op."paidAt" >= ${since} AND op."paidAt" <= ${eod}
+          GROUP BY 1
+          ORDER BY 1 ASC
+        `
+      )
+
+      const mRev = new Map<string, number>()
+      for (const r of byOrder) mRev.set(r.d.toISOString().slice(0,10), Number(r.revenue ?? 0))
+      const mPaid = new Map<string, number>()
+      for (const r of byPay) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
+
+      const last30d: { date: string; revenue: number; paid: number }[] = []
+      for (let i = days - 1; i >= 0; i--) {
+        const d = new Date(now); d.setDate(d.getDate() - i)
+        const key = d.toISOString().slice(0,10)
+        last30d.push({ date: key, revenue: mRev.get(key) ?? 0, paid: mPaid.get(key) ?? 0 })
+      }
+
+      return NextResponse.json({ last30d }, { headers: { 'Cache-Control': 'private, max-age=60' } })
     }
 
     /* ======= SECTION: CATEGORIES ======= */
@@ -254,7 +329,6 @@ export async function GET(req: NextRequest) {
 
     /* ======= SECTION: CUSTOMERS ======= */
     if (section === 'customers') {
-      // Müşteri adı Customer tablosundan, yoksa Order.customerName
       const rows = await prisma.$queryRaw<{ customer: string | null; orders: number; amount: number }[]>(
         Prisma.sql`
           SELECT COALESCE(c."name", NULLIF(TRIM(o."customerName"), ''), 'Müşteri') AS customer,
@@ -270,6 +344,45 @@ export async function GET(req: NextRequest) {
         `
       )
       return NextResponse.json({ topCustomers: rows }, { headers: { 'Cache-Control': 'private, max-age=120' } })
+    }
+
+    /* ======= SECTION: DEALERS (NEW) ======= */
+    if (section === 'dealers') {
+      // "Bayi" olarak müşteri adını kullanıyoruz (Customer.name varsa o, yoksa Order.customerName, yoksa 'Müşteri')
+      // Hem ciro (netTotal) hem tahsilat (OrderPayment.amount) aynı filtrelerle toplanır.
+      const rows = await prisma.$queryRaw<{ dealer: string | null; orders: number; revenue: number; paid: number }[]>(
+        Prisma.sql`
+          WITH p AS (
+            SELECT op."orderId", SUM(op."amount")::float AS paid
+            FROM "OrderPayment" op
+            JOIN "Order" o1 ON o1."id" = op."orderId" AND o1."tenantId" = ${tenantId} AND o1."status" = ANY(${statusArray})
+            WHERE op."tenantId" = ${tenantId}
+            GROUP BY op."orderId"
+          )
+          SELECT
+            COALESCE(c."name", NULLIF(TRIM(o."customerName"), ''), 'Müşteri') AS dealer,
+            COUNT(*)::int                                         AS orders,
+            COALESCE(SUM(o."netTotal"), 0)::float                 AS revenue,
+            COALESCE(SUM(COALESCE(p.paid, 0)), 0)::float          AS paid
+          FROM "Order" o
+          LEFT JOIN p            ON p."orderId" = o."id"
+          LEFT JOIN "Customer" c ON c."id" = o."customerId"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+          GROUP BY 1
+          ORDER BY revenue DESC
+        `
+      )
+
+      // sayısal cast ve null güvenliği
+      const byDealer = rows.map(r => ({
+        dealer: r.dealer ?? 'Müşteri',
+        orders: Number(r.orders ?? 0),
+        revenue: Number(r.revenue ?? 0),
+        paid: Number(r.paid ?? 0),
+      }))
+
+      return NextResponse.json({ byDealer }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
     // bilinmeyen section -> 400

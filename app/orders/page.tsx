@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { toast } from "sonner";
 
 /* ========= Types ========= */
 type Status = "pending" | "processing" | "completed" | "cancelled";
 type PaymentMethod = "CASH" | "TRANSFER" | "CARD";
+
+/** Raporlar ile aynı başlık filtresi */
+type HeaderFilter = "active" | "completed" | "all";
 
 type OrderItem = {
   id: string;
@@ -66,8 +69,7 @@ const methodLabel: Record<PaymentMethod, string> = {
 };
 
 function StatusBadge({ s }: { s: Status }) {
-  const common =
-    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border";
+  const common = "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border";
   const map: Record<Status, string> = {
     pending: `${common} bg-neutral-100 text-neutral-700 border-neutral-200`,
     processing: `${common} bg-blue-50 text-blue-700 border-blue-200`,
@@ -84,14 +86,16 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // TEXT + STATUS filters
+  /** Raporlar ile uyumlu üst şerit durum filtresi */
+  const [headerFilter, setHeaderFilter] = useState<HeaderFilter>("active");
+
+  // TEXT filters
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | Status>("all");
 
   // PAYMENT filters
   const [paymentStatus, setPaymentStatus] =
     useState<"all" | "unpaid" | "partial" | "paid">("all");
-  const [methodFilters, setMethodFilters] = useState<PaymentMethod[]>([]); // çoklu seçim
+  const [methodFilters, setMethodFilters] = useState<PaymentMethod[]>([]);
 
   // Responsive filter panel
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -110,6 +114,10 @@ export default function OrdersPage() {
   const [payNote, setPayNote] = useState<Record<string, string>>({});
   const [paySaving, setPaySaving] = useState<Record<string, boolean>>({});
 
+  // payment modal control
+  const [payModalOpenId, setPayModalOpenId] = useState<string | null>(null);
+  const modalBackdropRef = useRef<HTMLDivElement | null>(null);
+
   const toggleOpen = async (id: string) => {
     setOpenIds((prev) => {
       const next = new Set(prev);
@@ -122,11 +130,19 @@ export default function OrdersPage() {
     }
   };
 
-  const fetchOrders = async (status: "all" | Status, signal?: AbortSignal) => {
+  /** Raporlar’la uyumlu fetch stratejisi:
+   *  - active  -> hepsini çek, client’ta cancelled’ı gizle
+   *  - completed -> sadece completed çek
+   *  - all -> hepsi
+   */
+  const fetchOrders = async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const qs = status === "all" ? "" : `?status=${encodeURIComponent(status)}`;
+      const qs =
+        headerFilter === "completed"
+          ? `?status=${encodeURIComponent("completed")}`
+          : ""; // active & all -> hepsi
       const res = await fetch(`/api/orders${qs}`, { cache: "no-store", signal });
       if (!res.ok) throw new Error("Siparişler alınamadı");
       const data: Order[] = await res.json();
@@ -173,7 +189,7 @@ export default function OrdersPage() {
     }
   };
 
-  // ödeme filtresi aktifken, listedeki siparişlerin detaylarını toparla (ilk kez)
+  // ödeme filtresi aktifken detayları topla (ilk kez)
   useEffect(() => {
     if (paymentStatus === "all" && methodFilters.length === 0) return;
     const ids = orders.map((o) => o.id);
@@ -193,17 +209,52 @@ export default function OrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentStatus, methodFilters, orders]);
 
-  // initial + status change
+  // initial + header filter change
   useEffect(() => {
     const ac = new AbortController();
-    fetchOrders(statusFilter, ac.signal);
+    fetchOrders(ac.signal);
     return () => ac.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [headerFilter]);
 
   const onRefresh = () => {
     const ac = new AbortController();
-    fetchOrders(statusFilter, ac.signal);
+    fetchOrders(ac.signal);
+  };
+
+  // Payment modal helpers
+  const openPayModal = (id: string) => setPayModalOpenId(id);
+  const closePayModal = () => setPayModalOpenId(null);
+
+  // Fetch detail when modal opens
+  useEffect(() => {
+    if (!payModalOpenId) return;
+    if (!detailById[payModalOpenId]) fetchOrderDetail(payModalOpenId);
+  }, [payModalOpenId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prefill amount with balance once detail arrives (only if empty)
+  useEffect(() => {
+    if (!payModalOpenId) return;
+    const d = detailById[payModalOpenId];
+    if (d && !(payAmount[payModalOpenId] ?? "").trim()) {
+      setPayAmount((m) => ({
+        ...m,
+        [payModalOpenId]: d.balance > 0 ? String(d.balance).replace(".", ",") : "",
+      }));
+    }
+  }, [payModalOpenId, detailById]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close modal with ESC / backdrop click
+  useEffect(() => {
+    if (!payModalOpenId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closePayModal();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [payModalOpenId]);
+
+  const onBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === modalBackdropRef.current) closePayModal();
   };
 
   const removeOrder = async (id: string) => {
@@ -218,16 +269,16 @@ export default function OrdersPage() {
         next.delete(id);
         return next;
       });
+      toast.success("Sipariş silindi");
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Silmede hata");
-
     } finally {
       setDeletingId(null);
     }
   };
 
   // text filter
-  const filteredByTextAndStatus = useMemo(() => {
+  const textFiltered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return orders;
     return orders.filter((o) => {
@@ -246,24 +297,31 @@ export default function OrdersPage() {
     });
   }, [orders, q]);
 
+  // header status filter (Raporlar ile aynı)
+  const statusHeaderFiltered = useMemo(() => {
+    if (headerFilter === "all") return textFiltered;
+    if (headerFilter === "completed") {
+      return textFiltered.filter((o) => o.status === "completed");
+    }
+    // active: cancelled hariç hepsi
+    return textFiltered.filter((o) => o.status !== "cancelled");
+  }, [textFiltered, headerFilter]);
+
   // payment filter
   const filtered = useMemo(() => {
     if (paymentStatus === "all" && methodFilters.length === 0) {
-      return filteredByTextAndStatus;
+      return statusHeaderFiltered;
     }
 
-    return filteredByTextAndStatus.filter((o) => {
+    return statusHeaderFiltered.filter((o) => {
       const d = detailById[o.id];
-      // Detay gelmediyse (yüklenene kadar) elemeden geçir
       if (!d) return true;
 
-      // Ödeme yöntemi filtresi
       if (methodFilters.length > 0) {
         const hasMethod = d.payments.some((p) => methodFilters.includes(p.method));
         if (!hasMethod) return false;
       }
 
-      // Ödeme durumu filtresi
       if (paymentStatus !== "all") {
         const balance = d.balance;
         const net = d.netTotal;
@@ -274,7 +332,7 @@ export default function OrdersPage() {
 
       return true;
     });
-  }, [filteredByTextAndStatus, paymentStatus, methodFilters, detailById]);
+  }, [statusHeaderFiltered, paymentStatus, methodFilters, detailById]);
 
   const summary = useMemo(() => {
     const count = filtered.length;
@@ -311,7 +369,9 @@ export default function OrdersPage() {
       toast.error(e?.message || "Ödeme kaydedilemedi");
     } finally {
       setPaySaving((s) => ({ ...s, [id]: false }));
+      toast.success( "Ödeme kaydedildi");
     }
+    closePayModal();
   };
 
   // simple skeleton
@@ -326,38 +386,98 @@ export default function OrdersPage() {
 
   // helper: method filter toggle
   const toggleMethod = (m: PaymentMethod) =>
-    setMethodFilters((prev) =>
-      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
-    );
+    setMethodFilters((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
 
   return (
-    <main className="mx-auto max-w-7xl p-4 sm:p-6">
-      {/* Başlık + özet */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <main className="mx-auto max-w-7xl p-3 sm:p-6 overflow-x-hidden">
+      {/* Başlık + Raporlar ile aynı üst şerit */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Siparişler</h1>
-        <div className="text-sm text-neutral-600">
-          {summary.count} kayıt · Toplam {fmt(summary.total)} ₺
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="tablist"
+            aria-label="Durum filtresi"
+            className="inline-flex rounded-xl border border-neutral-200 bg-white p-0.5"
+          >
+            {(
+              [
+                { k: "active", label: "Aktif" },
+                { k: "completed", label: "Tamamlanan" },
+                { k: "all", label: "Tümü" },
+              ] as { k: HeaderFilter; label: string }[]
+            ).map(({ k, label }) => (
+              <button
+                key={k}
+                role="tab"
+                aria-selected={headerFilter === k}
+                onClick={() => setHeaderFilter(k)}
+                className={`px-3 py-1.5 text-sm rounded-[10px] transition ${
+                  headerFilter === k
+                    ? "bg-indigo-600 text-white"
+                    : "text-neutral-700 hover:bg-neutral-50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
+            onClick={onRefresh}
+            disabled={loading}
+            title="Yenile"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+              <path
+                fill="currentColor"
+                d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z"
+              />
+            </svg>
+            {loading ? "Yükleniyor…" : "Yenile"}
+          </button>
+
+          <a
+            href="/order"
+            className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+          >
+            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+              <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
+            </svg>
+            Yeni Sipariş
+          </a>
         </div>
       </div>
 
-      {/* Filtreler */}
-      <div className="mt-4 rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
-        {/* Üst satır: durum chip’leri + responsive arama + panel butonu */}
+      {/* Özet satırı */}
+      <div className="mb-4 text-sm text-neutral-600">
+        {summary.count} kayıt · Toplam {fmt(summary.total)} ₺
+      </div>
+
+      {/* Filtreler – Raporlar’daki kart ile aynı */}
+      <div className="rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-2">
-         
-
-              <input
-                className="h-9 w-full sm:w-80 rounded-xl border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                placeholder="Arama yap"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                aria-label="Siparişlerde ara"
+          <div className="relative w-full sm:w-80">
+            <input
+              className="h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              placeholder="Arama yap"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="Siparişlerde ara"
+            />
+            <svg
+              className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                fill="currentColor"
+                d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
               />
-          <div className="ms-auto flex w-full justify-between gap-2 sm:w-auto">
-            {/* Arama (mobile full width) */}
-            
+            </svg>
+          </div>
 
-            {/* Gelişmiş filtre paneli aç/kapat (mobile visible) */}
+          <div className="ms-auto flex w-full justify-between gap-2 sm:w-auto">
             <button
               type="button"
               onClick={() => setFiltersOpen((s) => !s)}
@@ -369,46 +489,10 @@ export default function OrdersPage() {
               </svg>
               Filtreler
             </button>
-
-            {/* <button
-              type="button"
-              onClick={() => {
-                setQ("");
-                setPaymentStatus("all");
-                setMethodFilters([]);
-              }}
-              className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
-            >
-              Temizle
-            </button> */}
-
-            {/* Yenile */}
-            <button
-              type="button"
-              onClick={onRefresh}
-              className="hidden sm:inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
-              title="Listeyi yenile"
-            >
-              
-              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z" />
-              </svg>
-              Yenile
-            </button>
-
-            <a
-              href="/order"
-              className="h-9 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
-            >
-              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
-              </svg>
-              Yeni Sipariş
-            </a>
           </div>
         </div>
 
-        {/* Gelişmiş filtreler: desktop’ta satır içi, mobile’da panel */}
+        {/* Gelişmiş filtreler */}
         <div
           className={[
             "mt-3 grid gap-2 sm:mt-4 sm:grid-cols-3",
@@ -417,9 +501,7 @@ export default function OrdersPage() {
         >
           {/* Ödeme Durumu */}
           <div className="rounded-xl border border-neutral-200 p-3">
-            <div className="mb-2 text-xs font-semibold text-neutral-500">
-              Ödeme Durumu
-            </div>
+            <div className="mb-2 text-xs font-semibold text-neutral-500">Ödeme Durumu</div>
             <div className="flex flex-wrap gap-2">
               {[
                 { v: "all", label: "Tümü" },
@@ -455,9 +537,7 @@ export default function OrdersPage() {
 
           {/* Ödeme Yöntemi (çoklu) */}
           <div className="rounded-xl border border-neutral-200 p-3">
-            <div className="mb-2 text-xs font-semibold text-neutral-500">
-              Ödeme Yöntemi
-            </div>
+            <div className="mb-2 text-xs font-semibold text-neutral-500">Ödeme Yöntemi</div>
             <div className="flex flex-wrap gap-2">
               {(["CASH", "TRANSFER", "CARD"] as PaymentMethod[]).map((m) => {
                 const active = methodFilters.includes(m);
@@ -481,40 +561,10 @@ export default function OrdersPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-neutral-200 p-3">
-            <div className="mb-2 text-xs font-semibold text-neutral-500">
-              Sipariş Durumu
-            </div>
-            <div className="flex flex-wrap gap-2">
-               {[
-              { v: "all", label: "Tümü" },
-              { v: "pending", label: "Beklemede" },
-              { v: "processing", label: "İşlemde" },
-              { v: "completed", label: "Tamamlandı" },
-              { v: "cancelled", label: "İptal" },
-            ].map((b) => {
-              const active = statusFilter === (b.v as any);
-              return (
-                <button
-                  key={b.v}
-                  type="button"
-                  onClick={() => setStatusFilter(b.v as any)}
-                  className={[
-                    "h-9 shrink-0 rounded-xl border px-3 text-sm",
-                    active
-                      ? "border-neutral-900 bg-neutral-900 text-white"
-                      : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
-                  ].join(" ")}
-                  aria-pressed={active}
-                >
-                  {b.label}
-                </button>
-              );
-            })}
-            </div>
+          {/* Bilgi kutusu */}
+          <div className="rounded-xl border border-dashed border-neutral-200 p-3 text-xs text-neutral-500">
+            Üst şeritteki <b>Aktif / Tamamlanan / Tümü</b> segmentleriyle durum filtresi uygulanır.
           </div>
-
-          
         </div>
       </div>
 
@@ -554,10 +604,7 @@ export default function OrdersPage() {
             const detailId = `order-detail-${order.id}`;
 
             return (
-              <section
-                key={order.id}
-                className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
-              >
+              <section key={order.id} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
                 {/* Header */}
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="flex flex-col gap-1">
@@ -565,13 +612,11 @@ export default function OrdersPage() {
                       <div className="font-semibold">Sipariş #{num}</div>
                       <StatusBadge s={order.status} />
                     </div>
-                    <div className="text-sm">
-                      <span className="font-medium">Müşteri:</span>{" "}
-                      {order.customerName || "—"}
+                    <div className="text-sm max-w-[240px] break-words sm:max-w-none">
+                      <span className="font-medium">Müşteri:</span> {order.customerName || "—"}
                     </div>
-                    <div className="text-sm">
-                      <span className="font-medium">Telefon:</span>{" "}
-                      {order.customerPhone || "—"}
+                    <div className="text-sm max-w-[240px] break-words sm:max-w-none">
+                      <span className="font-medium">Telefon:</span> {order.customerPhone || "—"}
                     </div>
                   </div>
 
@@ -579,33 +624,23 @@ export default function OrdersPage() {
                     {/* Ödeme özet pill’leri */}
                     <div className="mb-2.5 flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                        Toplam:{" "}
-                        <strong className="ms-1">
-                          {fmt(d?.netTotal ?? order.total ?? 0)} ₺
-                        </strong>
+                        Toplam: <strong className="ms-1">{fmt(d?.netTotal ?? order.total ?? 0)} ₺</strong>
                       </span>
                       <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                        Ödenen:{" "}
-                        <strong className="ms-1">
-                          {fmt(d?.paidTotal ?? 0)} ₺
-                        </strong>
+                        Ödenen: <strong className="ms-1">{fmt(d?.paidTotal ?? 0)} ₺</strong>
                       </span>
                       <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
-                        Kalan:{" "}
-                        <strong className="ms-1">
-                          {fmt(d?.balance ?? (order.total ?? 0))} ₺
-                        </strong>
+                        Kalan: <strong className="ms-1">{fmt(d?.balance ?? (order.total ?? 0))} ₺</strong>
                       </span>
                     </div>
 
                     <div className="mb-2.5 text-right text-xs text-neutral-500">
-                      {new Intl.DateTimeFormat("tr-TR", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }).format(new Date(order.createdAt))}
+                      {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(
+                        new Date(order.createdAt)
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <a
                         href={`/orders/${order.id}`}
                         className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
@@ -619,6 +654,18 @@ export default function OrdersPage() {
                         </svg>
                         Düzenle
                       </a>
+
+                      {/* Ödeme Yap */}
+                      <button
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+                        onClick={() => openPayModal(order.id)}
+                        title="Ödeme Yap"
+                      >
+                        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                          <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                        </svg>
+                        Ödeme Yap
+                      </button>
 
                       <button
                         className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
@@ -641,9 +688,7 @@ export default function OrdersPage() {
                       >
                         <svg
                           viewBox="0 0 24 24"
-                          className={`size-4 transition-transform ${
-                            isOpen ? "rotate-180" : ""
-                          }`}
+                          className={`size-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
                           aria-hidden
                         >
                           <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
@@ -657,105 +702,69 @@ export default function OrdersPage() {
                 {/* Detay */}
                 {isOpen && (
                   <div id={detailId} className="mt-4 space-y-4">
-                    {/* Ödeme Ekle */}
-                    <div className="rounded-xl border border-neutral-200 p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <div className="font-medium">Ödeme Ekle</div>
-                        {detailLoading[order.id] && (
-                          <div className="text-xs text-neutral-500">Yükleniyor…</div>
-                        )}
-                        {detailError[order.id] && (
-                          <div className="text-xs text-rose-600">
-                            {detailError[order.id]}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid gap-2 sm:grid-cols-4">
-                        <div className="sm:col-span-1">
-                          <label className="text-xs text-neutral-600">Tutar (₺)</label>
-                          <input
-                            className="input mt-1 w-full text-right"
-                            placeholder="0,00"
-                            inputMode="decimal"
-                            value={payAmount[order.id] ?? ""}
-                            onChange={(e) =>
-                              setPayAmount((m) => ({ ...m, [order.id]: e.target.value }))
-                            }
-                          />
-                        </div>
-                        <div className="sm:col-span-1">
-                          <label className="text-xs text-neutral-600">Ödeme Tipi</label>
-                          <select
-                            className="select mt-1 w-full"
-                            value={payMethod[order.id] ?? "CASH"}
-                            onChange={(e) =>
-                              setPayMethod((m) => ({
-                                ...m,
-                                [order.id]: e.target.value as PaymentMethod,
-                              }))
-                            }
-                          >
-                            <option value="CASH">Nakit</option>
-                            <option value="TRANSFER">Havale/EFT</option>
-                            <option value="CARD">Kredi Kartı</option>
-                          </select>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <label className="text-xs text-neutral-600">Not (opsiyonel)</label>
-                          <input
-                            className="input mt-1 w-full"
-                            placeholder="Açıklama…"
-                            value={payNote[order.id] ?? ""}
-                            onChange={(e) =>
-                              setPayNote((m) => ({ ...m, [order.id]: e.target.value }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center justify-between">
-                        <div className="text-sm text-neutral-600">
-                          Kalan:&nbsp;
-                          <span className="font-semibold">
-                            {fmt(d?.balance ?? 0)} ₺
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => addPayment(order.id)}
-                          disabled={!!paySaving[order.id]}
-                          className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
-                        >
-                          {paySaving[order.id] ? (
-                            <>
-                              <svg className="size-4 animate-spin" viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity=".25" />
-                                <path d="M4 12a8 8 0 0 1 8-8" stroke="currentColor" strokeWidth="4" fill="none" />
-                              </svg>
-                              Kaydediliyor…
-                            </>
-                          ) : (
-                            <>
-                              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                                <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
-                              </svg>
-                              Ödeme Ekle
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
                     {/* Not */}
                     {order.note && (
-                      <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                      <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
                         <span className="font-medium">Sipariş Notu:</span> {order.note}
                       </div>
                     )}
 
                     {/* Kalemler */}
-                    <div className="overflow-x-auto rounded-xl border border-neutral-200">
+                    {/* Mobil: kart liste */}
+                    <div className="sm:hidden">
+                      <ul className="divide-y rounded-2xl border border-neutral-200">
+                        {order.items.map((it) => (
+                          <li key={it.id} className="p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium">
+                                  {it.category.name} · {it.variant.name}
+                                </div>
+                                {it.note && (
+                                  <div className="mt-0.5 text-[11px] text-neutral-500 break-words">
+                                    Not: {it.note}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="shrink-0 text-right text-sm font-semibold">
+                                {fmt(Number(it.subtotal))} ₺
+                              </div>
+                            </div>
+                            <div className="mt-1 grid grid-cols-2 text-xs text-neutral-600">
+                              <div>
+                                Adet: <span className="font-medium">{it.qty}</span>
+                              </div>
+                              <div className="text-right">
+                                Birim: <span className="font-medium">{fmt(Number(it.unitPrice))}</span>
+                              </div>
+                              <div>
+                                En: <span className="font-medium">{it.width}</span>
+                              </div>
+                              <div className="text-right">
+                                Boy: <span className="font-medium">{it.height}</span>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                        <div className="flex justify-between">
+                          <span className="font-semibold">Toplam</span>
+                          <span className="font-bold">{fmt(Number(d?.total ?? order.total ?? 0))} ₺</span>
+                        </div>
+                        <div className="mt-1 flex justify-between">
+                          <span className="font-semibold">İskonto</span>
+                          <span>- {fmt(Number(d?.discount ?? 0))} ₺</span>
+                        </div>
+                        <div className="mt-1 flex justify-between">
+                          <span className="font-semibold">NET</span>
+                          <span className="font-bold">{fmt(Number(d?.netTotal ?? order.total ?? 0))} ₺</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tablet/desktop: tablo */}
+                    <div className="hidden sm:block overflow-x-auto rounded-2xl border border-neutral-200">
                       <table className="min-w-full text-sm">
                         <thead className="bg-neutral-50">
                           <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
@@ -774,9 +783,7 @@ export default function OrdersPage() {
                               <td>{it.category.name}</td>
                               <td>
                                 <div>{it.variant.name}</div>
-                                {it.note && (
-                                  <div className="text-xs text-neutral-500">Not: {it.note}</div>
-                                )}
+                                {it.note && <div className="text-xs text-neutral-500">Not: {it.note}</div>}
                               </td>
                               <td className="text-right">{it.qty}</td>
                               <td className="text-right">{it.width}</td>
@@ -788,82 +795,108 @@ export default function OrdersPage() {
                         </tbody>
                         <tfoot className="bg-neutral-50">
                           <tr className="[&>td]:px-3 [&>td]:py-2">
-                            <td colSpan={6} className="text-right font-semibold">
-                              Toplam
-                            </td>
-                            <td className="text-right font-bold">
-                              {fmt(Number(d?.total ?? order.total ?? 0))} ₺
-                            </td>
+                            <td colSpan={6} className="text-right font-semibold">Toplam</td>
+                            <td className="text-right font-bold">{fmt(Number(d?.total ?? order.total ?? 0))} ₺</td>
                           </tr>
                           <tr className="[&>td]:px-3 [&>td]:py-2">
-                            <td colSpan={6} className="text-right font-semibold">
-                              İskonto
-                            </td>
+                            <td colSpan={6} className="text-right font-semibold">İskonto</td>
                             <td className="text-right">- {fmt(Number(d?.discount ?? 0))} ₺</td>
                           </tr>
                           <tr className="[&>td]:px-3 [&>td]:py-2">
-                            <td colSpan={6} className="text-right font-semibold">
-                              NET
-                            </td>
-                            <td className="text-right font-bold">
-                              {fmt(Number(d?.netTotal ?? order.total ?? 0))} ₺
-                            </td>
+                            <td colSpan={6} className="text-right font-semibold">NET</td>
+                            <td className="text-right font-bold">{fmt(Number(d?.netTotal ?? order.total ?? 0))} ₺</td>
                           </tr>
                         </tfoot>
                       </table>
                     </div>
 
                     {/* Ödemeler */}
-                    <div className="rounded-xl border border-neutral-200 p-3">
+                    <div className="rounded-2xl border border-neutral-200 p-3">
                       <div className="mb-2 font-medium">Alınan Ödemeler</div>
                       {(d?.payments?.length ?? 0) === 0 ? (
                         <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
                       ) : (
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-sm">
-                            <thead className="bg-neutral-50">
-                              <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
-                                <th>Tarih</th>
-                                <th>Yöntem</th>
-                                <th>Not</th>
-                                <th className="text-right">Tutar</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y">
+                        <>
+                          {/* Mobil: kart liste */}
+                          <div className="sm:hidden">
+                            <ul className="divide-y rounded-2xl border border-neutral-200">
                               {d!.payments.map((p) => (
-                                <tr key={p.id} className="[&>td]:px-3 [&>td]:py-2">
-                                  <td>
-                                    {new Intl.DateTimeFormat("tr-TR", {
-                                      dateStyle: "medium",
-                                      timeStyle: "short",
-                                    }).format(new Date(p.paidAt))}
-                                  </td>
-                                  <td>
-                                    <span className="inline-flex items-center rounded-md bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                                      {methodLabel[p.method]}
-                                    </span>
-                                  </td>
-                                  <td className="text-neutral-600">{p.note || "—"}</td>
-                                  <td className="text-right font-medium">{fmt(p.amount)} ₺</td>
-                                </tr>
+                                <li key={p.id} className="p-3 text-sm">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <div className="font-medium">{methodLabel[p.method]}</div>
+                                      <div className="mt-0.5 text-xs text-neutral-600">
+                                        {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(
+                                          new Date(p.paidAt)
+                                        )}
+                                      </div>
+                                      {p.note && (
+                                        <div className="mt-0.5 text-xs text-neutral-600 break-words">Not: {p.note}</div>
+                                      )}
+                                    </div>
+                                    <div className="shrink-0 text-right font-semibold">
+                                      {fmt(p.amount)} ₺
+                                    </div>
+                                  </div>
+                                </li>
                               ))}
-                            </tbody>
-                            <tfoot className="bg-neutral-50">
-                              <tr className="[&>td]:px-3 [&>td]:py-2">
-                                <td colSpan={3} className="text-right font-semibold">
-                                  Toplam Ödenen
-                                </td>
-                                <td className="text-right font-bold">{fmt(d!.paidTotal)} ₺</td>
-                              </tr>
-                              <tr className="[&>td]:px-3 [&>td]:py-2">
-                                <td colSpan={3} className="text-right font-semibold">
-                                  Kalan Borç
-                                </td>
-                                <td className="text-right font-bold">{fmt(d!.balance)} ₺</td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
+                            </ul>
+
+                            {/* Mobil toplamlar */}
+                            <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                              <div className="rounded-xl bg-neutral-50 p-2 text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                                <div className="text-[11px]">Toplam Ödenen</div>
+                                <div className="font-semibold">{fmt(d!.paidTotal)} ₺</div>
+                              </div>
+                              <div className="rounded-xl bg-amber-50 p-2 text-amber-700 ring-1 ring-inset ring-amber-200">
+                                <div className="text-[11px]">Kalan Borç</div>
+                                <div className="font-semibold">{fmt(d!.balance)} ₺</div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Tablet/desktop: tablo */}
+                          <div className="hidden sm:block overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                              <thead className="bg-neutral-50">
+                                <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
+                                  <th>Tarih</th>
+                                  <th>Yöntem</th>
+                                  <th>Not</th>
+                                  <th className="text-right">Tutar</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y">
+                                {d!.payments.map((p) => (
+                                  <tr key={p.id} className="[&>td]:px-3 [&>td]:py-2">
+                                    <td>
+                                      {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(
+                                        new Date(p.paidAt)
+                                      )}
+                                    </td>
+                                    <td>
+                                      <span className="inline-flex items-center rounded-md bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                                        {methodLabel[p.method]}
+                                      </span>
+                                    </td>
+                                    <td className="text-neutral-600">{p.note || "—"}</td>
+                                    <td className="text-right font-medium">{fmt(p.amount)} ₺</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                              <tfoot className="bg-neutral-50">
+                                <tr className="[&>td]:px-3 [&>td]:py-2">
+                                  <td colSpan={3} className="text-right font-semibold">Toplam Ödenen</td>
+                                  <td className="text-right font-bold">{fmt(d!.paidTotal)} ₺</td>
+                                </tr>
+                                <tr className="[&>td]:px-3 [&>td]:py-2">
+                                  <td colSpan={3} className="text-right font-semibold">Kalan Borç</td>
+                                  <td className="text-right font-bold">{fmt(d!.balance)} ₺</td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>
@@ -872,6 +905,178 @@ export default function OrdersPage() {
             );
           })}
       </div>
+
+      {/* Payment Modal */}
+      {payModalOpenId && (
+        <div
+          ref={modalBackdropRef}
+          onClick={onBackdropClick}
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-[1px]"
+          aria-modal="true"
+          role="dialog"
+          aria-labelledby="pay-modal-title"
+        >
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl border border-neutral-200 bg-white p-4 sm:p-5 shadow-xl transition ease-out animate-[fadeIn_0.15s_ease-out]">
+            <div className="mb-3 flex items-start justify-between">
+              <div>
+                <div id="pay-modal-title" className="text-base font-semibold">
+                  Ödeme Yap
+                </div>
+                <div className="text-xs text-neutral-500">
+                  Sipariş ID: <span className="font-mono">{payModalOpenId}</span>
+                </div>
+              </div>
+              <button
+                className="inline-flex size-8 items-center justify-center rounded-xl border border-neutral-200 hover:bg-neutral-50"
+                onClick={closePayModal}
+                title="Kapat"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path fill="currentColor" d="M18.3 5.71L12 12.01l-6.29-6.3L4.3 7.12 10.59 13.4l-6.3 6.29 1.42 1.42 6.29-6.3 6.29 6.3 1.42-1.42-6.3-6.29 6.3-6.29z" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="space-y-3">
+              {/* Kalan */}
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
+                  Kalan:
+                  <strong className="ms-1">
+                    {fmt(detailById[payModalOpenId]?.balance ?? 0)} ₺
+                  </strong>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const bal = detailById[payModalOpenId]?.balance ?? 0;
+                    setPayAmount((m) => ({ ...m, [payModalOpenId]: bal ? String(bal).replace(".", ",") : "" }));
+                  }}
+                  className="h-8 rounded-lg border border-neutral-200 bg-white px-2.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                >
+                  Kalanı Doldur
+                </button>
+              </div>
+
+              {/* Tutar */}
+              <div>
+                <label className="text-xs text-neutral-600">Tutar (₺)</label>
+                <input
+                  className="input mt-1 w-full text-right"
+                  placeholder="0,00"
+                  inputMode="decimal"
+                  value={payAmount[payModalOpenId] ?? ""}
+                  onChange={(e) => setPayAmount((m) => ({ ...m, [payModalOpenId]: e.target.value }))}
+                />
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {[100, 500, 1000].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() =>
+                        setPayAmount((m) => ({ ...m, [payModalOpenId]: String(v).replace(".", ",") }))
+                      }
+                      className="h-8 rounded-lg border border-neutral-200 bg-white px-2.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                    >
+                      {fmt(v)} ₺
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Yöntem (chip radios) */}
+              <div>
+                <div className="mb-1 text-xs text-neutral-600">Ödeme Tipi</div>
+                <div className="flex flex-wrap gap-2">
+                  {(["CASH", "TRANSFER", "CARD"] as PaymentMethod[]).map((m) => {
+                    const active = (payMethod[payModalOpenId] ?? "CASH") === m;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setPayMethod((s) => ({ ...s, [payModalOpenId]: m }))}
+                        className={[
+                          "inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm",
+                          active
+                            ? "border-neutral-900 bg-neutral-900 text-white"
+                            : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
+                        ].join(" ")}
+                        aria-pressed={active}
+                      >
+                        {m === "CASH" && (
+                          <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                            <path fill="currentColor" d="M3 6h18v12H3zM5 8v8h14V8z" />
+                          </svg>
+                        )}
+                        {m === "TRANSFER" && (
+                          <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                            <path fill="currentColor" d="M4 11h12V8l4 4-4 4v-3H4z" />
+                          </svg>
+                        )}
+                        {m === "CARD" && (
+                          <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                            <path fill="currentColor" d="M2 6h20v12H2zM4 10h16V8H4z" />
+                          </svg>
+                        )}
+                        {methodLabel[m]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Not */}
+              <div>
+                <label className="text-xs text-neutral-600">Not (opsiyonel)</label>
+                <input
+                  className="input mt-1 w-full"
+                  placeholder="Açıklama…"
+                  value={payNote[payModalOpenId] ?? ""}
+                  onChange={(e) => setPayNote((m) => ({ ...m, [payModalOpenId]: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-4 flex items-center justify-between">
+              <div className="text-xs text-neutral-500">
+                {detailLoading[payModalOpenId] ? "Detay yükleniyor…" : "\u00A0"}
+                {detailError[payModalOpenId] && (
+                  <span className="text-rose-600">{detailError[payModalOpenId]}</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  await addPayment(payModalOpenId!);
+                  closePayModal();
+                }}
+                disabled={!!paySaving[payModalOpenId!]}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {paySaving[payModalOpenId!] ? (
+                  <>
+                    <svg className="size-4 animate-spin" viewBox="0 0 24 24" aria-hidden>
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" opacity=".25" />
+                      <path d="M4 12a8 8 0 0 1 8-8" stroke="currentColor" strokeWidth="4" fill="none" />
+                    </svg>
+                    Kaydediliyor…
+                  </>
+                ) : (
+                  <>
+                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                      <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                    </svg>
+                    Şimdi Öde
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

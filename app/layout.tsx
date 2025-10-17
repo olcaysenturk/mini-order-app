@@ -55,7 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </nav>
 
                 {/* Right side */}
-                <div className="ml-2 flex items-center gap-2">
+                <div className="ml-2 md:ml-8 flex items-center gap-2">
                   <UserMenu />
                 </div>
               </div>
@@ -69,7 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Toaster 
               richColors        // daha canlı renkler
               position="bottom-right"
-              theme="system"    // 'light' | 'dark' | 'system'
+              theme="light"    // 'light' | 'dark' | 'system'
               closeButton
               expand            // aynı tip toasları gruplayıp genişletir
               duration={3000}   // varsayılan süre

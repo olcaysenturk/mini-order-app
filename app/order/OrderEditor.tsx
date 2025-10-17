@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { useOrderSetupStore } from '@/app/lib/orderSetupStore'
 import { toast } from 'sonner'
+import { PageOverlay } from '../components/PageOverlay'
 
 /* ========= Types ========= */
 type Status = 'processing' | 'pending' | 'completed' | 'cancelled'
@@ -134,6 +135,8 @@ export default function OrderEditor({
   const [fileDensity, setFileDensity] = useState(1.0)
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
   const [lineStatus, setLineStatus] = useState<Status>('processing')
+
+  const [pageBusy, setPageBusy] = useState(false)
 
   /* ==== setup’dan prefill ==== */
   useEffect(() => {
@@ -296,6 +299,7 @@ export default function OrderEditor({
 
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
+        <PageOverlay show={pageBusy} label="Kaydediliyor…" />
       {/* Toolbar */}
       <div className=" m-auto w-[210mm] print:w-auto print:min-h-[auto] flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
@@ -496,6 +500,7 @@ export default function OrderEditor({
           className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
           disabled={false}
           onClick={async () => {
+            setPageBusy(true)
             // ✅ Kaydet
             if (!customerName.trim() || !customerPhone.trim()) { toast.error("Müşteri adı ve telefon zorunlu."); return }
             if (items.length === 0) { toast.error("En az bir satır ekleyin."); return }
@@ -546,6 +551,7 @@ export default function OrderEditor({
               toast.success('Sipariş kaydedildi')
               clearSetup(); router.push('/orders')
             } catch { toast.error('Sunucu hatası') }
+             setPageBusy(false)
           }}
         >
           Siparişi Kaydet

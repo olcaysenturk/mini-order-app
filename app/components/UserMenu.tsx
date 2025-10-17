@@ -83,7 +83,7 @@ export function UserMenu() {
         <span className="grid size-6 place-items-center rounded-full bg-neutral-200 text-[10px] font-bold text-neutral-700">
           {initials} 
         </span>
-        <span>Hesabım</span>
+        <span className='hidden md:flex'>Hesabım</span>
         {/* İsim */}
        
         {/* Rozetler */}
@@ -131,14 +131,14 @@ export function UserMenu() {
                 </span>
               ) : (
                 <span className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-700">
-                  FREE
+                  Ücretsiz Deneme
                 </span>
               )}
-              {role && (
+              {/* {role && (
                 <span className="inline-flex items-center rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-700">
                   {role}
                 </span>
-              )}
+              )} */}
             </div>
           </div>
 
@@ -148,13 +148,13 @@ export function UserMenu() {
             <Link
               prefetch={false}
               role="menuitem"
-              href="/orders"
+              href="/company"
               className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                 <path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z" />
               </svg>
-              Siparişler
+              Hesap Bilgileri
             </Link>
 
             {isSuper && (

@@ -28,7 +28,7 @@ function NavButton({
       className={[
         'inline-flex h-9 items-center gap-2 rounded-xl border px-3 text-sm transition',
         active
-          ? 'border-neutral-900 bg-neutral-900 text-white'
+          ? 'border-indigo-700 bg-indigo-700 text-white'
           : 'border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50',
         'focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2',
       ].join(' ')}
@@ -76,14 +76,14 @@ export function AuthedNav() {
   const isActive = (href: string) => pathname.startsWith(href)
 
   const items: NavItem[] = [
-    {
-      href: '/company',
-      label: 'Şirketim',
-      icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>,
-    },
+    // {
+    //   href: '/company',
+    //   label: 'Şirketim',
+    //   icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>,
+    // },
     {
       href: '/category',
-      label: 'Kategori',
+      label: 'Kategoriler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/></svg>,
     },
     {
