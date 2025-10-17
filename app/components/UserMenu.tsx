@@ -167,7 +167,7 @@ export function UserMenu() {
                 <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                   <path fill="currentColor" d="M3 4h18v2H3zm0 14h18v2H3zM5 8h14v8H5z" />
                 </svg>
-                Yönetim
+                Kullanıcı Yönetimi
               </Link>
             )}
           </div>

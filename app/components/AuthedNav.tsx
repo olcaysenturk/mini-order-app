@@ -184,12 +184,7 @@ export function AuthedNav() {
           <NavButton key={it.href} item={it} active={isActive(it.href)} />
         ))}
 
-        {isSuperAdmin && (
-          <>
-            <span className="hidden sm:inline text-neutral-300">·</span>
-            <NavButton item={adminItem} active={pathname.startsWith('/admin')} />
-          </>
-        )}
+        
       </nav>
     </div>
   )
