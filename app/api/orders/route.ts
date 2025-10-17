@@ -109,6 +109,7 @@ export async function GET(req: NextRequest) {
       ]
     }
 
+    // 1) Siparişleri çek
     const orders = await prisma.order.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -127,35 +128,67 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    // UI payload
-    const payload = orders.map((o) => ({
-      id: o.id,
-      createdAt: o.createdAt,
-      note: o.note,
-      status: o.status,
-      branch: o.branch,     // ✅ yeni alan
-      dealer: o.branch,     // 🔁 legacy alias (eski UI için)
-      customerName: o.customerName,
-      customerPhone: o.customerPhone,
-      customer: o.customer,
-      total: Number(o.total),
-      discount: Number((o as any).discount ?? 0),
-      netTotal: Number((o as any).netTotal ?? o.total),
-      items: o.items.map((it) => ({
-        id: it.id,
-        qty: it.qty,
-        width: it.width,
-        height: it.height,
-        unitPrice: Number(it.unitPrice),
-        fileDensity: Number(it.fileDensity),
-        subtotal: Number(it.subtotal),
-        note: it.note,
-        slotIndex: it.slotIndex ?? null,            // ✅
-        lineStatus: (it as any).lineStatus ?? 'pending', // ✅
-        category: { name: it.category.name },
-        variant: { name: it.variant.name },
-      })),
-    }))
+    if (orders.length === 0) {
+      return NextResponse.json([])
+    }
+
+    // 2) Bu listede yer alan siparişler için toplu ödeme toplamları (performanslı)
+    const orderIds = orders.map(o => o.id)
+
+    const paymentSums = await prisma.orderPayment.groupBy({
+      by: ['orderId'],
+      where: {
+        tenantId,
+        orderId: { in: orderIds },
+        // (İhtiyaç varsa: status=CONFIRMED, deletedAt:null vs.)
+      },
+      _sum: { amount: true },
+    })
+
+    const paidMap = new Map<string, number>(
+      paymentSums.map(row => [row.orderId, Number(row._sum.amount ?? 0)])
+    )
+
+    // 3) UI payload (paidTotal & balance ekli; totalPaid alias’ı dahil)
+    const payload = orders.map((o) => {
+      const total = Number(o.total)
+      const discount = Number((o as any).discount ?? 0)
+      const netTotal = Number((o as any).netTotal ?? total)
+      const paidTotal = Number(paidMap.get(o.id) ?? 0)
+      const balance = Math.max(0, netTotal - paidTotal)
+
+      return {
+        id: o.id,
+        createdAt: o.createdAt,
+        note: o.note,
+        status: o.status,
+        branch: o.branch,     // ✅ yeni alan
+        dealer: o.branch,     // 🔁 legacy alias (eski UI için)
+        customerName: o.customerName,
+        customerPhone: o.customerPhone,
+        customer: o.customer,
+        total,
+        discount,
+        netTotal,
+        paidTotal,            // ✅ FE tarafından kullanılan asıl alan
+        totalPaid: paidTotal, // ✅ legacy alias
+        balance,              // ✅ borç
+        items: o.items.map((it) => ({
+          id: it.id,
+          qty: it.qty,
+          width: it.width,
+          height: it.height,
+          unitPrice: Number(it.unitPrice),
+          fileDensity: Number(it.fileDensity),
+          subtotal: Number(it.subtotal),
+          note: it.note,
+          slotIndex: it.slotIndex ?? null,                 // ✅
+          lineStatus: (it as any).lineStatus ?? 'pending', // ✅
+          category: { name: it.category.name },
+          variant: { name: it.variant.name },
+        })),
+      }
+    })
 
     return NextResponse.json(payload)
   } catch (e) {
@@ -315,14 +348,18 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // Sayılara cast (UI için) + legacy alias
+    // Sayılara cast (UI için) + legacy alias + ilk ödeme özetleri
+    const netNumber = Number(created.netTotal)
     const payload = {
       ...created,
       branch: created.branch,
       dealer: created.branch, // legacy alias
       total:    Number(created.total),
       discount: Number(created.discount),
-      netTotal: Number(created.netTotal),
+      netTotal: netNumber,
+      paidTotal: 0,     // ✅ yeni sipariş için başlangıç
+      totalPaid: 0,     // ✅ legacy alias
+      balance:   netNumber,
       items: created.items.map(it => ({
         id: it.id,
         categoryId: it.categoryId,

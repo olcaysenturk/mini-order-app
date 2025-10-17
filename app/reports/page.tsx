@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
-  LineChart,
+  ComposedChart, // günlük + kümülatif tek grafikte
   Line,
   CartesianGrid,
   XAxis,
   YAxis,
   Tooltip,
-  ReferenceLine,
   BarChart,
   Bar,
   PieChart,
@@ -120,28 +119,14 @@ export default function ReportsPage() {
     try {
       const statusQs = `status=${encodeURIComponent(STATUS_PRESETS[filter])}`;
       const [r1, r2, r3, r4, r5, r6, r7, r8] = await Promise.all([
-        fetch(`/api/reports?section=overview&${statusQs}`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/reports?section=payments&${statusQs}`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/reports?section=categories&${statusQs}`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/reports?section=variants&${statusQs}`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/reports?section=customers&${statusQs}`, {
-          cache: "no-store",
-        }),
+        fetch(`/api/reports?section=overview&${statusQs}`, { cache: "no-store" }),
+        fetch(`/api/reports?section=payments&${statusQs}`, { cache: "no-store" }),
+        fetch(`/api/reports?section=categories&${statusQs}`, { cache: "no-store" }),
+        fetch(`/api/reports?section=variants&${statusQs}`, { cache: "no-store" }),
+        fetch(`/api/reports?section=customers&${statusQs}`, { cache: "no-store" }),
         fetch(`/api/reports?section=daily&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=dealers&${statusQs}`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/reports?section=items_agg&${statusQs}`, {
-          cache: "no-store",
-        }),
+        fetch(`/api/reports?section=dealers&${statusQs}`, { cache: "no-store" }),
+        fetch(`/api/reports?section=items_agg&${statusQs}`, { cache: "no-store" }),
       ]);
 
       setOver(r1.ok ? ((await r1.json()) as OverviewResp) : null);
@@ -181,6 +166,28 @@ export default function ReportsPage() {
   }, [chartData]);
 
   const dailyData = daily?.last30d ?? [];
+
+  // Günlük + Kümülatif liste
+  const dailyWithCum = useMemo(() => {
+    let cum = 0;
+    const list = (daily?.last30d ?? []).map((d) => {
+      const rev = Number(d.revenue || 0);
+      cum += rev;
+      return { ...d, cumRevenue: cum };
+    });
+    return list;
+  }, [daily]);
+
+  // Günlük özetler
+  const dailyTotals = useMemo(() => {
+    const list = dailyWithCum;
+    const days = list.length || 0;
+    const revenue = list.reduce((a, b) => a + Number(b.revenue || 0), 0);
+    const paid = list.reduce((a, b) => a + Number(b.paid || 0), 0);
+    const balance = Math.max(0, revenue - paid);
+    const avg = days ? revenue / days : 0;
+    return { revenue, paid, balance, avg, days };
+  }, [dailyWithCum]);
 
   const dealersData = dealers?.byDealer ?? [];
   const dealersWithRatio = useMemo(() => {
@@ -413,6 +420,7 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* Üst metrikler */}
       <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
         <MetricCard
           label="Bugün"
@@ -432,11 +440,111 @@ export default function ReportsPage() {
         />
       </section>
 
+      {/* Günlük + Kümülatif Ciro */}
       <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold">
-            Bayi Bazlı Ciro & Tahsilat
+            Ciro: Günlük &amp; Kümülatif (Son 30 Gün)
           </div>
+          <div className="ms-auto flex items-center gap-2">
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              onClick={downloadDailyCSV}
+              disabled={!dailyWithCum.length}
+              title="Günlük ciro CSV indir"
+            >
+              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                <path
+                  fill="currentColor"
+                  d="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"
+                />
+              </svg>
+              CSV
+            </button>
+          </div>
+        </div>
+
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <SummaryTile
+            label="Toplam Ciro"
+            value={`${fmtMoney(dailyTotals.revenue)} ₺`}
+          />
+          <SummaryTile
+            label="Toplam Alınan"
+            value={`${fmtMoney(dailyTotals.paid)} ₺`}
+          />
+          <SummaryTile
+            label="Toplam Kalan"
+            value={`${fmtMoney(dailyTotals.balance)} ₺`}
+            tone="amber"
+          />
+          <SummaryTile
+            label="Günlük Ortalama"
+            value={`${fmtMoney(dailyTotals.avg)} ₺`}
+            tone="indigo"
+          />
+        </div>
+
+        {!dailyWithCum.length ? (
+          <SkeletonBox />
+        ) : (
+          <div className="h-[300px] w-full">
+            <ResponsiveContainer>
+              <ComposedChart data={dailyWithCum}>
+                <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 11 }}
+                  minTickGap={16}
+                  tickLine={false}
+                  axisLine={{ stroke: "#E5E7EB" }}
+                />
+                <YAxis
+                  tickFormatter={(v) => fmtMoney(Number(v))}
+                  width={80}
+                  tickLine={false}
+                  axisLine={{ stroke: "#E5E7EB" }}
+                />
+                <Tooltip
+                  formatter={(v: any, name: string) => [
+                    `${fmtMoney(Number(v))} ₺`,
+                    name === "revenue" ? "Günlük Ciro" : "Kümülatif Ciro",
+                  ]}
+                  contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
+                  labelFormatter={(d) => `Tarih: ${d}`}
+                />
+                {/* Günlük ciro barı */}
+                <defs>
+                  <linearGradient id="barFillDaily" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#6366F1" />
+                    <stop offset="100%" stopColor="#A78BFA" />
+                  </linearGradient>
+                </defs>
+                <Bar
+                  dataKey="revenue"
+                  name="Günlük Ciro"
+                  fill="url(#barFillDaily)"
+                  radius={[8, 8, 0, 0]}
+                />
+                {/* Kümülatif ciro çizgisi */}
+                <Line
+                  type="monotone"
+                  dataKey="cumRevenue"
+                  name="Kümülatif Ciro"
+                  dot={false}
+                  stroke="#0EA5E9"
+                  strokeWidth={2}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </section>
+
+      {/* Bayi Bazlı Ciro & Tahsilat */}
+      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <div className="text-sm font-semibold">Bayi Bazlı Ciro &amp; Tahsilat</div>
           <div className="ms-auto flex flex-wrap items-center gap-2">
             <div className="relative">
               <input
@@ -588,7 +696,8 @@ export default function ReportsPage() {
         )}
       </section>
 
-      <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+      {/* Ödemeler */}
+      <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="mb-3 text-sm font-semibold">Ödeme Durumu</div>
           {!pay ? (
@@ -644,7 +753,7 @@ export default function ReportsPage() {
                     iconType="circle"
                     formatter={(value, entry: any) =>
                       METHOD_TR[entry?.payload?.method] ?? value
-                    } // ✅ Emniyet kemeri
+                    }
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -652,43 +761,10 @@ export default function ReportsPage() {
           )}
         </div>
 
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">
-            Son 30 Gün Kümülatif (Ödeme)
-          </div>
-          {!pay?.last30dCumulative?.length ? (
-            <SkeletonBox />
-          ) : (
-            <div className="h-[260px]">
-              <ResponsiveContainer>
-                <BarChart data={pay.last30dCumulative}>
-                  <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 11 }}
-                    minTickGap={16}
-                    tickLine={false}
-                    axisLine={{ stroke: "#E5E7EB" }}
-                  />
-                  <YAxis
-                    tickFormatter={(v) => fmtMoney(Number(v))}
-                    width={70}
-                    tickLine={false}
-                    axisLine={{ stroke: "#E5E7EB" }}
-                  />
-                  <Tooltip
-                    formatter={(v: any) => `${fmtMoney(Number(v))} ₺`}
-                    contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
-                  />
-                  <Bar dataKey="paid" stackId="a" />
-                  <Bar dataKey="unpaid" stackId="a" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
+    
       </section>
 
+      {/* Kategoriler & Ürün toplamları */}
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
           <div className="mb-3 text-sm font-semibold">
@@ -721,13 +797,7 @@ export default function ReportsPage() {
                     contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
                   />
                   <defs>
-                    <linearGradient
-                      id="barFillCategory"
-                      x1="0"
-                      y1="0"
-                      x2="0"
-                      y2="1"
-                    >
+                    <linearGradient id="barFillCategory" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#6366F1" />
                       <stop offset="100%" stopColor="#A78BFA" />
                     </linearGradient>
@@ -743,11 +813,9 @@ export default function ReportsPage() {
           )}
         </div>
 
-        {/* Ürün Toplamları (cm) – En Popüler Varyantlar yerine */}
+        {/* Ürün Toplamları (cm) */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">
-            Ürün Bazlı Satış (cm)
-          </div>
+          <div className="mb-3 text-sm font-semibold">Ürün Bazlı Satış (cm)</div>
           {!itemsAgg?.byProduct?.length ? (
             <SkeletonBox />
           ) : (
@@ -768,9 +836,7 @@ export default function ReportsPage() {
                       <td className="font-medium">{p.group}</td>
                       <td className="text-right">{fmtInt(p.qty)}</td>
                       <td className="text-right">{fmtCm(p.totalWidthCm / 100)} m</td>
-                      <td className="text-right">
-                        {fmtCm(p.totalHeightCm / 100)} m
-                      </td>
+                      <td className="text-right">{fmtCm(p.totalHeightCm / 100)} m</td>
                       <td className="text-right">{fmtMoney(p.amount)} ₺</td>
                     </tr>
                   ))}
@@ -781,6 +847,7 @@ export default function ReportsPage() {
         </div>
       </section>
 
+      {/* En çok müşteri */}
       <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="mb-3 text-sm font-semibold">
           En Çok Sipariş Veren Müşteriler
@@ -814,6 +881,7 @@ export default function ReportsPage() {
   );
 }
 
+/* ---- küçük komponentler ---- */
 function MetricCard({ label, value }: { label: string; value: string | null }) {
   const loading = value === null;
   return (
