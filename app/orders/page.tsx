@@ -513,7 +513,7 @@ export default function OrdersPage() {
             CSV
           </button>
 
-          <a href="/order" className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
+          <a href="/order/new" className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700">
             <svg viewBox="0 0 24 24" className="size-4" aria-hidden><path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z"/></svg>
             Yeni Sipariş
           </a>

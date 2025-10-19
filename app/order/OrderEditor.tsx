@@ -78,6 +78,24 @@ const statusDot: Record<Status, string> = {
   cancelled: 'bg-rose-600',
 }
 
+const isStorPerdeByName = (name: string) => normalize(name) === 'STOR PERDE'
+
+/** 🔢 Tutar hesabı:
+ * - STOR PERDE: m² hesabı (en/100 * boy/100) * adet * price (density YOK)
+ * - Diğerleri: (en/100 * fileDensity || 1) * adet * price
+ */
+function calcSubtotal(catName: string, price: number, qty: number, width: number, height: number, fileDensity: number) {
+  const q = Math.max(1, Math.floor(qty))
+  const w = Math.max(0, Math.floor(width))
+  const h = Math.max(0, Math.floor(height))
+  if (isStorPerdeByName(catName)) {
+    const area = (w / 100) * (h / 100)
+    return price * (area || 0) * q
+  } else {
+    return price * (((w / 100) * (fileDensity || 1)) || 1) * q
+  }
+}
+
 /* ========= API ========= */
 async function fetchCategories(): Promise<Category[]> {
   const res = await fetch('/api/categories', { cache: 'no-store' })
@@ -136,12 +154,16 @@ export default function OrderEditor({
   const [editingLineId, setEditingLineId] = useState<string | null>(null)
   const [lineStatus, setLineStatus] = useState<Status>('processing')
 
+  // 💲 Elle fiyat modları
+  const [useCustomPrice, setUseCustomPrice] = useState(false)
+  const [unitPriceInput, setUnitPriceInput] = useState<number>(0)
+
   const [pageBusy, setPageBusy] = useState(false)
 
   /* ==== setup’dan prefill ==== */
   useEffect(() => {
     if (!setup) {
-      router.replace('/order/new')
+      // router.replace('/order/new')
       return
     }
     setDealerId(setup.dealerId)
@@ -176,14 +198,18 @@ export default function OrderEditor({
     if (variants.length > 0 && !variants.find(v => v.id === varId)) setVarId(variants[0].id)
   }, [selectedCategory, variants, varId])
 
+  // Varyant veya elle mod kapalıyken fiyat inputunu senkronla
+  useEffect(() => {
+    if (!useCustomPrice) {
+      setUnitPriceInput(Number(selectedVariant?.unitPrice ?? 0))
+    }
+  }, [selectedVariant, useCustomPrice])
+
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0
-    const price = Number(selectedVariant.unitPrice) || 0
-    const q = Math.max(1, Math.floor(qty))
-    const w = Math.max(0, Math.floor(width))
-    const d = Number(fileDensity) || 1
-    return price * ((w / 100) * d || 1) * q
-  }, [selectedVariant, qty, width, fileDensity])
+    const price = Number(useCustomPrice ? unitPriceInput : selectedVariant.unitPrice) || 0
+    return calcSubtotal(selectedCategory?.name || '', price, qty, width, height, fileDensity)
+  }, [selectedVariant, useCustomPrice, unitPriceInput, selectedCategory, qty, width, height, fileDensity])
 
   const catById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories])
 
@@ -227,13 +253,16 @@ export default function OrderEditor({
 
   /* ==== actions ==== */
   const openAddAt = (title: string, index: number) => {
-    // index sadece başlıkta gösteriliyor
     setSlot({ title, index })
     const match = categories.find(c => normalize(c.name) === normalize(title))
     setCatId(match?.id || '')
     if (match?.variants?.length) setVarId(match.variants[0].id)
     setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0)
     setEditingLineId(null); setLineStatus('processing')
+
+    const defaultPrice = Number(match?.variants?.[0]?.unitPrice ?? 0)
+    setUseCustomPrice(false)
+    setUnitPriceInput(defaultPrice)
   }
   const openQuickFor = (categoryName: string, index: number) => {
     const cat = categories.find(c => normalize(c.name) === normalize(categoryName))
@@ -242,6 +271,10 @@ export default function OrderEditor({
     if (cat?.variants?.length) setVarId(cat.variants[0].id)
     setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0)
     setEditingLineId(null); setLineStatus('processing')
+
+    const defaultPrice = Number(cat?.variants?.[0]?.unitPrice ?? 0)
+    setUseCustomPrice(false)
+    setUnitPriceInput(defaultPrice)
   }
   const closeDrawer = () => { setSlot(null); setEditingLineId(null) }
 
@@ -249,9 +282,11 @@ export default function OrderEditor({
     if (!selectedCategory || !selectedVariant) return
     const q = Math.max(1, Math.floor(qty))
     const w = Math.max(0, Math.floor(width))
-    const price = Number(selectedVariant.unitPrice) || 0
+    const h = Math.max(0, Math.floor(height))
+    const price = Number(useCustomPrice ? unitPriceInput : selectedVariant.unitPrice) || 0
     const d = Number(fileDensity) || 1
-    const sub = price * ((w / 100) * d || 1) * q
+
+    const sub = calcSubtotal(selectedCategory.name, price, q, w, h, d)
 
     if (editingLineId) {
       setItems(prev => prev.map(it => it.id === editingLineId
@@ -259,7 +294,7 @@ export default function OrderEditor({
             ...it,
             categoryId: selectedCategory.id,
             variantId: selectedVariant.id,
-            qty: q, width: w, height,
+            qty: q, width: w, height: h,
             unitPrice: price, note: lineNote || null, fileDensity: d, subtotal: sub,
             lineStatus,
           }
@@ -269,7 +304,7 @@ export default function OrderEditor({
         id: uid(),
         categoryId: selectedCategory.id,
         variantId: selectedVariant.id,
-        qty: q, width: w, height,
+        qty: q, width: w, height: h,
         unitPrice: price, note: lineNote || undefined, fileDensity: d, subtotal: sub,
         lineStatus,
       }
@@ -287,6 +322,13 @@ export default function OrderEditor({
     })
     setCatId(line.categoryId); setVarId(line.variantId); setQty(line.qty); setWidth(line.width); setHeight(line.height)
     setLineNote(line.note || ''); setFileDensity(line.fileDensity || 1.0); setLineStatus(line.lineStatus || 'processing')
+
+    const variantPrice = Number(
+      catById.get(line.categoryId)?.variants?.find(v => v.id === line.variantId)?.unitPrice ?? 0
+    )
+    const currentUnit = Number(line.unitPrice) || variantPrice
+    setUnitPriceInput(currentUnit)
+    setUseCustomPrice(currentUnit !== variantPrice)
   }
 
   // satır durumunu inline güncelle (kutucuğun içindeki select’ten)
@@ -294,12 +336,12 @@ export default function OrderEditor({
     setItems(prev => prev.map(it => (it.id === id ? { ...it, lineStatus: s } : it)))
 
   // özel bölümler (kutusuz)
-  const storItems = items.filter(i => normalize(catById.get(i.categoryId)?.name || '') === 'STOR PERDE')
+  const storItems = items.filter(i => isStorPerdeByName(catById.get(i.categoryId)?.name || ''))
   const aksesuarItems = items.filter(i => normalize(catById.get(i.categoryId)?.name || '') === 'AKSESUAR')
 
   return (
     <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
-        <PageOverlay show={pageBusy} label="Kaydediliyor…" />
+      <PageOverlay show={pageBusy} label="Kaydediliyor…" />
       {/* Toolbar */}
       <div className=" m-auto w-[210mm] print:w-auto print:min-h-[auto] flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
@@ -449,14 +491,42 @@ export default function OrderEditor({
             <div className="mb-3 grid grid-cols-2 gap-3">
               <div>
                 <label className="text-sm">File Sıklığı</label>
-                <select className="select mt-1" value={String(fileDensity)} onChange={(e)=>setFileDensity(parseFloat(e.target.value))}>
+                <select
+                  className="select mt-1"
+                  value={String(fileDensity)}
+                  onChange={(e)=>setFileDensity(parseFloat(e.target.value))}
+                  disabled={isStorPerdeByName(selectedCategory?.name || '')}
+                  title={isStorPerdeByName(selectedCategory?.name || '') ? 'STOR PERDE m² hesabı: file dikkate alınmaz' : undefined}
+                >
                   <option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option>
                   <option value="2.5">2.5x</option><option value="3">3.0x</option>
                 </select>
+                {isStorPerdeByName(selectedCategory?.name || '') && (
+                  <div className="mt-1 text-[10px] text-emerald-700 font-medium">
+                    STOR PERDE <b>m²</b> hesabı ile (En×Boy/10.000) fiyatlanır; file dikkate alınmaz.
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-sm">Birim Fiyat</label>
-                <input className="input mt-1 text-right" value={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : ''} readOnly placeholder="—" />
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    className="input flex-1 text-right disabled:bg-gray-100"
+                    type="number" min={0} step="0.01"
+                    value={Number.isFinite(unitPriceInput) ? unitPriceInput : 0}
+                    onChange={(e)=>setUnitPriceInput(parseFloat(e.target.value || '0'))}
+                    disabled={!useCustomPrice}
+                    placeholder={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : '—'}
+                  />
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={useCustomPrice}
+                      onChange={(e)=>setUseCustomPrice(e.target.checked)}
+                    />
+                    Elle
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -500,11 +570,11 @@ export default function OrderEditor({
           className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
           disabled={false}
           onClick={async () => {
-            setPageBusy(true)
-            // ✅ Kaydet
+            // ✅ Önce validasyon
             if (!customerName.trim() || !customerPhone.trim()) { toast.error("Müşteri adı ve telefon zorunlu."); return }
             if (items.length === 0) { toast.error("En az bir satır ekleyin."); return }
 
+            setPageBusy(true)
             // payload — lineStatus artık gönderiliyor
             const payload: any = {
               dealerId, // (veya branchId kullanıyorsanız ona geçin)
@@ -549,9 +619,13 @@ export default function OrderEditor({
                 }
               }
               toast.success('Sipariş kaydedildi')
-              clearSetup(); router.push('/orders')
-            } catch { toast.error('Sunucu hatası') }
-             setPageBusy(false)
+              router.push('/orders')
+              clearSetup(); 
+            } catch { 
+              toast.error('Sunucu hatası') 
+            } finally {
+              setPageBusy(false)
+            }
           }}
         >
           Siparişi Kaydet
@@ -741,16 +815,33 @@ function SectionQuickPlus({ title, items, catById, onAddAt, onEdit }: {
 }) {
   const order = [0,3,1,4,2,5] // görsel sıra (sadece satır numaralandırma için)
   const visibleRows = Array.from({ length: order.length }).map((_, idx) => items[idx] || null)
+  const isStor = isStorPerdeByName(title)
 
   return (
     <div className="mt-6 break-inside-avoid">
-      <div className="mb-0 font-semibold uppercase">{title}</div>
+      <div className="mb-0 font-semibold uppercase flex items-center gap-2">
+        {title}
+        {isStor && <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">m² hesap</span>}
+      </div>
       <div className="grid grid-cols-2 gap-0">
         {order.map((rowNumber, visIndex) => {
           const it = visibleRows[visIndex]
           const variantName = it
             ? (catById.get(it.categoryId)?.variants?.find(v => v.id === it.variantId)?.name ?? '—')
             : null
+
+          let label = <span className="print:hidden">+ Ekle</span>
+          if (it) {
+            const area = isStor ? ((it.width / 100) * (it.height / 100)) : 0
+            label = (
+              <>
+                {variantName ?? '—'} • {it.qty} adet • {it.width}×{it.height} cm
+                {isStor && <> • Alan: {fmt(area)} m²</>}
+                {' '}• {fmt(it.subtotal)}
+              </>
+            )
+          }
+
           return (
             <div key={rowNumber} className="flex items-center gap-0">
               <div className="w-6 text-right text-xs">{visIndex + 1}-</div>
@@ -760,9 +851,7 @@ function SectionQuickPlus({ title, items, catById, onAddAt, onEdit }: {
                 className="input h-[23px] flex-1 rounded-none border-0 border-b border-[#999] p-0 pl-2 text-left text-sm hover:bg-black/5"
                 title={it ? 'Düzenle' : 'Ekle'}
               >
-                {it
-                  ? `${variantName ?? '—'} • ${it.qty} adet • ${it.width}×${it.height} cm • ${fmt(it.subtotal)}`
-                  : <span className="print:hidden">+ Ekle</span>}
+                {label}
               </button>
             </div>
           )
