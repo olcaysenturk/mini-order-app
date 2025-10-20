@@ -62,6 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </div>
           </header>
+          
 
           {/* ======= Page Content ======= */}
           <main id="content" className="relative min-h-[calc(100vh-135px)] p-8">
@@ -77,16 +78,28 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </main>
 
           {/* ======= Footer (Light) ======= */}
-          <footer className="border-t border-neutral-200/80 bg-white/70 backdrop-blur print:hidden flex items-end">
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 text-sm text-neutral-600 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div>© {new Date().getFullYear()} Perde Konağı</div>
-              <div className="flex items-center gap-4">
-                <Link href="/login" className="hover:text-indigo-600">Giriş</Link>
-                <Link href="/register" className="hover:text-indigo-600">Kaydol</Link>
-                <a href="#ozellikler" className="hover:text-indigo-600">Özellikler</a>
-              </div>
+           <footer className="relative z-10 border-t border-neutral-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm text-neutral-600">
+              <span className="font-semibold">Perdexa</span>
+              <span className="hidden sm:inline">•</span>
+              <span className="text-neutral-500">Perde Sipariş Yönetimi</span>
             </div>
-          </footer>
+            <nav aria-label="Alt menü" className="flex items-center gap-4 text-sm">
+              <Link prefetch={false} href="/legal/privacy" className="text-neutral-600 hover:text-neutral-900">
+                Gizlilik
+              </Link>
+              <Link prefetch={false} href="/legal/terms" className="text-neutral-600 hover:text-neutral-900">
+                Şartlar
+              </Link>
+              <Link prefetch={false} href="/contact" className="text-neutral-600 hover:text-neutral-900">
+                İletişim
+              </Link>
+            </nav>
+          </div>
+        </div>
+      </footer>
         </Providers>
       </body>
     </html>
