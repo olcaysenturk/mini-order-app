@@ -67,7 +67,7 @@ export default async function ContactPage({
       {
         "@type": "ContactPoint",
         contactType: "customer support",
-        email: "support@perdexa.app",
+        email: "support@perdexa.com",
         availableLanguage: ["tr", "en"],
         areaServed: "TR",
       },
@@ -228,8 +228,8 @@ export default async function ContactPage({
               <ul className="mt-3 space-y-2 text-sm text-neutral-700">
                 <li>
                   E-posta:{" "}
-                  <a href="mailto:support@perdexa.app" className="underline underline-offset-4">
-                    support@perdexa.app
+                  <a href="mailto:support@perdexa.com" className="underline underline-offset-4">
+                    support@perdexa.com
                   </a>
                 </li>
                 <li>Çalışma saatleri: Hafta içi 10:00–18:00 (TR)</li>
@@ -244,10 +244,10 @@ export default async function ContactPage({
                   Pro plan ve ekip lisansları için bize ulaşın.
                 </p>
                 <a
-                  href="mailto:sales@perdexa.app"
+                  href="mailto:sales@perdexa.com"
                   className="mt-3 inline-flex rounded-xl bg-neutral-900 px-4 py-2 text-xs font-medium text-white hover:bg-black"
                 >
-                  sales@perdexa.app
+                  sales@perdexa.com
                 </a>
               </div>
 
@@ -282,10 +282,10 @@ export default async function ContactPage({
               </p>
               <div className="mt-4">
                 <a
-                  href="mailto:support@perdexa.app"
+                  href="mailto:support@perdexa.com"
                   className="inline-flex items-center rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-neutral-900 shadow-sm hover:bg-neutral-100"
                 >
-                  support@perdexa.app
+                  support@perdexa.com
                 </a>
               </div>
             </div>
