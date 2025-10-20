@@ -1,6 +1,7 @@
 // app/contact/page.tsx — LIGHT MODE · modern (landing referanslı)
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { SubmitButton } from "../components/SubmitButton";
 
 /** ======= SEO / OpenGraph ======= */
 export const metadata = {
@@ -45,11 +46,16 @@ async function sendContact(formData: FormData) {
   redirect("/contact?sent=1");
 }
 
-export default function ContactPage({
+type ContactSearchParams = { sent?: string; error?: string };
+
+export default async function ContactPage({
   searchParams,
-}: { searchParams?: { sent?: string; error?: string } }) {
-  const sent = searchParams?.sent === "1";
-  const error = searchParams?.error === "1";
+}: {
+  searchParams?: Promise<ContactSearchParams>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const isSent = sp.sent === "1" || sp.sent === "true" || sp.sent === "ok";
+  const hasError = sp.error === "1" || sp.error === "true";
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -57,13 +63,15 @@ export default function ContactPage({
     name: "Perdexa İletişim",
     url: "/contact",
     publisher: { "@type": "Organization", name: "Perdexa" },
-    contactPoint: [{
-      "@type": "ContactPoint",
-      contactType: "customer support",
-      email: "support@perdexa.app",
-      availableLanguage: ["tr", "en"],
-      areaServed: "TR"
-    }]
+    contactPoint: [
+      {
+        "@type": "ContactPoint",
+        contactType: "customer support",
+        email: "support@perdexa.app",
+        availableLanguage: ["tr", "en"],
+        areaServed: "TR",
+      },
+    ],
   };
 
   return (
@@ -111,14 +119,14 @@ export default function ContactPage({
 
             {/* Bildirim bantları */}
             <div className="relative">
-              {(sent || error) && (
+              {(isSent || hasError) && (
                 <div className="rounded-3xl border border-neutral-200 bg-white/70 backdrop-blur p-5 shadow-sm">
-                  {sent && (
+                  {isSent && (
                     <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                       Teşekkürler! Mesajın bize ulaştı. En kısa sürede dönüş yapacağız.
                     </div>
                   )}
-                  {error && (
+                  {hasError && (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
                       Formda eksik/hatalı bilgi var. Lütfen geçerli e-posta girin ve mesajınızı biraz detaylandırın.
                     </div>
@@ -295,6 +303,3 @@ export default function ContactPage({
     </main>
   );
 }
-
-/* Client submit button */
-import { SubmitButton } from "../components/SubmitButton";
