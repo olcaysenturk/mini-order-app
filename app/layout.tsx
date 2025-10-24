@@ -78,7 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </main>
 
           {/* ======= Footer (Light) ======= */}
-           <footer className="relative z-10 border-t border-neutral-200 bg-white">
+           <footer className="relative z-10 border-t border-neutral-200 bg-white print:hidden">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 text-sm text-neutral-600">

@@ -48,7 +48,6 @@ export async function GET(req: NextRequest) {
 
     /* ======= SECTION: OVERVIEW ======= */
     if (section === 'overview') {
-      // KPI: gün/hafta/ay/yıl (netTotal)
       const totalsRow = await prisma.$queryRaw<
         { day: number | null; week: number | null; month: number | null; year: number | null }[]
       >(Prisma.sql`
@@ -63,7 +62,6 @@ export async function GET(req: NextRequest) {
       `)
       const totals = totalsRow[0] ?? { day: 0, week: 0, month: 0, year: 0 }
 
-      // Son 30 gün (netTotal)
       const days = 30
       const since = startOfDay(new Date(now))
       since.setDate(since.getDate() - (days - 1))
@@ -109,7 +107,6 @@ export async function GET(req: NextRequest) {
 
     /* ======= SECTION: PAYMENTS ======= */
     if (section === 'payments') {
-      // Ödeme yapılan/ödenmeyen (orders + payments)
       const summary = await prisma.$queryRaw<{
         paid_amount: number | null
         paid_count: number | null
@@ -137,7 +134,6 @@ export async function GET(req: NextRequest) {
       )
       const s = summary[0] ?? { paid_amount: 0, paid_count: 0, unpaid_amount: 0, unpaid_count: 0 }
 
-      // Ödeme yöntemi dağılımı
       const methods = await prisma.$queryRaw<{ method: string; amount: number; count: number }[]>(
         Prisma.sql`
           SELECT op."method"::text as method,
@@ -153,7 +149,6 @@ export async function GET(req: NextRequest) {
         `
       )
 
-      // Son 30 gün kümülatif (netTotal vs paid)
       const days = 30
       const since = startOfDay(new Date(now))
       since.setDate(since.getDate() - (days - 1))
@@ -206,43 +201,43 @@ export async function GET(req: NextRequest) {
       }, { headers: { 'Cache-Control': 'private, max-age=60' } })
     }
 
+    /* ======= SECTION: ITEMS_AGG ======= */
     if (section === 'items_agg') {
-  const rows = await prisma.$queryRaw<
-    { group: string | null; qty: number | null; amount: number | null; total_width_cm: number | null; total_height_cm: number | null }[]
-  >(Prisma.sql`
-    SELECT
-      COALESCE(c."name", 'Ürün') AS group,
-      COALESCE(SUM(oi."qty"), 0)::int AS qty,
-      COALESCE(SUM(oi."subtotal"), 0)::float AS amount,
-      COALESCE(SUM((oi."width") * (oi."qty")), 0)::float  AS total_width_cm,
-      COALESCE(SUM((oi."height") * (oi."qty")), 0)::float AS total_height_cm
-    FROM "OrderItem" oi
-    JOIN "Order" o ON o."id" = oi."orderId"
-    LEFT JOIN "Category" c ON c."id" = oi."categoryId"
-    WHERE o."tenantId" = ${tenantId}
-      AND o."status" = ANY(${statusArray})
-    GROUP BY 1
-    ORDER BY amount DESC
-  `)
+      const rows = await prisma.$queryRaw<
+        { group: string | null; qty: number | null; amount: number | null; total_width_cm: number | null; total_height_cm: number | null }[]
+      >(Prisma.sql`
+        SELECT
+          COALESCE(c."name", 'Ürün') AS group,
+          COALESCE(SUM(oi."qty"), 0)::int AS qty,
+          COALESCE(SUM(oi."subtotal"), 0)::float AS amount,
+          COALESCE(SUM((oi."width") * (oi."qty")), 0)::float  AS total_width_cm,
+          COALESCE(SUM((oi."height") * (oi."qty")), 0)::float AS total_height_cm
+        FROM "OrderItem" oi
+        JOIN "Order" o ON o."id" = oi."orderId"
+        LEFT JOIN "Category" c ON c."id" = oi."categoryId"
+        WHERE o."tenantId" = ${tenantId}
+          AND o."status" = ANY(${statusArray})
+        GROUP BY 1
+        ORDER BY amount DESC
+      `)
 
-  return NextResponse.json({
-    byProduct: rows.map(r => ({
-      group: r.group ?? 'Ürün',
-      qty: Number(r.qty ?? 0),
-      amount: Number(r.amount ?? 0),
-      totalWidthCm: Number(r.total_width_cm ?? 0),
-      totalHeightCm: Number(r.total_height_cm ?? 0),
-    })),
-  }, { headers: { 'Cache-Control': 'private, max-age=120' } })
-}
+      return NextResponse.json({
+        byProduct: rows.map(r => ({
+          group: r.group ?? 'Ürün',
+          qty: Number(r.qty ?? 0),
+          amount: Number(r.amount ?? 0),
+          totalWidthCm: Number(r.total_width_cm ?? 0),
+          totalHeightCm: Number(r.total_height_cm ?? 0),
+        })),
+      }, { headers: { 'Cache-Control': 'private, max-age=120' } })
+    }
 
-    /* ======= SECTION: DAILY (NEW) ======= */
+    /* ======= SECTION: DAILY ======= */
     if (section === 'daily') {
       const days = 30
       const since = startOfDay(new Date(now))
       since.setDate(since.getDate() - (days - 1))
 
-      // Günlük ciro (netTotal) — createdAt
       const byOrder = await prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(
         Prisma.sql`
           SELECT DATE_TRUNC('day', o."createdAt")::date AS d,
@@ -255,7 +250,6 @@ export async function GET(req: NextRequest) {
           ORDER BY 1 ASC
         `
       )
-      // Günlük tahsilat — paidAt
       const byPay = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
         Prisma.sql`
           SELECT DATE_TRUNC('day', op."paidAt")::date AS d,
@@ -346,11 +340,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ topCustomers: rows }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
-    /* ======= SECTION: DEALERS (NEW) ======= */
-    if (section === 'dealers') {
-      // "Bayi" olarak müşteri adını kullanıyoruz (Customer.name varsa o, yoksa Order.customerName, yoksa 'Müşteri')
-      // Hem ciro (netTotal) hem tahsilat (OrderPayment.amount) aynı filtrelerle toplanır.
-      const rows = await prisma.$queryRaw<{ dealer: string | null; orders: number; revenue: number; paid: number }[]>(
+    /* ======= SECTION: BRANCHES (Şube bazlı ciro & tahsilat) ======= */
+    if (section === 'branches') {
+      const rows = await prisma.$queryRaw<{ branchId: string | null; branch: string | null; code: string | null; orders: number; revenue: number; paid: number }[]>(
         Prisma.sql`
           WITH p AS (
             SELECT op."orderId", SUM(op."amount")::float AS paid
@@ -360,32 +352,34 @@ export async function GET(req: NextRequest) {
             GROUP BY op."orderId"
           )
           SELECT
-            COALESCE(c."name", NULLIF(TRIM(o."customerName"), ''), 'Müşteri') AS dealer,
+            b."id"::text AS "branchId",
+            COALESCE(b."name", 'Şube') AS branch,
+            b."code"::text AS code,
             COUNT(*)::int                                         AS orders,
             COALESCE(SUM(o."netTotal"), 0)::float                 AS revenue,
             COALESCE(SUM(COALESCE(p.paid, 0)), 0)::float          AS paid
           FROM "Order" o
-          LEFT JOIN p            ON p."orderId" = o."id"
-          LEFT JOIN "Customer" c ON c."id" = o."customerId"
+          LEFT JOIN p       ON p."orderId" = o."id"
+          LEFT JOIN "Branch" b ON b."id" = o."branchId"
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
-          GROUP BY 1
+          GROUP BY b."id", b."name", b."code"
           ORDER BY revenue DESC
         `
       )
 
-      // sayısal cast ve null güvenliği
-      const byDealer = rows.map(r => ({
-        dealer: r.dealer ?? 'Müşteri',
+      const byBranch = rows.map(r => ({
+        branchId: r.branchId,
+        branch: r.branch ?? 'Şube',
+        code: r.code,
         orders: Number(r.orders ?? 0),
         revenue: Number(r.revenue ?? 0),
         paid: Number(r.paid ?? 0),
       }))
 
-      return NextResponse.json({ byDealer }, { headers: { 'Cache-Control': 'private, max-age=120' } })
+      return NextResponse.json({ byBranch }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
-    // bilinmeyen section -> 400
     return NextResponse.json({ error: 'invalid_section' }, { status: 400 })
   } catch (e) {
     console.error('GET /api/reports error', e)

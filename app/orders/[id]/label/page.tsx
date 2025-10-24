@@ -136,7 +136,7 @@ export default function OrderLabelsThermal() {
               <div className="flex flex-col gap-1">
                 <h1 className="text-lg font-semibold tracking-tight">Barkod Etiketleri</h1>
                 <div className="flex items-center gap-2">
-                  <Badge>Yalnızca <b>success/completed</b></Badge>
+                  <Badge>Yalnızca <b className='ml-2'>Tamamlanan siparişler</b></Badge>
                   <Badge muted>
                     Satır: {filteredCount}/{totalCount}
                   </Badge>
@@ -349,9 +349,9 @@ function Label70({
       </div>
 
       {/* Barkod */}
-      <div className="flex justify-center">
+      {/* <div className="flex justify-center">
         <svg ref={svgRef} width="100%" height="44" />
-      </div>
+      </div> */}
     </div>
   );
 }

@@ -14,13 +14,18 @@ const PatchItemSchema = z.object({
   variantId: z.string(),
   qty: z.number().int().positive(),
   width: z.number().int().nonnegative(),    // cm
-  height: z.number().int().nonnegative(),   // cm (saklanır, hesapta kullanılmaz)
+  height: z.number().int().nonnegative(),   // cm
   unitPrice: z.union([z.number(), z.string()]).transform(v => {
     const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : v
     return Number.isFinite(n) && n >= 0 ? n : 0
   }),
   fileDensity: z.number().positive().default(1), // default 1
   note: z.string().nullable().optional(),
+
+  // ✅ eklendi
+  lineStatus: StatusSchema.default('pending'),
+  slotIndex: z.number().int().nullable().optional(),
+
   _action: z.enum(['upsert', 'delete']).optional(), // default: upsert
 })
 
@@ -77,6 +82,9 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         unitPrice:   Number(it.unitPrice),
         fileDensity: Number(it.fileDensity),
         subtotal:    Number(it.subtotal),
+        // lineStatus ve slotIndex zaten geliyor; açıkça bırakıyoruz
+        lineStatus: it.lineStatus,
+        slotIndex: it.slotIndex,
       })),
       payments: order.payments.map(p => ({
         ...p,
@@ -143,6 +151,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         .mul(density)
         .mul(qtyInt)
 
+      const slotForDb =
+        typeof it.slotIndex === 'number' && Number.isFinite(it.slotIndex)
+          ? it.slotIndex
+          : null
+
       // Ortak alanlar — update için
       const lineDataForUpdate: Prisma.OrderItemUpdateInput = {
         qty: qtyInt,
@@ -154,6 +167,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         note: (it.note ?? null) as string | null,
         category: { connect: { id: String(it.categoryId) } },
         variant:  { connect: { id: String(it.variantId) } },
+
+        // ✅ kritik alanlar:
+        lineStatus: { set: it.lineStatus ?? 'pending' },
+        slotIndex:  { set: slotForDb },
       }
 
       if (it.id) {
@@ -174,6 +191,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           category: { connect: { id: String(it.categoryId) } },
           variant:  { connect: { id: String(it.variantId) } },
           order: { connect: { id: orderId } },
+
+          // ✅ kritik alanlar:
+          lineStatus: it.lineStatus ?? 'pending',
+          slotIndex:  slotForDb,
         }
         ops.push(prisma.orderItem.create({ data: lineDataForCreate }))
       }
@@ -254,6 +275,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         unitPrice:   Number(it.unitPrice),
         fileDensity: Number(it.fileDensity),
         subtotal:    Number(it.subtotal),
+        lineStatus:  it.lineStatus,
+        slotIndex:   it.slotIndex,
       })),
       payments: updated.payments.map(p => ({ ...p, amount: Number(p.amount) })),
       paidTotal,

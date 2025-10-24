@@ -1,9 +1,10 @@
+// app/reports/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer,
-  ComposedChart, // günlük + kümülatif tek grafikte
+  ComposedChart,
   Line,
   CartesianGrid,
   XAxis,
@@ -17,6 +18,7 @@ import {
   Legend,
 } from "recharts";
 
+/* -------------------- helpers -------------------- */
 type Status = "pending" | "processing" | "completed" | "cancelled";
 type FilterKey = "active" | "completed" | "all";
 const STATUS_PRESETS: Record<FilterKey, string> = {
@@ -44,6 +46,12 @@ const fmtCm = (n: number | undefined | null) =>
     Number(n ?? 0)
   );
 
+// Güvenli CSV helpers
+const csvEsc = (v: unknown) => `"${String(v).replace(/"/g, '""')}"`;
+const rowsToCSV = (rows: (string | number)[][]) =>
+  rows.map((r) => r.map(csvEsc).join(",")).join("\n");
+
+/* -------------------- API response types -------------------- */
 type OverviewResp = {
   mode: string;
   statuses: Status[];
@@ -84,8 +92,15 @@ type DailyResp = {
   last30d: { date: string; revenue: number; paid: number }[];
 };
 
-type DealersResp = {
-  byDealer: { dealer: string; revenue: number; paid: number; orders: number }[];
+type BranchesResp = {
+  byBranch: {
+    branchId: string | null;
+    branch: string;
+    code: string | null;
+    orders: number;
+    revenue: number;
+    paid: number;
+  }[];
 };
 
 type ItemsAggResp = {
@@ -98,6 +113,7 @@ type ItemsAggResp = {
   }[];
 };
 
+/* -------------------- page -------------------- */
 export default function ReportsPage() {
   const [filter, setFilter] = useState<FilterKey>("active");
 
@@ -107,7 +123,7 @@ export default function ReportsPage() {
   const [vars, setVars] = useState<VariantsResp | null>(null);
   const [cust, setCust] = useState<CustomersResp | null>(null);
   const [daily, setDaily] = useState<DailyResp | null>(null);
-  const [dealers, setDealers] = useState<DealersResp | null>(null);
+  const [branches, setBranches] = useState<BranchesResp | null>(null);
   const [itemsAgg, setItemsAgg] = useState<ItemsAggResp | null>(null);
 
   const [loading, setLoading] = useState(false);
@@ -125,7 +141,7 @@ export default function ReportsPage() {
         fetch(`/api/reports?section=variants&${statusQs}`, { cache: "no-store" }),
         fetch(`/api/reports?section=customers&${statusQs}`, { cache: "no-store" }),
         fetch(`/api/reports?section=daily&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=dealers&${statusQs}`, { cache: "no-store" }),
+        fetch(`/api/reports?section=branches&${statusQs}`, { cache: "no-store" }),
         fetch(`/api/reports?section=items_agg&${statusQs}`, { cache: "no-store" }),
       ]);
 
@@ -135,7 +151,7 @@ export default function ReportsPage() {
       setVars(r4.ok ? ((await r4.json()) as VariantsResp) : null);
       setCust(r5.ok ? ((await r5.json()) as CustomersResp) : null);
       setDaily(r6.ok ? ((await r6.json()) as DailyResp) : null);
-      setDealers(r7.ok ? ((await r7.json()) as DealersResp) : null);
+      setBranches(r7.ok ? ((await r7.json()) as BranchesResp) : null);
       setItemsAgg(r8.ok ? ((await r8.json()) as ItemsAggResp) : null);
     } catch (e: any) {
       setError(e?.message || "Bilinmeyen hata");
@@ -149,78 +165,62 @@ export default function ReportsPage() {
   }, [filter]);
 
   const chartData = useMemo(() => over?.series30d ?? [], [over]);
-  const avgMax = useMemo(() => {
-    if (!chartData.length) return { avg: 0, max: 0, maxDate: "—" };
-    const totals = chartData.map((d) => Number(d.total || 0));
-    const sum = totals.reduce((a, b) => a + b, 0);
-    const avg = sum / totals.length;
-    let max = -Infinity;
-    let maxDate = chartData[0].date;
-    for (const d of chartData) {
-      if (d.total > max) {
-        max = d.total;
-        maxDate = d.date;
-      }
-    }
-    return { avg, max, maxDate };
-  }, [chartData]);
 
-  const dailyData = daily?.last30d ?? [];
-
-  // Günlük + Kümülatif liste
+  // Günlük + Kümülatif liste (ciro) + Günlük alınan/kalan/oran
   const dailyWithCum = useMemo(() => {
-    let cum = 0;
-    const list = (daily?.last30d ?? []).map((d) => {
-      const rev = Number(d.revenue || 0);
-      cum += rev;
-      return { ...d, cumRevenue: cum };
+    let cumRevenue = 0;
+    return (daily?.last30d ?? []).map((d) => {
+      const r = Number(d.revenue || 0);
+      const p = Number(d.paid || 0);
+      cumRevenue += r;
+      return {
+        ...d,
+        cumRevenue,
+        unpaid: Math.max(0, r - p),
+        ratio: r > 0 ? p / r : 0,
+      };
     });
-    return list;
   }, [daily]);
 
-  // Günlük özetler
   const dailyTotals = useMemo(() => {
-    const list = dailyWithCum;
-    const days = list.length || 0;
-    const revenue = list.reduce((a, b) => a + Number(b.revenue || 0), 0);
-    const paid = list.reduce((a, b) => a + Number(b.paid || 0), 0);
+    const days = dailyWithCum.length || 0;
+    const revenue = dailyWithCum.reduce((a, b) => a + Number(b.revenue || 0), 0);
+    const paid = dailyWithCum.reduce((a, b) => a + Number(b.paid || 0), 0);
     const balance = Math.max(0, revenue - paid);
     const avg = days ? revenue / days : 0;
     return { revenue, paid, balance, avg, days };
   }, [dailyWithCum]);
 
-  const dealersData = dealers?.byDealer ?? [];
-  const dealersWithRatio = useMemo(() => {
-    return dealersData.map((d) => ({
-      ...d,
-      ratio: (d.revenue || 0) > 0 ? (d.paid || 0) / d.revenue : 0,
+  // ŞUBE verileri
+  const branchData = branches?.byBranch ?? [];
+  const branchesWithRatio = useMemo(() => {
+    return branchData.map((b) => ({
+      ...b,
+      ratio: (b.revenue || 0) > 0 ? (b.paid || 0) / b.revenue : 0,
+      balance: Math.max(0, (b.revenue || 0) - (b.paid || 0)),
+      label: b.code ? `${b.branch} (${b.code})` : b.branch,
     }));
-  }, [dealersData]);
+  }, [branchData]);
 
-  const [dealerQuery, setDealerQuery] = useState("");
-  const [dealerSort, setDealerSort] = useState<
-    "revenue" | "paid" | "ratio" | "orders" | "balance" | "dealer"
+  const [branchQuery, setBranchQuery] = useState("");
+  const [branchSort, setBranchSort] = useState<
+    "revenue" | "paid" | "ratio" | "orders" | "balance" | "branch"
   >("revenue");
-  const [dealerDesc, setDealerDesc] = useState(true);
+  const [branchDesc, setBranchDesc] = useState(true);
   const [onlyDebtors, setOnlyDebtors] = useState(false);
 
-  const dealerRows = useMemo(() => {
-    const rows = dealersWithRatio.map((d) => ({
-      ...d,
-      balance: Math.max(0, (d.revenue || 0) - (d.paid || 0)),
-    }));
-
-    const q = dealerQuery.trim().toLowerCase();
-    const filtered = rows.filter(
+  const branchRows = useMemo(() => {
+    const q = branchQuery.trim().toLowerCase();
+    const filtered = branchesWithRatio.filter(
       (r) =>
-        (!q || r.dealer.toLowerCase().includes(q)) &&
+        (!q || r.label.toLowerCase().includes(q)) &&
         (!onlyDebtors || r.balance > 0)
     );
 
     const cmp = (a: any, b: any) => {
-      switch (dealerSort) {
-        case "dealer":
-          return a.dealer.localeCompare(b.dealer, "tr");
+      switch (branchSort) {
+        case "branch":
+          return a.label.localeCompare(b.label, "tr");
         case "orders":
           return (a.orders || 0) - (b.orders || 0);
         case "revenue":
@@ -234,19 +234,19 @@ export default function ReportsPage() {
       }
     };
     const sorted = filtered.sort((a, b) =>
-      dealerDesc ? -cmp(a, b) : cmp(a, b)
+      branchDesc ? -cmp(a, b) : cmp(a, b)
     );
     return sorted;
-  }, [dealersWithRatio, dealerQuery, onlyDebtors, dealerSort, dealerDesc]);
+  }, [branchesWithRatio, branchQuery, onlyDebtors, branchSort, branchDesc]);
 
-  const dealerTotals = useMemo(() => {
-    const revenue = dealerRows.reduce((a, b) => a + Number(b.revenue || 0), 0);
-    const paid = dealerRows.reduce((a, b) => a + Number(b.paid || 0), 0);
-    const orders = dealerRows.reduce((a, b) => a + Number(b.orders || 0), 0);
+  const branchTotals = useMemo(() => {
+    const revenue = branchRows.reduce((a, b) => a + Number(b.revenue || 0), 0);
+    const paid = branchRows.reduce((a, b) => a + Number(b.paid || 0), 0);
+    const orders = branchRows.reduce((a, b) => a + Number(b.orders || 0), 0);
     const balance = Math.max(0, revenue - paid);
     const ratio = revenue > 0 ? paid / revenue : 0;
     return { revenue, paid, orders, balance, ratio };
-  }, [dealerRows]);
+  }, [branchRows]);
 
   const PIE_COLORS = [
     "#6366F1",
@@ -258,15 +258,14 @@ export default function ReportsPage() {
     "#84CC16",
   ];
 
+  // CSV indirme: Son 30 gün toplam ciro
   const downloadCSV = () => {
     if (!chartData.length) return;
-    const rows = [
+    const rows: (string | number)[][] = [
       ["Tarih", "Toplam (TRY)"],
-      ...chartData.map((x) => [x.date, String(x.total)]),
+      ...chartData.map((x) => [x.date, x.total]),
     ];
-    const csv = rows
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    const csv = rowsToCSV(rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -276,55 +275,51 @@ export default function ReportsPage() {
     URL.revokeObjectURL(url);
   };
 
+  // CSV indirme: Günlük ciro + alınan + kalan + oran
   const downloadDailyCSV = () => {
-    if (!dailyData.length) return;
-    const rows = [
-      ["Tarih", "Ciro (TRY)", "Alınan Ücret (TRY)"],
-      ...dailyData.map((d) => [d.date, String(d.revenue), String(d.paid)]),
+    if (!dailyWithCum.length) return;
+    const rows: (string | number)[][] = [
+      ["Tarih", "Ciro (TRY)", "Alınan (TRY)", "Kalan (TRY)", "Tahsilat Oranı"],
+      ...dailyWithCum.map((d) => [
+        d.date,
+        d.revenue,
+        d.paid,
+        d.unpaid,
+        (d.ratio || 0).toFixed(4),
+      ]),
     ];
-    const csv = rows
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    const csv = rowsToCSV(rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `gunluk_ciro_odemeler_${new Date()
+    a.download = `gunluk_ciro_tahsilat_${new Date()
       .toISOString()
       .slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const downloadDealersCSV = () => {
-    if (!dealerRows.length) return;
-    const rows = [
-      [
-        "Bayi",
-        "Sipariş",
-        "Ciro (TRY)",
-        "Alınan (TRY)",
-        "Tahsilat Oranı",
-        "Kalan (TRY)",
-      ],
-    ].concat(
-      dealerRows.map((d) => [
-        d.dealer,
-        String(d.orders),
-        String(d.revenue),
-        String(d.paid),
-        (d.ratio || 0).toFixed(4),
-        String(d.balance),
-      ])
-    );
-    const csv = rows
-      .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+  // CSV indirme: Şube bazlı ciro & tahsilat
+  const downloadBranchesCSV = () => {
+    if (!branchRows.length) return;
+    const rows: (string | number)[][] = [
+      ["Şube", "Sipariş", "Ciro (TRY)", "Alınan (TRY)", "Tahsilat Oranı", "Kalan (TRY)"],
+      ...branchRows.map((b) => [
+        b.label,
+        b.orders,
+        b.revenue,
+        b.paid,
+        (b.ratio || 0).toFixed(4),
+        b.balance,
+      ]),
+    ];
+    const csv = rowsToCSV(rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `bayi_ciro_tahsilat_${new Date()
+    a.download = `sube_ciro_tahsilat_${new Date()
       .toISOString()
       .slice(0, 10)}.csv`;
     a.click();
@@ -422,36 +417,24 @@ export default function ReportsPage() {
 
       {/* Üst metrikler */}
       <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetricCard
-          label="Bugün"
-          value={over ? fmtMoney(over.totals.day) : null}
-        />
-        <MetricCard
-          label="Bu Hafta"
-          value={over ? fmtMoney(over.totals.week) : null}
-        />
-        <MetricCard
-          label="Bu Ay"
-          value={over ? fmtMoney(over.totals.month) : null}
-        />
-        <MetricCard
-          label="Bu Yıl"
-          value={over ? fmtMoney(over.totals.year) : null}
-        />
+        <MetricCard label="Bugün"     value={over ? fmtMoney(over.totals.day)   : null} />
+        <MetricCard label="Bu Hafta"  value={over ? fmtMoney(over.totals.week)  : null} />
+        <MetricCard label="Bu Ay"     value={over ? fmtMoney(over.totals.month) : null} />
+        <MetricCard label="Bu Yıl"    value={over ? fmtMoney(over.totals.year)  : null} />
       </section>
 
-      {/* Günlük + Kümülatif Ciro */}
+      {/* Günlük Ciro + Alınan + Kümülatif Ciro */}
       <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold">
-            Ciro: Günlük &amp; Kümülatif (Son 30 Gün)
+            Günlük Ciro &amp; Alınan + Kümülatif (Son 30 Gün)
           </div>
           <div className="ms-auto flex items-center gap-2">
             <button
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
               onClick={downloadDailyCSV}
               disabled={!dailyWithCum.length}
-              title="Günlük ciro CSV indir"
+              title="Günlük ciro & tahsilat CSV indir"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                 <path
@@ -465,94 +448,92 @@ export default function ReportsPage() {
         </div>
 
         <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <SummaryTile
-            label="Toplam Ciro"
-            value={`${fmtMoney(dailyTotals.revenue)} ₺`}
-          />
-          <SummaryTile
-            label="Toplam Alınan"
-            value={`${fmtMoney(dailyTotals.paid)} ₺`}
-          />
-          <SummaryTile
-            label="Toplam Kalan"
-            value={`${fmtMoney(dailyTotals.balance)} ₺`}
-            tone="amber"
-          />
-          <SummaryTile
-            label="Günlük Ortalama"
-            value={`${fmtMoney(dailyTotals.avg)} ₺`}
-            tone="indigo"
-          />
+          <SummaryTile label="Toplam Ciro"           value={`${fmtMoney(dailyTotals.revenue)} ₺`} />
+          <SummaryTile label="Toplam Alınan"         value={`${fmtMoney(dailyTotals.paid)} ₺`} />
+          <SummaryTile label="Toplam Kalan"          value={`${fmtMoney(dailyTotals.balance)} ₺`} tone="amber" />
+          <SummaryTile label="Günlük Ortalama Ciro"  value={`${fmtMoney(dailyTotals.avg)} ₺`}    tone="indigo" />
         </div>
 
         {!dailyWithCum.length ? (
           <SkeletonBox />
         ) : (
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer>
-              <ComposedChart data={dailyWithCum}>
-                <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  minTickGap={16}
-                  tickLine={false}
-                  axisLine={{ stroke: "#E5E7EB" }}
-                />
-                <YAxis
-                  tickFormatter={(v) => fmtMoney(Number(v))}
-                  width={80}
-                  tickLine={false}
-                  axisLine={{ stroke: "#E5E7EB" }}
-                />
-                <Tooltip
-                  formatter={(v: any, name: string) => [
-                    `${fmtMoney(Number(v))} ₺`,
-                    name === "revenue" ? "Günlük Ciro" : "Kümülatif Ciro",
-                  ]}
-                  contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
-                  labelFormatter={(d) => `Tarih: ${d}`}
-                />
-                {/* Günlük ciro barı */}
-                <defs>
-                  <linearGradient id="barFillDaily" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366F1" />
-                    <stop offset="100%" stopColor="#A78BFA" />
-                  </linearGradient>
-                </defs>
-                <Bar
-                  dataKey="revenue"
-                  name="Günlük Ciro"
-                  fill="url(#barFillDaily)"
-                  radius={[8, 8, 0, 0]}
-                />
-                {/* Kümülatif ciro çizgisi */}
-                <Line
-                  type="monotone"
-                  dataKey="cumRevenue"
-                  name="Kümülatif Ciro"
-                  dot={false}
-                  stroke="#0EA5E9"
-                  strokeWidth={2}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+          <>
+            <div className="h-[320px] w-full">
+              <ResponsiveContainer>
+                <ComposedChart data={dailyWithCum}>
+                  <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={16} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <YAxis tickFormatter={(v) => fmtMoney(Number(v))} width={80} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <Tooltip
+                    formatter={(v: any, name: string) => {
+                      const map: Record<string, string> = {
+                        revenue: "Günlük Ciro",
+                        paid: "Günlük Alınan",
+                        cumRevenue: "Kümülatif Ciro",
+                      };
+                      return [`${fmtMoney(Number(v))} ₺`, map[name] ?? name];
+                    }}
+                    contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
+                    labelFormatter={(d) => `Tarih: ${d}`}
+                  />
+                  <defs>
+                    <linearGradient id="barFillRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366F1" />
+                      <stop offset="100%" stopColor="#A78BFA" />
+                    </linearGradient>
+                    <linearGradient id="barFillPaid" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" />
+                      <stop offset="100%" stopColor="#34D399" />
+                    </linearGradient>
+                  </defs>
+                  <Bar dataKey="revenue" name="Günlük Ciro"   fill="url(#barFillRevenue)" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="paid"    name="Günlük Alınan" fill="url(#barFillPaid)"    radius={[8, 8, 0, 0]} />
+                  <Line type="monotone" dataKey="cumRevenue" name="Kümülatif Ciro" dot={false} stroke="#0EA5E9" strokeWidth={2} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Günlük tablo */}
+            {/* <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
+                    <th>Tarih</th>
+                    <th className="text-right">Ciro</th>
+                    <th className="text-right">Alınan</th>
+                    <th className="text-right">Kalan</th>
+                    <th className="text-right">Tahsilat Oranı</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {dailyWithCum.map((d) => (
+                    <tr key={d.date} className="[&>td]:px-3 [&>td]:py-2">
+                      <td className="font-medium">{d.date}</td>
+                      <td className="text-right">{fmtMoney(d.revenue)} ₺</td>
+                      <td className="text-right">{fmtMoney(d.paid)} ₺</td>
+                      <td className="text-right">{fmtMoney(d.unpaid)} ₺</td>
+                      <td className="text-right">{fmtPct(d.ratio)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div> */}
+          </>
         )}
       </section>
 
-      {/* Bayi Bazlı Ciro & Tahsilat */}
+      {/* Şube Bazlı Ciro & Tahsilat */}
       <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="text-sm font-semibold">Bayi Bazlı Ciro &amp; Tahsilat</div>
+          <div className="text-sm font-semibold">Şube Bazlı Ciro &amp; Tahsilat</div>
           <div className="ms-auto flex flex-wrap items-center gap-2">
             <div className="relative">
               <input
                 className="h-9 w-56 rounded-xl border border-neutral-200 bg-white px-3 pe-8 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                placeholder="Bayi ara"
-                value={dealerQuery}
-                onChange={(e) => setDealerQuery(e.target.value)}
-                aria-label="Bayi ara"
+                placeholder="Şube ara"
+                value={branchQuery}
+                onChange={(e) => setBranchQuery(e.target.value)}
+                aria-label="Şube ara"
               />
               <svg
                 className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
@@ -579,8 +560,8 @@ export default function ReportsPage() {
             <div className="inline-flex items-center gap-1">
               <select
                 className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                value={dealerSort}
-                onChange={(e) => setDealerSort(e.target.value as any)}
+                value={branchSort}
+                onChange={(e) => setBranchSort(e.target.value as any)}
                 aria-label="Sırala"
               >
                 <option value="revenue">Ciro (₺)</option>
@@ -588,20 +569,18 @@ export default function ReportsPage() {
                 <option value="balance">Kalan (₺)</option>
                 <option value="ratio">Tahsilat Oranı</option>
                 <option value="orders">Sipariş</option>
-                <option value="dealer">Bayi Adı</option>
+                <option value="branch">Şube Adı</option>
               </select>
               <button
                 type="button"
-                onClick={() => setDealerDesc((s) => !s)}
+                onClick={() => setBranchDesc((s) => !s)}
                 className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50"
-                title={dealerDesc ? "Azalan" : "Artan"}
-                aria-label={dealerDesc ? "Azalan sırala" : "Artan sırala"}
+                title={branchDesc ? "Azalan" : "Artan"}
+                aria-label={branchDesc ? "Azalan sırala" : "Artan sırala"}
               >
                 <svg
                   viewBox="0 0 24 24"
-                  className={`size-4 transition-transform ${
-                    dealerDesc ? "" : "rotate-180"
-                  }`}
+                  className={`size-4 transition-transform ${branchDesc ? "" : "rotate-180"}`}
                   aria-hidden
                 >
                   <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
@@ -611,9 +590,9 @@ export default function ReportsPage() {
 
             <button
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-              onClick={downloadDealersCSV}
-              disabled={!dealerRows.length}
-              title="Bayi CSV indir"
+              onClick={downloadBranchesCSV}
+              disabled={!branchRows.length}
+              title="Şube CSV indir"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                 <path
@@ -627,68 +606,41 @@ export default function ReportsPage() {
         </div>
 
         <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <SummaryTile
-            label="Toplam Ciro"
-            value={`${fmtMoney(dealerTotals.revenue)} ₺`}
-          />
-          <SummaryTile
-            label="Toplam Alınan"
-            value={`${fmtMoney(dealerTotals.paid)} ₺`}
-          />
-          <SummaryTile
-            label="Toplam Kalan"
-            value={`${fmtMoney(dealerTotals.balance)} ₺`}
-            tone="amber"
-          />
-          <SummaryTile
-            label="Ort. Tahsilat Oranı"
-            value={fmtPct(dealerTotals.ratio)}
-            tone="indigo"
-          />
+          <SummaryTile label="Toplam Ciro"   value={`${fmtMoney(branchTotals.revenue)} ₺`} />
+          <SummaryTile label="Toplam Alınan" value={`${fmtMoney(branchTotals.paid)} ₺`} />
+          <SummaryTile label="Toplam Kalan"  value={`${fmtMoney(branchTotals.balance)} ₺`} tone="amber" />
+          <SummaryTile label="Ort. Tahsilat Oranı" value={fmtPct(branchTotals.ratio)} tone="indigo" />
         </div>
 
-        {!dealersWithRatio.length ? (
+        {!branchesWithRatio.length ? (
           <SkeletonBox />
-        ) : dealerRows.length === 0 ? (
+        ) : branchRows.length === 0 ? (
           <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-            Kriterlere uyan bayi bulunamadı.
+            Kriterlere uyan şube bulunamadı.
           </div>
         ) : (
           <ul className="divide-y rounded-xl border border-neutral-200">
-            {dealerRows.map((d, i) => (
-              <li key={`${d.dealer}-${i}`} className="p-3 sm:p-4">
+            {branchRows.map((b, i) => (
+              <li key={`${b.branchId ?? b.label}-${i}`} className="p-3 sm:p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <div className="truncate text-sm font-semibold">
-                        {d.dealer}
-                      </div>
-                      <RatioBadge ratio={d.ratio} />
+                      <div className="truncate text-sm font-semibold">{b.label}</div>
+                      <RatioBadge ratio={b.ratio} />
                     </div>
-                    <div className="mt-0.5 text-xs text-neutral-600">
-                      {fmtInt(d.orders)} sipariş
-                    </div>
+                    <div className="mt-0.5 text-xs text-neutral-600">{fmtInt(b.orders)} sipariş</div>
                   </div>
 
                   <div className="grid w-full grid-cols-3 items-end gap-3 sm:w-auto sm:min-w-[420px] sm:grid-cols-4">
-                    <KPI label="Ciro" value={`${fmtMoney(d.revenue)} ₺`} />
-                    <KPI label="Alınan" value={`${fmtMoney(d.paid)} ₺`} />
-                    <KPI
-                      label="Kalan"
-                      value={`${fmtMoney(d.balance)} ₺`}
-                      tone={d.balance > 0 ? "amber" : "neutral"}
-                    />
-                    <KPI label="Oran" value={fmtPct(d.ratio)} />
+                    <KPI label="Ciro"   value={`${fmtMoney(b.revenue)} ₺`} />
+                    <KPI label="Alınan" value={`${fmtMoney(b.paid)} ₺`} />
+                    <KPI label="Kalan"  value={`${fmtMoney(b.balance)} ₺`} tone={b.balance > 0 ? "amber" : "neutral"} />
+                    <KPI label="Oran"   value={fmtPct(b.ratio)} />
                   </div>
                 </div>
 
                 <div className="mt-3">
-                  <Progress
-                    value={Math.max(
-                      0,
-                      Math.min(100, Math.round((d.ratio || 0) * 100))
-                    )}
-                  />
+                  <Progress value={Math.max(0, Math.min(100, Math.round((b.ratio || 0) * 100)))} />
                 </div>
               </li>
             ))}
@@ -704,18 +656,8 @@ export default function ReportsPage() {
             <SkeletonBox />
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              <StatTile
-                title="Ödenen"
-                amount={fmtMoney(pay.paid?.amount)}
-                count={fmtInt(pay.paid?.count)}
-                accent="emerald"
-              />
-              <StatTile
-                title="Bekleyen"
-                amount={fmtMoney(pay.unpaid?.amount)}
-                count={fmtInt(pay.unpaid?.count)}
-                accent="rose"
-              />
+              <StatTile title="Ödenen"  amount={fmtMoney(pay.paid?.amount)}  count={fmtInt(pay.paid?.count)}  accent="emerald" />
+              <StatTile title="Bekleyen" amount={fmtMoney(pay.unpaid?.amount)} count={fmtInt(pay.unpaid?.count)} accent="rose" />
               <div className="col-span-2 mt-2 text-xs text-neutral-600">
                 {pay.last30dCumulative?.length
                   ? "Son 30 gün kümülatif görünüm sağ sütunda."
@@ -726,22 +668,14 @@ export default function ReportsPage() {
         </div>
 
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">
-            Ödeme Yöntemi Dağılımı
-          </div>
+          <div className="mb-3 text-sm font-semibold">Ödeme Yöntemi Dağılımı</div>
           {!pay || !pay.methods?.length ? (
             <SkeletonBox />
           ) : (
             <div className="h-[260px] w-full">
               <ResponsiveContainer>
                 <PieChart>
-                  <Pie
-                    dataKey="amount"
-                    data={pay.methods}
-                    innerRadius={50}
-                    outerRadius={80}
-                    label
-                  >
+                  <Pie dataKey="amount" data={pay.methods} innerRadius={50} outerRadius={80} label>
                     {pay.methods.map((_, i) => (
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
@@ -751,25 +685,19 @@ export default function ReportsPage() {
                     verticalAlign="bottom"
                     align="center"
                     iconType="circle"
-                    formatter={(value, entry: any) =>
-                      METHOD_TR[entry?.payload?.method] ?? value
-                    }
+                    formatter={(value, entry: any) => METHOD_TR[entry?.payload?.method] ?? value}
                   />
                 </PieChart>
               </ResponsiveContainer>
             </div>
           )}
         </div>
-
-    
       </section>
 
       {/* Kategoriler & Ürün toplamları */}
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">
-            Kategori Bazlı Satış (₺)
-          </div>
+          <div className="mb-3 text-sm font-semibold">Kategori Bazlı Satış (₺)</div>
           {!cats?.byCategory?.length ? (
             <SkeletonBox />
           ) : (
@@ -777,36 +705,16 @@ export default function ReportsPage() {
               <ResponsiveContainer>
                 <BarChart data={cats.byCategory}>
                   <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
-                  <XAxis
-                    dataKey="category"
-                    tick={{ fontSize: 11 }}
-                    interval={0}
-                    angle={-10}
-                    height={60}
-                    tickLine={false}
-                    axisLine={{ stroke: "#E5E7EB" }}
-                  />
-                  <YAxis
-                    tickFormatter={(v) => fmtMoney(Number(v))}
-                    width={80}
-                    tickLine={false}
-                    axisLine={{ stroke: "#E5E7EB" }}
-                  />
-                  <Tooltip
-                    formatter={(v: any) => `${fmtMoney(Number(v))} ₺`}
-                    contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
-                  />
+                  <XAxis dataKey="category" tick={{ fontSize: 11 }} interval={0} angle={-10} height={60} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <YAxis tickFormatter={(v) => fmtMoney(Number(v))} width={80} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <Tooltip formatter={(v: any) => `${fmtMoney(Number(v))} ₺`} contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }} />
                   <defs>
                     <linearGradient id="barFillCategory" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#6366F1" />
                       <stop offset="100%" stopColor="#A78BFA" />
                     </linearGradient>
                   </defs>
-                  <Bar
-                    dataKey="amount"
-                    fill="url(#barFillCategory)"
-                    radius={[8, 8, 0, 0]}
-                  />
+                  <Bar dataKey="amount" fill="url(#barFillCategory)" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -849,9 +757,7 @@ export default function ReportsPage() {
 
       {/* En çok müşteri */}
       <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 text-sm font-semibold">
-          En Çok Sipariş Veren Müşteriler
-        </div>
+        <div className="mb-3 text-sm font-semibold">En Çok Sipariş Veren Müşteriler</div>
         {!cust?.topCustomers?.length ? (
           <SkeletonBox />
         ) : (
@@ -881,17 +787,14 @@ export default function ReportsPage() {
   );
 }
 
-/* ---- küçük komponentler ---- */
+/* -------------------- küçük komponentler -------------------- */
 function MetricCard({ label, value }: { label: string; value: string | null }) {
   const loading = value === null;
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="mb-1 flex items-center gap-1.5 text-xs text-neutral-500">
         <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
-          <path
-            fill="currentColor"
-            d="M4 20h16v-2H4zM6 16h3V8H6zm5 0h3V4h-3zm5 0h3v-6h-3z"
-          />
+          <path fill="currentColor" d="M4 20h16v-2H4zM6 16h3V8H6zm5 0h3V4h-3zm5 0h3v-6h-3z" />
         </svg>
         {label}
       </div>
@@ -905,9 +808,7 @@ function MetricCard({ label, value }: { label: string; value: string | null }) {
 }
 
 function SkeletonBox() {
-  return (
-    <div className="h-[260px] w-full animate-pulse rounded-xl bg-neutral-100" />
-  );
+  return <div className="h-[260px] w-full animate-pulse rounded-xl bg-neutral-100" />;
 }
 
 function StatTile({
@@ -951,7 +852,7 @@ function SummaryTile({
     indigo: "text-indigo-700 bg-indigo-50 border-indigo-200",
   } as const;
   return (
-    <div className={`rounded-xl border ${map[tone]} p-3`}>
+    <div className={`rounded-2xl border ${map[tone]} p-3`}>
       <div className="text-xs">{label}</div>
       <div className="mt-1 text-base font-semibold">{value}</div>
     </div>
@@ -998,9 +899,7 @@ function RatioBadge({ ratio }: { ratio: number }) {
   else if (pct >= 50) tone = "bg-amber-50 text-amber-700 ring-amber-200";
   else tone = "bg-rose-50 text-rose-700 ring-rose-200";
   return (
-    <span
-      className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${tone}`}
-    >
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${tone}`}>
       {pct}% tahsilat
     </span>
   );
