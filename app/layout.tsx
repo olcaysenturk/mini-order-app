@@ -16,17 +16,17 @@ export const metadata: Metadata = {
     default: "PERDEXA",
     template: "%s — PERDEXA",
   },
-  description: "Kategori/Varyant + Sipariş",
+  description: "Kategori/Ürün + Sipariş",
   metadataBase: new URL("https://perde-konagi.local"),
   openGraph: {
     title: "PERDEXA",
-    description: "Kategori/Varyant + Sipariş",
+    description: "Kategori/Ürün + Sipariş",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
     title: "PERDEXA",
-    description: "Kategori/Varyant + Sipariş",
+    description: "Kategori/Ürün + Sipariş",
   },
 };
 
@@ -70,7 +70,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           
 
           {/* ======= Page Content ======= */}
-          <main id="content" className="relative min-h-[calc(100vh-135px)] p-8">
+          <main id="content" className="relative p-8">
             {children}
            
             <Toaster 

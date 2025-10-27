@@ -150,7 +150,7 @@ async function createVariant(categoryId: string, payload: { name: string; unitPr
     credentials: 'include',
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await res.text().catch(() => 'Varyant eklenemedi'));
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Ürün eklenemedi'));
   return res.json() as Promise<Variant>;
 }
 
@@ -605,11 +605,11 @@ export default function EditOrderPage() {
                 </select>
               </div>
               <div>
-                <label className="text-sm">Varyant</label>
+                <label className="text-sm">Ürün</label>
                 <div className="mt-1 flex items-center gap-2">
                   <select className="select flex-1" value={varId} onChange={(e) => setVarId(e.target.value)} disabled={!selectedCategory}>
                     {!selectedCategory && <option>Önce kategori seçin</option>}
-                    {selectedCategory && selectedCategory.variants.length === 0 && <option>Varyant yok</option>}
+                    {selectedCategory && selectedCategory.variants.length === 0 && <option>Ürün yok</option>}
                     {selectedCategory?.variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
                   </select>
                   <button
@@ -617,7 +617,7 @@ export default function EditOrderPage() {
                     className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
                     disabled={!selectedCategory}
                     onClick={() => { setNewVarName(''); setNewVarPrice(''); setShowVarModal(true) }}
-                    title="Yeni varyant ekle"
+                    title="Yeni ürün ekle"
                   >
                     + Yeni
                   </button>
@@ -696,7 +696,7 @@ export default function EditOrderPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" onClick={()=>setShowVarModal(false)}>
           <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl" onClick={(e)=>e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
-              <div className="text-base font-semibold">Yeni Varyant</div>
+              <div className="text-base font-semibold">Yeni Ürün</div>
               <button className="inline-flex size-8 items-center justify-center rounded-xl border border-neutral-200 hover:bg-neutral-50" onClick={() => setShowVarModal(false)} aria-label="Kapat">✕</button>
             </div>
 
@@ -706,7 +706,7 @@ export default function EditOrderPage() {
                 <input className="input mt-1 w-full" value={selectedCategory?.name || '—'} readOnly />
               </div>
               <div>
-                <label className="text-sm">Varyant Adı *</label>
+                <label className="text-sm">Ürün Adı *</label>
                 <input className="input mt-1 w-full" value={newVarName} onChange={(e)=>setNewVarName(e.target.value)} placeholder="Örn: Deluxe 280 cm" />
               </div>
               <div>
@@ -731,10 +731,10 @@ export default function EditOrderPage() {
                     const created = await createVariant(selectedCategory.id, { name: newVarName.trim(), unitPrice: price });
                     setCategories(prev => prev.map(c => c.id !== selectedCategory.id ? c : { ...c, variants: [...c.variants, created] }));
                     setVarId(created.id);
-                    toast.success('Varyant eklendi');
+                    toast.success('Ürün eklendi');
                     setShowVarModal(false);
                   } catch (err: any) {
-                    toast.error(err?.message || 'Varyant eklenemedi');
+                    toast.error(err?.message || 'Ürün eklenemedi');
                   } finally {
                     setSavingVariant(false);
                   }

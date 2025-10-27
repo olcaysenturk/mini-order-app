@@ -177,7 +177,7 @@ export default function AdminPage() {
       {/* HEADER */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-2xl font-bold tracking-tight">Kategori &amp; Varyant</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Kategori &amp; Ürün</h1>
           {loading && <span className="text-xs text-neutral-400">Yükleniyor…</span>}
         </div>
 
@@ -186,7 +186,7 @@ export default function AdminPage() {
             Kategori: <strong className="ms-1">{categories.length}</strong>
           </span>
           <span className="inline-flex items-center gap-1 rounded-xl bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-            Varyant: <strong className="ms-1">{totalVariants}</strong>
+            Ürün: <strong className="ms-1">{totalVariants}</strong>
           </span>
           <button
             className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
@@ -206,7 +206,7 @@ export default function AdminPage() {
       <div className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="text-sm text-neutral-700">
           Kategoriler sabittir (<b>{DEFAULT_CATEGORIES.join(', ')}</b>).
-          Yeni kategori eklenemez, silinemez. <b>Varyantlar</b> panel bazında sayfalı yüklenir.
+          Yeni kategori eklenemez, silinemez. <b>Ürünler</b> panel bazında sayfalı yüklenir.
         </div>
       </div>
 
@@ -251,7 +251,7 @@ export default function AdminPage() {
                     </span>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">{cat.name}</div>
-                      <div className="mt-0.5 text-xs text-neutral-500">{variantCount} varyant</div>
+                      <div className="mt-0.5 text-xs text-neutral-500">{variantCount} ürün</div>
                     </div>
                   </button>
                 </div>
@@ -288,7 +288,7 @@ export default function AdminPage() {
 
       {/* Footer toplamlar */}
       <div className="mt-6 text-sm text-neutral-600">
-        Toplam kategori: <b>{categories.length}</b> • Toplam varyant: <b>{totalVariants}</b>
+        Toplam kategori: <b>{categories.length}</b> • Toplam ürün: <b>{totalVariants}</b>
       </div>
 
       {/* Safari akordeon fix */}
@@ -382,7 +382,7 @@ function VariantPanel({
       setItems(page.items ?? [])
       setNextCursor(page.nextCursor ?? null)
     } catch (e: any) {
-      setError(e?.message || 'Varyantlar alınamadı')
+      setError(e?.message || 'Ürünler alınamadı')
       // Fallback: server desteklemiyorsa
       if (cat.variants?.length) {
         setItems(filterSortLocal(cat.variants))
@@ -450,9 +450,9 @@ function VariantPanel({
       setItems(prev => prev.map(v => (v.id === varId ? { ...v, ...updated } : v)))
       onVariantUpdated(updated) // üstte varsa local listede de güncelle
       cancelEdit(varId)
-      toast.success('Varyant güncellendi')
+      toast.success('Ürün güncellendi')
     } else {
-      toast.error('Varyant güncellenemedi')
+      toast.error('Ürün güncellenemedi')
     }
   }
 
@@ -460,7 +460,7 @@ function VariantPanel({
     const res = await fetch(`/api/categories/${cat.id}/variants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Yeni Varyant', unitPrice: 0 }),
+      body: JSON.stringify({ name: 'Yeni Ürün', unitPrice: 0 }),
     })
     if (res.ok) {
       const v: Variant = await res.json()
@@ -468,23 +468,23 @@ function VariantPanel({
       setGlobalEditing(prev => ({ ...prev, [v.id]: v }))
       onVariantAdded(v)   // üst sayaç + varsa category.variants güncelle
       onBumpCount(1)      // garanti olsun
-      toast.success('Varyant eklendi')
+      toast.success('Ürün eklendi')
     } else {
-      toast.error('Varyant eklenemedi')
+      toast.error('Ürün eklenemedi')
     }
   }
 
   const removeVariant = async (varId: string) => {
-    if (!confirm('Varyant silinsin mi?')) return
+    if (!confirm('Ürün silinsin mi?')) return
     const res = await fetch(`/api/variants/${varId}`, { method: 'DELETE' })
     if (res.ok) {
       setItems(prev => (Array.isArray(prev) ? prev.filter(v => v.id !== varId) : []))
       cancelEdit(varId)
       onVariantRemoved(varId) // üst liste/ sayaç güncelle
       onBumpCount(-1)
-      toast.success('Varyant silindi')
+      toast.success('Ürün silindi')
     } else {
-      toast.error('Varyant silinemedi')
+      toast.error('Ürün silinemedi')
     }
   }
 
@@ -512,10 +512,10 @@ function VariantPanel({
         <div className="relative">
           <input
             className="h-9 w-64 rounded-xl border border-neutral-200 bg-white pl-8 pr-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-            placeholder="Varyant ara"
+            placeholder="Ürün ara"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            aria-label="Varyant ara"
+            aria-label="Ürün ara"
           />
           <svg
             className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
@@ -544,7 +544,7 @@ function VariantPanel({
           <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
             <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
           </svg>
-          Varyant Ekle
+          Ürün Ekle
         </button>
       </div>
 
@@ -572,13 +572,13 @@ function VariantPanel({
               key={v.id}
               className="rounded-xl border border-neutral-200 bg-white p-3 transition hover:shadow-sm"
             >
-              <div className="mb-1 text-[11px] text-neutral-500">Varyant</div>
+              <div className="mb-1 text-[11px] text-neutral-500">Ürün</div>
               <input
                 className="mb-2 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 value={name}
                 onFocus={() => !draft && startEdit(v)}
                 onChange={e => onEditChange(v.id, { name: e.target.value })}
-                placeholder="Varyant adı"
+                placeholder="Ürün adı"
               />
 
               <div className="mb-1 text-[11px] text-neutral-500">Birim Fiyat</div>

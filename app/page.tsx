@@ -10,7 +10,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/options";
 export const metadata = {
   title: "Perdexa — Perde Siparişlerini Tek Yerden Yönetin",
   description:
-    "Perdexa ile kategori & varyant tanımla, m² ve file sıklığına göre otomatik hesapla, yazdırılabilir A4 çıktılar al. Çoklu kullanıcı, çok cihaz, bulutta güvenli.",
+    "Perdexa ile kategori & ürün tanımla, m² ve file sıklığına göre otomatik hesapla, yazdırılabilir A4 çıktılar al. Çoklu kullanıcı, çok cihaz, bulutta güvenli.",
   openGraph: {
     title: "Perdexa — Perde Siparişlerini Tek Yerden Yönetin",
     description:
@@ -69,7 +69,7 @@ export default async function Home() {
                 yönetin.
               </h1>
               <p className="mt-4 text-base sm:text-lg text-neutral-600 max-w-xl">
-                Kategori & varyant tanımla, m² ve file sıklığına göre tutarı otomatik hesapla, grid tabanlı yazdırılabilir
+                Kategori & ürün tanımla, m² ve file sıklığına göre tutarı otomatik hesapla, grid tabanlı yazdırılabilir
                 formla işi hızlandır. Çok kullanıcılı, rol & yetki destekli, bulutta güvenli.
               </p>
 
@@ -189,14 +189,14 @@ export default async function Home() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           <h2 className="text-2xl sm:text-3xl font-bold text-center">İhtiyacın olan her şey</h2>
           <p className="mt-2 text-center text-neutral-600">
-            Kategoriler, varyantlar, otomatik fiyat hesaplama ve tek tıkla yazdırma.
+            Kategoriler, ürünlerlar, otomatik fiyat hesaplama ve tek tıkla yazdırma.
           </p>
 
           <div className="mt-8 grid md:grid-cols-3 gap-5">
             {[
               {
                 title: "Esnek Katalog",
-                desc: "Kategori & varyant ekle, birim fiyatı belirle, m² hesabı otomatik çalışsın.",
+                desc: "Kategori & ürün ekle, birim fiyatı belirle, m² hesabı otomatik çalışsın.",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z" />
@@ -273,7 +273,7 @@ export default async function Home() {
               <h3 className="text-xl font-semibold">Nasıl çalışır?</h3>
               <ol className="mt-4 grid grid-cols-1 gap-3 text-sm">
                 {[
-                  { t: "1) Katalog oluştur", d: "Kategori & varyantları tanımla. Fiyat gir." },
+                  { t: "1) Katalog oluştur", d: "Kategori & ürünları tanımla. Fiyat gir." },
                   { t: "2) Sipariş gir", d: "Müşteri bilgisi, ölçüler, file sıklığı; sistem otomatik hesaplar." },
                   { t: "3) Yazdır & paylaş", d: "A4 düzeniyle çıktı al veya PDF paylaş." },
                 ].map((s) => (

@@ -136,7 +136,7 @@ export default function PrivacyPage() {
               <ul className="mt-2 space-y-2 text-sm text-neutral-700">
                 <li>• Hesap verileri: ad, e-posta, telefon (opsiyonel), şirket/mağaza adı.</li>
                 <li>• Kullanım verileri: oturum, cihaz/tarayıcı bilgileri, IP (güvenlik/log).</li>
-                <li>• Sipariş verileri: müşteri adı/telefonu, ürün/kategori/varyant, ölçüler, tutarlar, notlar.</li>
+                <li>• Sipariş verileri: müşteri adı/telefonu, ürün/kategori, ölçüler, tutarlar, notlar.</li>
                 <li>• Ödeme verileri: yöntem ve durum; **kart bilgileri sistemimizde saklanmaz** (ödeme sağlayıcıda işlenir).</li>
                 <li>• Destek içerikleri: form mesajları, ekler.</li>
               </ul>

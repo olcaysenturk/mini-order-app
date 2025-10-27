@@ -66,6 +66,11 @@ model User {
 
   billingNextDueAt    DateTime?
   billingPaidForMonth DateTime?
+  billingPlan String? // "FREE" | "PRO"
+  monthlyPriceCents Int? @default(200000) // 2000,00 ₺
+  payments Payment[]
+
+
 
   accounts     Account[]
   memberships  Membership[]
@@ -77,9 +82,33 @@ model User {
   paymentsCreated OrderPayment[]       @relation("OrderPaymentCreatedBy")
   resetTokens     PasswordResetToken[]
 
+
   @@index([email])
   @@index([role])
   @@index([username])
+}
+
+model Payment {
+  id String @id @default(cuid())
+  userId String
+  monthKey String // YYYY-MM (örn: 2025-11)
+  amount Int // kuruş/cents
+  currency String @default("TRY")
+  status String @default("paid") // paid | pending | failed
+  paidAt DateTime @default(now())
+
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+
+  @@unique([userId, monthKey])
+  @@index([userId])
+}
+
+model WebhookEvent {
+  id      String @id @default(cuid())
+  eventId String @unique
+  createdAt DateTime @default(now())
 }
 
 model Membership {

@@ -52,7 +52,7 @@ export default function AdminPage() {
   }
 
   const removeCategory = async (id: string) => {
-    if (!confirm('Kategori ve içindeki tüm varyantlar silinsin mi?')) return
+    if (!confirm('Kategori ve içindeki tüm ürünler silinsin mi?')) return
     await fetch(`/api/categories/${id}`, { method: 'DELETE' })
     setCategories(prev => prev.filter(c => c.id !== id))
     setExpanded(prev => {
@@ -64,7 +64,7 @@ export default function AdminPage() {
     const res = await fetch(`/api/categories/${catId}/variants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'Yeni Varyant', unitPrice: 0 }),
+      body: JSON.stringify({ name: 'Yeni Ürün', unitPrice: 0 }),
     })
     if (res.ok) {
       const v: Variant = await res.json()
@@ -113,7 +113,7 @@ export default function AdminPage() {
   }
 
   const removeVariant = async (varId: string) => {
-    if (!confirm('Varyant silinsin mi?')) return
+    if (!confirm('Ürün silinsin mi?')) return
     const res = await fetch(`/api/variants/${varId}`, { method: 'DELETE' })
     if (res.ok) {
       setCategories(prev => prev.map(c => ({
@@ -131,7 +131,7 @@ export default function AdminPage() {
 
   return (
     <div className="card">
-      <h1 className="text-xl font-semibold mb-4">Admin: Kategori & Varyant</h1>
+      <h1 className="text-xl font-semibold mb-4">Admin: Kategori & Ürün</h1>
 
       {/* Kategori ekleme */}
       <div className="flex gap-2 mb-6">
@@ -174,14 +174,14 @@ export default function AdminPage() {
                   <div>
                     <div className="font-semibold">{cat.name}</div>
                     <div className="text-xs text-gray-500">
-                      {variantCount} varyant
+                      {variantCount} Ürün
                     </div>
                   </div>
                 </button>
 
                 <div className="flex gap-2">
                   <button className="btn-secondary" onClick={() => addVariant(cat.id)}>
-                    + Varyant
+                    + Ürün
                   </button>
                   <button className="btn-secondary" onClick={() => removeCategory(cat.id)}>
                     Kategoriyi Sil
@@ -198,7 +198,7 @@ export default function AdminPage() {
                 <div className="min-h-0">
                   {variantCount === 0 ? (
                     <div className="px-4 pb-4 text-sm text-gray-500">
-                      Varyant yok. “+ Varyant” ile ekleyebilirsiniz.
+                      Ürün yok. “+ Ürün ile ekleyebilirsiniz.
                     </div>
                   ) : (
                     <div className="px-4 pb-4">
@@ -214,13 +214,13 @@ export default function AdminPage() {
                               key={v.id}
                               className="rounded-xl border border-gray-200 p-3 hover:shadow-sm transition bg-white"
                             >
-                              <div className="text-xs text-gray-500 mb-1">Varyant</div>
+                              <div className="text-xs text-gray-500 mb-1">Ürün</div>
                               <input
                                 className="input mb-2"
                                 value={name}
                                 onFocus={() => !draft && startEdit(v)}
                                 onChange={e => onEditChange(v.id, { name: e.target.value })}
-                                placeholder="Varyant adı"
+                                placeholder="Ürün adı"
                               />
 
                               <div className="text-xs text-gray-500 mb-1">Birim Fiyat</div>
@@ -280,7 +280,7 @@ export default function AdminPage() {
       </div>
 
       <div className="mt-6 text-sm text-gray-600">
-        Toplam kategori: <b>{categories.length}</b> • Toplam varyant: <b>{totalVariants}</b>
+        Toplam kategori: <b>{categories.length}</b> • Toplam ürün: <b>{totalVariants}</b>
       </div>
 
       {/* Minik stil dokunuşları */}

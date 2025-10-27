@@ -1037,7 +1037,7 @@ export default function OrdersPage() {
                               <thead className="bg-neutral-50 text-neutral-600">
                                 <tr>
                                   <th className="px-3 py-2 text-left">Kategori</th>
-                                  <th className="px-3 py-2 text-left">Varyant</th>
+                                  <th className="px-3 py-2 text-left">Ürün</th>
                                   <th className="px-3 py-2 text-right">Adet</th>
                                   <th className="px-3 py-2 text-right">En</th>
                                   <th className="px-3 py-2 text-right">Boy</th>
