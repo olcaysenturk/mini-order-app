@@ -64,6 +64,9 @@ model User {
   isActive           Boolean  @default(true)
   mustChangePassword Boolean  @default(true)
 
+  billingNextDueAt    DateTime?
+  billingPaidForMonth DateTime?
+
   accounts     Account[]
   memberships  Membership[]
   orders       Order[]      @relation("OrderCreatedBy")
@@ -71,7 +74,7 @@ model User {
   tenantsOwned Tenant[]     @relation("TenantCreatedBy")
 
   // ⬇️ BACK-RELATION: Ödemeleri oluşturan kullanıcı
-  paymentsCreated OrderPayment[] @relation("OrderPaymentCreatedBy")
+  paymentsCreated    OrderPayment[]       @relation("OrderPaymentCreatedBy")
 
   @@index([email])
   @@index([role])
@@ -320,6 +323,7 @@ model Order {
   storLines      Json?
   accessoryLines Json?
   deletedAt      DateTime?
+  deliveryAt     DateTime?
 
   // ✅ only Branch relation (no Dealer)
   branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)
@@ -338,6 +342,7 @@ model Order {
   @@index([tenantId, customerPhone])
   @@index([tenantId, createdById])
   @@index([tenantId, deletedAt])
+  @@index([tenantId, deliveryAt])
 }
 
 model OrderItem {
@@ -357,9 +362,9 @@ model OrderItem {
   category Category @relation(fields: [categoryId], references: [id])
   variant  Variant  @relation(fields: [variantId], references: [id])
 
-  slotIndex   Int?     // nullable; UI kutusu yoksa null
+  slotIndex Int? // nullable; UI kutusu yoksa null
 
-  lineStatus  OrderLineStatus  @default(processing)
+  lineStatus OrderLineStatus @default(processing)
 
   @@index([orderId])
   @@index([categoryId])

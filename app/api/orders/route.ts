@@ -8,9 +8,19 @@ import { z } from 'zod'
 
 export const runtime = 'nodejs'
 
-/* =================== Zod Schemas =================== */
+/* =================== Helpers =================== */
 const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled'])
 
+/** "YYYY-MM-DD" → Europe/Istanbul local Date (00:00) */
+function parseYMDToLocalDate(ymd?: string | null): Date | null {
+  if (!ymd) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd)
+  if (!m) return null
+  const [, y, mo, d] = m
+  return new Date(Number(y), Number(mo) - 1, Number(d))
+}
+
+/* =================== Zod Schemas =================== */
 const ItemSchema = z.object({
   categoryId: z.string(),
   variantId: z.string(),
@@ -25,8 +35,8 @@ const ItemSchema = z.object({
   note: z.string().nullable().optional(),
   // ✅ kutucuk/sıra bilgisi (STOR/AKSESUAR gibi kutusuz alanlarda null olabilir)
   slotIndex: z.number().int().min(0).nullable().optional(),
-  // ✅ satır durumu
-  lineStatus: StatusSchema.default('pending').optional(),
+  // ✅ satır durumu (UI ve DB ile uyum: processing)
+  lineStatus: StatusSchema.default('processing').optional(),
 })
 
 /**
@@ -41,9 +51,10 @@ const BodySchema = z.object({
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
   note: z.string().nullable().optional(),
-  status: StatusSchema.default('pending'),
+  status: StatusSchema.default('processing'), // UI defaultu ile uyumlu
   discount: z.union([z.number(), z.string()]).optional(), // TL
   items: z.array(ItemSchema).min(1),
+  deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // ✅ yeni alan
 }).refine((d) => !!(d.branchId || d.dealerId), {
   message: 'branchId (veya legacy dealerId) zorunlu',
   path: ['branchId'],
@@ -123,14 +134,12 @@ export async function GET(req: NextRequest) {
           // ✅ kutulu alanlarda sıralama: kategori → slotIndex (null last) → id
           orderBy: [{ categoryId: 'asc' }, { slotIndex: 'asc' as const }, { id: 'asc' }],
         },
-        customer: { select: { id: true, name: true, phone: true } },
+        customer: { select: { id: true, name: true, phone: true} },
         branch: { select: { id: true, name: true } }, // ✅ doğru relation
       },
     })
 
-    if (orders.length === 0) {
-      return NextResponse.json([])
-    }
+    if (orders.length === 0) return NextResponse.json([])
 
     // 2) Bu listede yer alan siparişler için toplu ödeme toplamları (performanslı)
     const orderIds = orders.map(o => o.id)
@@ -140,7 +149,6 @@ export async function GET(req: NextRequest) {
       where: {
         tenantId,
         orderId: { in: orderIds },
-        // (İhtiyaç varsa: status=CONFIRMED, deletedAt:null vs.)
       },
       _sum: { amount: true },
     })
@@ -160,6 +168,8 @@ export async function GET(req: NextRequest) {
       return {
         id: o.id,
         createdAt: o.createdAt,
+        deliveryAt: o.deliveryAt ?? null,
+        deliveryDate: o.deliveryAt ? o.deliveryAt.toISOString().slice(0, 10) : null, // "YYYY-MM-DD"
         note: o.note,
         status: o.status,
         branch: o.branch,     // ✅ yeni alan
@@ -183,7 +193,7 @@ export async function GET(req: NextRequest) {
           subtotal: Number(it.subtotal),
           note: it.note,
           slotIndex: it.slotIndex ?? null,                 // ✅
-          lineStatus: (it as any).lineStatus ?? 'pending', // ✅
+          lineStatus: (it as any).lineStatus ?? 'processing', // ✅ uyum
           category: { name: it.category.name },
           variant: { name: it.variant.name },
         })),
@@ -228,6 +238,7 @@ export async function POST(req: NextRequest) {
       status,
       discount,
       items,
+      deliveryDate,
     } = parsed.data
 
     // ✅ Tek giriş değişkeni: branchIdInput
@@ -274,7 +285,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Kalemleri hazırla (formül: unitPrice * max(1, (width/100)*density) * qty ) ---
+    // --- Kalemleri hazırla (STOR için m²; diğerleri için max(1, (en/100)*file)) ---
+    // Güvenlik: ilgili tenant'a ait kategori & varyantlar mı?
+    const catIds = Array.from(new Set(items.map(p => p.categoryId)))
+    const varIds = Array.from(new Set(items.map(p => p.variantId)))
+
+    const [catRows, varOk] = await Promise.all([
+      prisma.category.findMany({ where: { tenantId, id: { in: catIds } }, select: { id: true, name: true } }),
+      prisma.variant.findMany({ where: { tenantId, id: { in: varIds } }, select: { id: true } }),
+    ])
+    if (varOk.length !== varIds.length || catRows.length !== catIds.length) {
+      return NextResponse.json({ error: 'forbidden_category_or_variant' }, { status: 403 })
+    }
+
+    const nameByCat = new Map(catRows.map(c => [c.id, c.name]))
+    const isStorCat = (catId: string) =>
+      (nameByCat.get(catId) || '').trim().toLocaleUpperCase('tr-TR') === 'STOR PERDE'
+
     const prepared = items.map(it => {
       const qty       = Math.max(1, Math.trunc(Number(it.qty)))
       const width     = Math.max(0, Math.trunc(Number(it.width)))
@@ -282,36 +309,28 @@ export async function POST(req: NextRequest) {
       const unitPrice = new Prisma.Decimal(it.unitPrice)
       const density   = new Prisma.Decimal(Number(it.fileDensity) || 1)
 
-      const wmt       = new Prisma.Decimal(width).div(100)
-      const meterPart = Prisma.Decimal.max(new Prisma.Decimal(1), wmt.mul(density))
-      const subtotal  = unitPrice.mul(meterPart).mul(qty)
+      const wmt = new Prisma.Decimal(width).div(100)
+      const hmt = new Prisma.Decimal(height).div(100)
+
+      // ✅ STOR = m², Diğer = max(1, (en/100)*file)
+      const base = isStorCat(it.categoryId)
+        ? wmt.mul(hmt) // m²
+        : Prisma.Decimal.max(new Prisma.Decimal(1), wmt.mul(density))
+
+      const subtotal  = unitPrice.mul(base).mul(qty)
 
       return {
         categoryId: it.categoryId,
         variantId:  it.variantId,
-        qty,
-        width,
-        height,
+        qty, width, height,
         unitPrice,
         fileDensity: density,
         subtotal,
         note: it.note ?? null,
-        slotIndex: typeof it.slotIndex === 'number' ? it.slotIndex : null,      // ✅
-        lineStatus: (it as any).lineStatus ?? 'pending',                         // ✅
+        slotIndex: typeof it.slotIndex === 'number' ? it.slotIndex : null, // UI gönderirse sakla
+        lineStatus: (it as any).lineStatus ?? 'processing',
       }
     })
-
-    // Güvenlik: ilgili tenant'a ait kategori & varyantlar mı?
-    const catIds = Array.from(new Set(prepared.map(p => p.categoryId)))
-    const varIds = Array.from(new Set(prepared.map(p => p.variantId)))
-
-    const [catOk, varOk] = await Promise.all([
-      prisma.category.findMany({ where: { tenantId, id: { in: catIds } }, select: { id: true } }),
-      prisma.variant.findMany({ where: { tenantId, id: { in: varIds } }, select: { id: true } }),
-    ])
-    if (catOk.length !== catIds.length || varOk.length !== varIds.length) {
-      return NextResponse.json({ error: 'forbidden_category_or_variant' }, { status: 403 })
-    }
 
     // Toplamlar
     let total = prepared.reduce((acc, p) => acc.add(p.subtotal), new Prisma.Decimal(0))
@@ -336,6 +355,7 @@ export async function POST(req: NextRequest) {
         total,
         discount: discountClamped,
         netTotal: net,
+        deliveryAt: parseYMDToLocalDate(deliveryDate) ?? undefined, // ✅ teslim tarihi
         items: { create: prepared },
       },
       include: {
@@ -360,6 +380,7 @@ export async function POST(req: NextRequest) {
       paidTotal: 0,     // ✅ yeni sipariş için başlangıç
       totalPaid: 0,     // ✅ legacy alias
       balance:   netNumber,
+      deliveryDate: created.deliveryAt ? created.deliveryAt.toISOString().slice(0,10) : null,
       items: created.items.map(it => ({
         id: it.id,
         categoryId: it.categoryId,
@@ -371,8 +392,8 @@ export async function POST(req: NextRequest) {
         fileDensity: Number(it.fileDensity),
         subtotal:    Number(it.subtotal),
         note: it.note,
-        slotIndex: it.slotIndex ?? null,                 // ✅
-        lineStatus: (it as any).lineStatus ?? 'processing', // ✅
+        slotIndex: it.slotIndex ?? null,
+        lineStatus: (it as any).lineStatus ?? 'processing', // ✅ uyum
         category: { name: it.category.name },
         variant: { name: it.variant.name },
       })),

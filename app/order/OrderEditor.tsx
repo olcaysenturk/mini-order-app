@@ -6,6 +6,7 @@ import Image from 'next/image'
 import { useOrderSetupStore } from '@/app/lib/orderSetupStore'
 import { toast } from 'sonner'
 import { PageOverlay } from '../components/PageOverlay'
+import { parseYMDToLocalDate } from '../lib/date'
 
 /* ========= Types ========= */
 type Status = 'processing' | 'pending' | 'completed' | 'cancelled'
@@ -103,6 +104,17 @@ async function fetchCategories(): Promise<Category[]> {
   return res.json()
 }
 
+async function createVariant(categoryId: string, payload: { name: string; unitPrice: number }) {
+  const res = await fetch(`/api/categories/${categoryId}/variants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Ürün eklenemedi'))
+  return res.json() as Promise<Variant> // { id, name, unitPrice }
+}
+
 /* ========= Component ========= */
 export default function OrderEditor({
   profile,
@@ -133,6 +145,7 @@ export default function OrderEditor({
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [orderDeliveryDate, setOrderDeliveryDate] = useState('')
 
   // discount + payment
   const [discountPercent, setDiscountPercent] = useState(0)
@@ -160,6 +173,12 @@ export default function OrderEditor({
 
   const [pageBusy, setPageBusy] = useState(false)
 
+  // Yeni Ürün modal
+  const [showVarModal, setShowVarModal] = useState(false)
+  const [newVarName, setNewVarName] = useState('')
+  const [newVarPrice, setNewVarPrice] = useState<string>('') // virgül desteği
+  const [savingVariant, setSavingVariant] = useState(false)
+
   /* ==== setup’dan prefill ==== */
   useEffect(() => {
     if (!setup) {
@@ -175,6 +194,7 @@ export default function OrderEditor({
     setSelectedCustomerId(setup.customerId ?? null)
     setCustomerName(setup.customerName || '')
     setCustomerPhone(setup.customerPhone || '')
+    setOrderDeliveryDate(setup.deliveryDate || '')
     setOrderNote(setup.note || '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setup])
@@ -198,7 +218,7 @@ export default function OrderEditor({
     if (variants.length > 0 && !variants.find(v => v.id === varId)) setVarId(variants[0].id)
   }, [selectedCategory, variants, varId])
 
-  // Varyant veya elle mod kapalıyken fiyat inputunu senkronla
+  // Ürün veya elle mod kapalıyken fiyat inputunu senkronla
   useEffect(() => {
     if (!useCustomPrice) {
       setUnitPriceInput(Number(selectedVariant?.unitPrice ?? 0))
@@ -232,7 +252,7 @@ export default function OrderEditor({
       const hit = arr.find(a => normalize(a) === normalize(p))
       sorted.push(hit ?? p)
     }
-    const others = arr.filter(a => !priority.some(p => normalize(p) === normalize(a)))
+    const others = arr.filter(a => !priority.some(pr => normalize(pr) === normalize(a)))
     others.sort((a, b) => a.localeCompare(b, 'tr'))
     return [...sorted, ...others]
   }, [groupedByCategoryName])
@@ -362,6 +382,7 @@ export default function OrderEditor({
           status={status}
           onChangeStatus={setStatus}
           customerName={customerName}
+          orderDeliveryDate={orderDeliveryDate}
           customerPhone={customerPhone}
           dealerName={dealerName}
           profile={profile}
@@ -461,7 +482,7 @@ export default function OrderEditor({
               <button className="btn-secondary" onClick={closeDrawer}>Kapat</button>
             </div>
 
-            {/* Kategori & Varyant */}
+            {/* Kategori & Ürün */}
             <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-2">
               <div>
                 <label className="text-sm">Kategori</label>
@@ -471,12 +492,28 @@ export default function OrderEditor({
                 </select>
               </div>
               <div>
-                <label className="text-sm">Varyant</label>
-                <select className="select mt-1" value={varId} onChange={(e) => setVarId(e.target.value)} disabled={!selectedCategory || loading}>
-                  {!selectedCategory && <option>Önce kategori seçin</option>}
-                  {selectedCategory && selectedCategory.variants.length === 0 && <option>Varyant yok</option>}
-                  {selectedCategory?.variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
+                <label className="text-sm">Ürün</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <select
+                    className="select flex-1"
+                    value={varId}
+                    onChange={(e) => setVarId(e.target.value)}
+                    disabled={!selectedCategory || loading}
+                  >
+                    {!selectedCategory && <option>Önce kategori seçin</option>}
+                    {selectedCategory && selectedCategory.variants.length === 0 && <option>Ürün yok</option>}
+                    {selectedCategory?.variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
+                    disabled={!selectedCategory}
+                    onClick={() => { setNewVarName(''); setNewVarPrice(''); setShowVarModal(true) }}
+                    title="Yeni Ürün ekle"
+                  >
+                    + Yeni
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -565,6 +602,96 @@ export default function OrderEditor({
         </div>
       )}
 
+      {/* Yeni Ürün Modal */}
+      {showVarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" onClick={()=>setShowVarModal(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl" onClick={(e)=>e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-base font-semibold">Yeni Ürün</div>
+              <button
+                className="inline-flex size-8 items-center justify-center rounded-xl border border-neutral-200 hover:bg-neutral-50"
+                onClick={() => setShowVarModal(false)}
+                aria-label="Kapat"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm">Kategori</label>
+                <input className="input mt-1 w-full" value={selectedCategory?.name || '—'} readOnly />
+              </div>
+              <div>
+                <label className="text-sm">Ürün Adı *</label>
+                <input
+                  className="input mt-1 w-full"
+                  value={newVarName}
+                  onChange={(e)=>setNewVarName(e.target.value)}
+                  placeholder="Örn: Deluxe 280 cm"
+                />
+              </div>
+              <div>
+                <label className="text-sm">Birim Fiyat (₺) *</label>
+                <input
+                  className="input mt-1 w-full text-right"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={newVarPrice}
+                  onChange={(e)=>setNewVarPrice(e.target.value)}
+                />
+                <p className="mt-1 text-[11px] text-neutral-500">Ondalık için virgül veya nokta kullanabilirsiniz.</p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50"
+                onClick={()=>setShowVarModal(false)}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                className="h-9 rounded-xl bg-neutral-900 px-3 text-sm font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
+                disabled={!selectedCategory || !newVarName.trim() || !newVarPrice.trim() || savingVariant}
+                onClick={async ()=>{
+                  if (!selectedCategory) return
+                  const price = parseFloat(newVarPrice.replace(',', '.'))
+                  if (!Number.isFinite(price) || price < 0) { toast.error('Geçerli bir fiyat girin.'); return }
+
+                  try {
+                    setSavingVariant(true)
+                    const created = await createVariant(selectedCategory.id, { name: newVarName.trim(), unitPrice: price })
+
+                    // Kategoriler state’inde ilgili kategoriye ekle
+                    setCategories(prev => prev.map(c => {
+                      if (c.id !== selectedCategory.id) return c
+                      return { ...c, variants: [...c.variants, created] }
+                    }))
+
+                    // Yeni varyantı seç ve fiyatı senkronla
+                    setVarId(created.id)
+                    setUseCustomPrice(false)
+                    setUnitPriceInput(Number(created.unitPrice ?? 0))
+
+                    toast.success('Ürün eklendi')
+                    setShowVarModal(false)
+                  } catch (err: any) {
+                    toast.error(err?.message || 'Ürün eklenemedi')
+                  } finally {
+                    setSavingVariant(false)
+                  }
+                }}
+              >
+                {savingVariant ? 'Kaydediliyor…' : 'Ekle'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="print:hidden mt-4 mb-4 px-4 py-4 flex items-center justify-end gap-3">
         <button
           className="btn-secondary disabled:opacity-50 text-white bg-green-600 hover:bg-green-700"
@@ -581,6 +708,7 @@ export default function OrderEditor({
               customerId: selectedCustomerId ?? undefined,
               customerName, customerPhone, note: (orderNote || ''), status,
               discount: computedDiscount,
+              deliveryDate: orderDeliveryDate,
               items: items.map(i => ({
                 categoryId: i.categoryId,
                 variantId: i.variantId,
@@ -650,12 +778,13 @@ export default function OrderEditor({
 /* ========= Sub Components ========= */
 
 function Header({
-  orderSeq, status, onChangeStatus, customerName, customerPhone, dealerName, profile, headerBranches,
+  orderSeq, status, onChangeStatus, customerName, orderDeliveryDate, customerPhone, dealerName, profile, headerBranches,
 }: {
   orderSeq: number | string
   status: Status
   onChangeStatus: (s: Status) => void
   customerName: string
+  orderDeliveryDate: string
   customerPhone: string
   dealerName: string
   profile: Profile
@@ -711,8 +840,10 @@ function Header({
           </select>
         </div>
         <div className="mt-3 font-semibold">
-          SIRA No:{' '}
-          <span className="inline-block min-w-[80px] text-red-700">{seqStr}</span>
+          Teslim Tarihi:{' '}
+          <span className="inline-block min-w-[80px] text-red-700">
+            {orderDeliveryDate ? parseYMDToLocalDate(orderDeliveryDate).toLocaleDateString('tr-TR') : '—'}
+          </span>
         </div>
       </div>
     </div>

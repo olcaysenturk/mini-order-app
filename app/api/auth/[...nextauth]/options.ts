@@ -24,6 +24,7 @@ declare module 'next-auth' {
     user?: DefaultSession['user'] & {
       id: string
       role: UserRole
+      isActive: boolean          // ✅ kullanıcı aktif/pasif bilgisi
     }
     tenantId?: string | null
     tenantRole?: TenantRole | null
@@ -34,6 +35,7 @@ declare module 'next-auth/jwt' {
   interface JWT {
     id?: string
     role?: UserRole
+    isActive?: boolean           // ✅ JWT üzerinde de tut
     tenantId?: string | null
     tenantRole?: TenantRole | null
   }
@@ -75,7 +77,7 @@ async function ensureTenantForUser(userId: string, role?: UserRole) {
 
     const { tenantId } = await prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
-        data: { name: `${u?.name || 'Admin'}'s workspace`, createdById: userId },
+        data: { name: `${u?.name || 'Admin'}`, createdById: userId },
         select: { id: true },
       })
 
@@ -117,19 +119,23 @@ export const authOptions: NextAuthOptions = {
 
         const user = await prisma.user.findUnique({
           where: { email },
-          select: { id: true, email: true, name: true, passwordHash: true, role: true },
+          select: { id: true, email: true, name: true, passwordHash: true, role: true, isActive: true },
         })
         if (!user) return null
 
         const ok = await bcrypt.compare(password, user.passwordHash)
         if (!ok) return null
 
+        // İstersen pasif kullanıcı girişini tamamen engelle:
+        // if (!user.isActive && user.role !== 'SUPERADMIN') return null
+
         return {
           id: user.id,
           email: user.email,
           name: user.name ?? '',
           role: user.role as UserRole,
-        }
+          isActive: !!user.isActive,          // ✅ authorize → JWT başlangıç değeri
+        } as any
       },
     }),
   ],
@@ -141,6 +147,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = (user as any).id
         token.role = (user as any).role as UserRole
+        token.isActive = Boolean((user as any).isActive)
 
         const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
         token.tenantId = ensured.tenantId
@@ -148,11 +155,24 @@ export const authOptions: NextAuthOptions = {
         return token
       }
 
-      // Sonradan tenantId düşmüşse yeniden garanti altına al
-      if (!token.tenantId && token.id) {
-        const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
-        token.tenantId = ensured.tenantId
-        token.tenantRole = ensured.tenantRole
+      // Her çağrıda isActive taze kalsın (admin pasife alırsa anında yansısın)
+      if (token.id) {
+        const u = await prisma.user.findUnique({
+          where: { id: String(token.id) },
+          select: { isActive: true, role: true },
+        })
+        if (u) {
+          token.isActive = !!u.isActive
+          // rol değiştiyse role de tazelensin (opsiyonel)
+          token.role = (u.role as UserRole) ?? token.role
+        }
+
+        // Sonradan tenantId düşmüşse yeniden garanti altına al
+        if (!token.tenantId) {
+          const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
+          token.tenantId = ensured.tenantId
+          token.tenantRole = ensured.tenantRole
+        }
       }
       return token
     },
@@ -161,6 +181,7 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = String(token.id)
         session.user.role = (token.role ?? UserRole.STAFF) as UserRole
+        session.user.isActive = Boolean(token.isActive)     // ✅ session.user.isActive
       }
       session.tenantId = (token.tenantId as string | null) ?? null
       session.tenantRole = (token.tenantRole as TenantRole | null) ?? null

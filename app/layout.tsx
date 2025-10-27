@@ -6,6 +6,10 @@ import Providers from "./providers";
 import { UserMenu } from "./components/UserMenu";   // ✅ components
 import { AuthedNav } from "./components/AuthedNav"; // ✅ components
 import { Toaster } from 'sonner'
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/options";
+import PaymentReminderOverlay from "./components/PaymentReminderOverlay";
+
 
 export const metadata: Metadata = {
   title: {
@@ -33,7 +37,8 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await getServerSession(authOptions);
   return (
     <html lang="tr">
       <body className="min-h-dvh bg-white text-neutral-900 antialiased">
@@ -67,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* ======= Page Content ======= */}
           <main id="content" className="relative min-h-[calc(100vh-135px)] p-8">
             {children}
+           
             <Toaster 
               richColors        // daha canlı renkler
               position="bottom-right"

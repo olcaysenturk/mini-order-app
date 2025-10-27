@@ -12,6 +12,77 @@ function toInt(v: string | undefined, def = 1) {
   return Number.isFinite(n) && n > 0 ? n : def;
 }
 
+// gün farkı
+function daysBetween(a: Date, b: Date) {
+  const MS = 24 * 60 * 60 * 1000;
+  return Math.ceil((a.getTime() - b.getTime()) / MS);
+}
+
+// Kullanıcının dahil olduğu tüm tenant aboneliklerinden plan & kalan gün çıkarımı
+function derivePlanAndDaysLeft(u: any): { plan: "FREE" | "PRO" | "-"; daysLeft: number | null } {
+  type Sub = {
+    plan: "FREE" | "PRO";
+    status: "trialing" | "active" | "past_due" | "canceled";
+    trialEndsAt: string | null;
+    currentPeriodEnd: string | null;
+  };
+
+  const subs: Sub[] = [];
+
+  // owner olduğu tenantlar
+  for (const t of u.tenantsOwned ?? []) {
+    if (t.subscriptions) {
+      subs.push({
+        plan: t.subscriptions.plan,
+        status: t.subscriptions.status,
+        trialEndsAt: t.subscriptions.trialEndsAt,
+        currentPeriodEnd: t.subscriptions.currentPeriodEnd,
+      });
+    }
+  }
+  // üye olduğu tenantlar
+  for (const m of u.memberships ?? []) {
+    if (m.tenant?.subscriptions) {
+      subs.push({
+        plan: m.tenant.subscriptions.plan,
+        status: m.tenant.subscriptions.status,
+        trialEndsAt: m.tenant.subscriptions.trialEndsAt,
+        currentPeriodEnd: m.tenant.subscriptions.currentPeriodEnd,
+      });
+    }
+  }
+
+  if (!subs.length) return { plan: "-", daysLeft: null };
+
+  // PRO (active/trial) öncelikli
+  const primary =
+    subs.find((s) => s.plan === "PRO" && (s.status === "active" || s.status === "trialing")) ||
+    subs.find((s) => s.plan === "PRO") ||
+    subs[0];
+
+  const now = new Date();
+
+  // FREE ise gün sayma (sadece trial varsa göster)
+  if (primary.plan === "FREE") {
+    if (primary.status === "trialing" && primary.trialEndsAt) {
+      const d = daysBetween(new Date(primary.trialEndsAt), now);
+      return { plan: "FREE", daysLeft: Math.max(0, d) };
+    }
+    return { plan: "FREE", daysLeft: null };
+  }
+
+  // PRO
+  if (primary.status === "trialing" && primary.trialEndsAt) {
+    const d = daysBetween(new Date(primary.trialEndsAt), now);
+    return { plan: "PRO", daysLeft: Math.max(0, d) };
+  }
+  if (primary.currentPeriodEnd) {
+    const d = daysBetween(new Date(primary.currentPeriodEnd), now);
+    return { plan: "PRO", daysLeft: Math.max(0, d) };
+  }
+  return { plan: "PRO", daysLeft: null };
+}
+
 export default async function AdminUsersPage({
   searchParams,
 }: {
@@ -35,7 +106,6 @@ export default async function AdminUsersPage({
     return [field, dir];
   })();
 
-  // 🔧 Tip güvenliği için açık prisma tipi
   const where: Prisma.UserWhereInput = q
     ? {
         OR: [
@@ -45,7 +115,7 @@ export default async function AdminUsersPage({
       }
     : {};
 
-  const [total, users, grouped] = await Promise.all([
+  const [total, rawUsers, grouped] = await Promise.all([
     prisma.user.count({ where }),
     prisma.user.findMany({
       where,
@@ -58,15 +128,50 @@ export default async function AdminUsersPage({
         email: true,
         role: true,
         createdAt: true,
+        // ⬇️ Abonelik verileri (Tenant.subscriptions DİKKAT: alan adı çoğul)
+        tenantsOwned: {
+          select: {
+            id: true,
+            subscriptions: {
+              select: {
+                plan: true,
+                status: true,
+                trialEndsAt: true,
+                currentPeriodEnd: true,
+              },
+            },
+          },
+        },
+        memberships: {
+          select: {
+            tenant: {
+              select: {
+                id: true,
+                subscriptions: {
+                  select: {
+                    plan: true,
+                    status: true,
+                    trialEndsAt: true,
+                    currentPeriodEnd: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     }),
-    // rol bazlı chip’ler için ufak toplama
     prisma.user.groupBy({
       by: ["role"],
       where,
       _count: { _all: true },
     }),
   ]);
+
+  const users = rawUsers.map((u) => {
+    const { plan, daysLeft } = derivePlanAndDaysLeft(u);
+    return { ...u, _plan: plan, _daysLeft: daysLeft as number | null };
+  });
 
   const totalPages = Math.max(1, Math.ceil(total / size));
 
@@ -189,12 +294,14 @@ export default async function AdminUsersPage({
           Kayıtlı Kullanıcılar
         </div>
         <div className="overflow-x-auto">
-          <table className="min-w-[780px] w-full text-sm" aria-label="Kullanıcı listesi">
+          <table className="min-w-[920px] w-full text-sm" aria-label="Kullanıcı listesi">
             <thead className="bg-neutral-50">
               <tr className="[&>th]:px-4 [&>th]:py-2 text-left text-neutral-500">
                 <th>#</th>
                 <th>Kullanıcı</th>
                 <th>Rol</th>
+                <th>Paket</th>
+                <th>Kalan</th>
                 <th className="text-right">Kayıt</th>
                 <th className="text-right">İşlem</th>
               </tr>
@@ -222,6 +329,12 @@ export default async function AdminUsersPage({
                     </span>
                   </td>
 
+                  <td className="text-neutral-800">{u._plan}</td>
+
+                  <td className="text-neutral-800">
+                    {u._daysLeft == null ? "—" : `${u._daysLeft} gün`}
+                  </td>
+
                   <td className="text-right tabular-nums text-neutral-700">
                     {new Intl.DateTimeFormat("tr-TR", {
                       dateStyle: "medium",
@@ -232,7 +345,7 @@ export default async function AdminUsersPage({
                   <td className="text-right">
                     <div className="inline-flex items-center gap-2">
                       <Link
-                        href={`/admin/users/${u.id}/billing`}
+                        href={`/admin/users/${u.id}`}
                         className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
                         title="Detay"
                       >
@@ -245,7 +358,7 @@ export default async function AdminUsersPage({
 
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
                     Kayıt bulunamadı.
                   </td>
                 </tr>

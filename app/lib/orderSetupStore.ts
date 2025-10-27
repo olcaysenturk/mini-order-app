@@ -9,6 +9,7 @@ export type OrderSetup = {
   customerName?: string
   customerPhone?: string
   note?: string
+  deliveryDate?: string | null
 }
 
 type Store = {

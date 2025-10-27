@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       })
 
       const tenant = await tx.tenant.create({
-        data: { name: `${name}'s workspace`, createdById: user.id },
+        data: { name: `${name}'`, createdById: user.id },
         select: { id: true },
       })
 

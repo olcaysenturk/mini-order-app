@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Search, UserPlus, Users, AlertCircle, Loader2, ChevronRight } from 'lucide-react'
+import { Search, UserPlus, Users, AlertCircle, Loader2, ChevronRight, Calendar as CalendarIcon } from 'lucide-react'
 import { useOrderSetupStore } from '@/app/lib/orderSetupStore'
 
 /** Company altındaki şube (bayi) tipi */
@@ -16,6 +16,20 @@ type BranchesResp = { ok: boolean; items: Branch[]; total?: number }
 
 type Customer = { id: string; name: string; phone: string; email?: string | null }
 type CustomersResp = { ok: boolean; items: Customer[]; total?: number }
+
+/* ====== helpers: tarih ====== */
+function toInputDate(d: Date) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function addDays(d: Date, n: number) {
+  const x = new Date(d)
+  x.setDate(x.getDate() + n)
+  x.setHours(0, 0, 0, 0)
+  return x
+}
 
 export default function NewOrderView() {
   const router = useRouter()
@@ -36,6 +50,15 @@ export default function NewOrderView() {
   const [newPhone, setNewPhone] = useState('')
   const [newEmail, setNewEmail] = useState('')
 
+  // Teslim tarihi
+  const today = useMemo(() => {
+    const t = new Date()
+    t.setHours(0, 0, 0, 0)
+    return t
+  }, [])
+  const [deliveryDate, setDeliveryDate] = useState<string>(() => toInputDate(addDays(new Date(), 7)))
+  const minDateStr = useMemo(() => toInputDate(today), [today])
+
   // Ortak
   const [note, setNote] = useState('')
   const [loading, setLoading] = useState(true)
@@ -44,10 +67,6 @@ export default function NewOrderView() {
 
   // Derived
   const activeBranches = useMemo(() => branches.filter(b => b.isActive), [branches])
-  const selectedBranchName = useMemo(
-    () => branches.find(b => b.id === branchId)?.name || '',
-    [branches, branchId]
-  )
 
   // Branches fetch (company altından)
   useEffect(() => {
@@ -137,6 +156,14 @@ export default function NewOrderView() {
     e.preventDefault()
     if (!branchId) { toast('Lütfen bir şube/bayi seçin.', 'warn'); return }
 
+    // teslim tarihi doğrula (min: bugün)
+    const picked = new Date(deliveryDate)
+    picked.setHours(0, 0, 0, 0)
+    if (isNaN(picked.getTime()) || picked < today) {
+      toast('Teslim tarihi bugünden önce olamaz.', 'warn')
+      return
+    }
+
     setSaving(true)
     try {
       // 1) seçilen/oluşturulan müşteri
@@ -155,14 +182,16 @@ export default function NewOrderView() {
 
       // 2) store'a yaz
       const branch = branches.find(b => b.id === branchId)
-      setSetup({
+      const payload: any = {
         dealerId: branchId,
         dealerName: branch?.name || '',
         customerId: customerPayload?.id ?? null,
         customerName: customerPayload!.name,
         customerPhone: customerPayload!.phone,
         note: note.trim() || '',
-      })
+        deliveryDate: deliveryDate, // YYYY-MM-DD
+      }
+      setSetup(payload)
 
       // 3) URL’e parametre basmadan editor’a geç
       router.push('/order')
@@ -173,6 +202,9 @@ export default function NewOrderView() {
     }
   }
 
+  // hızlı seçim butonları
+  const quickSet = (days: number) => setDeliveryDate(toInputDate(addDays(today, days)))
+
   return (
     <div className="p-6">
       <div className="mx-auto max-w-3xl">
@@ -180,7 +212,7 @@ export default function NewOrderView() {
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-[var(--brand-800,#111827)]">Yeni Sipariş</h1>
-            <p className="text-sm text-gray-500">Önce şube/bayi ve müşteriyi seçelim</p>
+            <p className="text-sm text-gray-500">Önce şube/bayi, müşteri ve teslim tarihini belirleyin</p>
           </div>
           <span className="text-xs text-gray-400">
             {loading ? 'Yükleniyor…' : 'Hazır'}
@@ -193,7 +225,7 @@ export default function NewOrderView() {
           </div>
         )}
 
-        {/* Loading skeleton – daha modern karşılık */}
+        {/* Loading skeleton */}
         {loading ? (
           <div className="space-y-4 rounded-2xl border border-[var(--surface-200,#e5e7eb)] bg-white p-5 shadow-sm">
             <div className="h-6 w-40 animate-pulse rounded-lg bg-[var(--surface-200,#e5e7eb)]" />
@@ -331,6 +363,53 @@ export default function NewOrderView() {
               )}
             </section>
 
+            {/* Teslim Tarihi */}
+            <section>
+              <label className="mb-1 block text-sm font-medium">Teslim Tarihi *</label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+                <TurkishDatePicker
+                  value={deliveryDate}
+                  min={minDateStr}
+                  onChange={(v) => setDeliveryDate(v)}
+                />
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => quickSet(0)}
+                    className="rounded-xl border border-[var(--surface-300,#d1d5db)] px-3 py-2 text-sm hover:bg-[var(--surface-50,#f9fafb)]"
+                    title="Bugün"
+                  >
+                    Bugün
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => quickSet(3)}
+                    className="rounded-xl border border-[var(--surface-300,#d1d5db)] px-3 py-2 text-sm hover:bg-[var(--surface-50,#f9fafb)]"
+                    title="+3 gün"
+                  >
+                    +3
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => quickSet(7)}
+                    className="rounded-xl border border-[var(--surface-300,#d1d5db)] px-3 py-2 text-sm hover:bg-[var(--surface-50,#f9fafb)]"
+                    title="+7 gün"
+                  >
+                    +7
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => quickSet(14)}
+                    className="rounded-xl border border-[var(--surface-300,#d1d5db)] px-3 py-2 text-sm hover:bg-[var(--surface-50,#f9fafb)]"
+                    title="+14 gün"
+                  >
+                    +14
+                  </button>
+                </div>
+              </div>
+            </section>
+
             {/* Not */}
             <section>
               <label className="mb-1 block text-sm font-medium">Sipariş Notu</label>
@@ -348,7 +427,8 @@ export default function NewOrderView() {
                 disabled={
                   saving ||
                   !branchId ||
-                  (mode === 'pick' ? !customerId : (!newName.trim() || !newPhone.trim()))
+                  (mode === 'pick' ? !customerId : (!newName.trim() || !newPhone.trim())) ||
+                  !deliveryDate
                 }
                 className="inline-flex items-center gap-2 rounded-xl bg-[var(--brand-600,#111827)] px-4 py-2 text-white transition hover:bg-[var(--brand-700,#0b1220)] disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500,#6366F1)] focus-visible:ring-offset-2"
               >
@@ -408,4 +488,217 @@ function toast(msg: string, variant: 'info' | 'warn' | 'error' = 'info') {
     el.style.transform = 'translateY(6px)'
     setTimeout(() => el.remove(), 200)
   }, 2400)
+}
+
+/* ================= Türkçe Tarih Seçici ================= */
+
+function ymd(d: Date) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+function parseYMD(s?: string) {
+  if (!s) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+function sameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+function useOutside(handler: () => void) {
+  const [node, setNode] = useState<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!node) return
+      if (!node.contains(e.target as Node)) handler()
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handler() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [node, handler])
+  return { setRef: setNode }
+}
+
+function trMonthName(d: Date) {
+  return new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric' }).format(d)
+}
+const TR_WEEKDAYS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'] // Pazartesi başlangıç
+
+function buildMonthGrid(view: Date) {
+  const first = new Date(view.getFullYear(), view.getMonth(), 1)
+  let startIdx = (first.getDay() + 6) % 7 // Pazartesi=0 olacak şekilde kaydır
+  const start = new Date(first)
+  start.setDate(first.getDate() - startIdx)
+
+  const cells: Date[] = []
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start)
+    d.setDate(start.getDate() + i)
+    cells.push(d)
+  }
+  return cells
+}
+
+function formatTR(d: Date) {
+  return new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(d)
+}
+
+function TurkishDatePicker({
+  value,
+  min,
+  onChange,
+}: {
+  value: string
+  min?: string
+  onChange: (v: string) => void
+}) {
+  const selected = parseYMD(value) || new Date()
+  const [open, setOpen] = useState(false)
+  const [view, setView] = useState<Date>(() => parseYMD(value) || new Date())
+  const minDate = parseYMD(min || '')
+
+  useEffect(() => {
+    const v = parseYMD(value)
+    if (v) setView(v)
+  }, [value])
+
+  const { setRef } = useOutside(() => setOpen(false))
+
+  const disableTyping = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const allowed = ['Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape', 'Enter']
+    if (!allowed.includes(e.key)) e.preventDefault()
+  }
+
+  return (
+    <div className="relative" ref={setRef}>
+      {/* Görünen text input (elle yazma kilitli) */}
+      <input
+        lang="tr-TR"
+        type="text"
+        value={formatTR(selected)}
+        onKeyDown={disableTyping}
+        onBeforeInput={(e) => e.preventDefault()}
+        onPaste={(e) => e.preventDefault()}
+        readOnly
+        onClick={() => setOpen((s) => !s)}
+        className="w-full cursor-pointer rounded-xl border border-[var(--surface-300,#d1d5db)] px-3 py-2 pr-9 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500,#6366F1)] focus-visible:ring-offset-2"
+        aria-label="Tarih seç"
+      />
+      {/* takvim ikonu */}
+      <span
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
+        aria-hidden
+      >
+        <CalendarIcon className="h-4 w-4" />
+      </span>
+
+      {open && (
+        <div
+          className="
+            absolute z-50 mt-2 w-[280px] rounded-2xl border
+            border-[var(--surface-200,#e5e7eb)] bg-white p-3 shadow-xl
+          "
+          role="dialog"
+          aria-label="Takvim"
+        >
+          {/* Başlık */}
+          <div className="mb-2 flex items-center justify-between">
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--surface-300,#d1d5db)] hover:bg-[var(--surface-50,#f9fafb)]"
+              onClick={() => setView(new Date(view.getFullYear(), view.getMonth() - 1, 1))}
+              aria-label="Önceki ay"
+            >
+              ‹
+            </button>
+            <div className="text-sm font-semibold capitalize">
+              {trMonthName(view)}
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--surface-300,#d1d5db)] hover:bg-[var(--surface-50,#f9fafb)]"
+              onClick={() => setView(new Date(view.getFullYear(), view.getMonth() + 1, 1))}
+              aria-label="Sonraki ay"
+            >
+              ›
+            </button>
+          </div>
+
+          {/* Haftalık başlıklar */}
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500">
+            {TR_WEEKDAYS.map((d) => (
+              <div key={d} className="py-1">{d}</div>
+            ))}
+          </div>
+
+          {/* Günler */}
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {buildMonthGrid(view).map((d) => {
+              const inMonth = d.getMonth() === view.getMonth()
+              const isSelected = sameDay(d, selected)
+              const isToday = sameDay(d, new Date())
+              const isDisabled = !!minDate && d < minDate
+
+              const base = "h-9 w-9 rounded-lg text-sm flex items-center justify-center transition"
+              const tone =
+                isDisabled ? "text-gray-300 cursor-not-allowed"
+                : isSelected ? "bg-[var(--brand-600,#111827)] text-white"
+                : isToday ? "border border-[var(--brand-400,#9CA3AF)]"
+                : inMonth ? "text-gray-900 hover:bg-[var(--surface-50,#f9fafb)]"
+                : "text-gray-400 hover:bg-[var(--surface-50,#f9fafb)]"
+
+              return (
+                <button
+                  key={d.toISOString()}
+                  type="button"
+                  disabled={isDisabled}
+                  className={`${base} ${tone}`}
+                  onClick={() => {
+                    onChange(ymd(d))
+                    setOpen(false)
+                  }}
+                >
+                  {d.getDate()}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Bugün / Kapat */}
+          <div className="mt-3 flex items-center justify-between">
+            <button
+              type="button"
+              className="text-xs text-gray-600 hover:underline"
+              onClick={() => {
+                const t = new Date(); t.setHours(0,0,0,0)
+                if (minDate && t < minDate) {
+                  onChange(ymd(minDate))
+                } else {
+                  onChange(ymd(t))
+                }
+                setView(parseYMD(value) || new Date())
+                setOpen(false)
+              }}
+            >
+              Bugün
+            </button>
+            <button
+              type="button"
+              className="text-xs text-gray-600 hover:underline"
+              onClick={() => setOpen(false)}
+            >
+              Kapat
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

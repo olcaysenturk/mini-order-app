@@ -56,7 +56,7 @@ export async function requireTenantId(): Promise<string> {
     where: { id: userId },
     select: { name: true },
   })
-  const workspaceName = `${user?.name || 'Admin'}'s workspace`
+  const workspaceName = `${user?.name || 'Admin'}'`
 
   const { tenant } = await prisma.$transaction(async (tx) => {
     const tenant = await tx.tenant.create({

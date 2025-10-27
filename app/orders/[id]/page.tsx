@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { toast } from 'sonner'
+import { toast } from 'sonner';
 
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
@@ -14,19 +14,18 @@ type LineItem = {
   categoryId: string;
   variantId: string;
   qty: number;
-  width: number; // cm
-  height: number; // cm
+  width: number;
+  height: number;
   unitPrice: number;
   note?: string | null;
-  fileDensity: number; // default 1.0
-  subtotal: number; // unitPrice * ((width/100)*fileDensity || 1) * qty
-  slotIndex: number | null; // gridli kategoriler için
-  lineStatus: Status;       // ✅ eklendi (UI + PATCH payload)
+  fileDensity: number;
+  subtotal: number;
+  slotIndex: number | null;
+  lineStatus: Status;
 };
 
 type Order = {
   id: string;
-  seq?: number | null;
   note?: string | null;
   createdAt: string;
   total: number;
@@ -34,6 +33,7 @@ type Order = {
   customerName: string;
   customerPhone: string;
   status: Status;
+  deliveryAt?: string | null; // <- API'den gelen alan
 };
 
 type InsertSlot = { title: string; index: number } | null;
@@ -67,14 +67,8 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const fmt = (n: number) =>
   new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
-// Sadece bu kategoriler gridte görünsün
-const BOX_COUNTS: Record<string, number> = {
-  'TÜL PERDE': 10,
-  'FON PERDE': 5,
-  'GÜNEŞLİK': 5,
-};
+const BOX_COUNTS: Record<string, number> = { 'TÜL PERDE': 10, 'FON PERDE': 5, 'GÜNEŞLİK': 5 };
 const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR');
-const hasBoxCount = (name: string) => Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name));
 
 const statusLabelMap: Record<Status, string> = {
   pending: 'Beklemede',
@@ -87,6 +81,20 @@ const statusDot: Record<Status, string> = {
   processing: 'bg-blue-500',
   completed: 'bg-emerald-600',
   cancelled: 'bg-rose-600',
+};
+
+// ISO/Date → YYYY-MM-DD (input için)
+const toYMD = (value?: string | null) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+};
+// YYYY-MM-DD → yerel gösterim
+const ymdToLocal = (ymd?: string | null) => {
+  if (!ymd) return '—';
+  const d = new Date(`${ymd}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('tr-TR');
 };
 
 /* ========= API ========= */
@@ -134,16 +142,28 @@ async function fetchBranches(): Promise<Branch[]> {
   })) as Branch[];
 }
 
+/** Kategoriye yeni varyant ekleme */
+async function createVariant(categoryId: string, payload: { name: string; unitPrice: number }) {
+  const res = await fetch(`/api/categories/${categoryId}/variants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await res.text().catch(() => 'Varyant eklenemedi'));
+  return res.json() as Promise<Variant>;
+}
+
 /* ========= Page ========= */
 export default function EditOrderPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  // master data
+  // master
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // company/header data
+  // company/header
   const [profile, setProfile] = useState<Profile | null>(null);
   const [headerBranches, setHeaderBranches] = useState<Branch[]>([]);
 
@@ -153,16 +173,15 @@ export default function EditOrderPage() {
   const [orderNote, setOrderNote] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [orderSeq, setOrderSeq] = useState<number | string>('—');
   const [status, setStatus] = useState<Status>('pending');
+  const [deliveryAt, setDeliveryAt] = useState<string>(''); // YYYY-MM-DD
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // PATCH’te sadece DB’de var olan item id’lerini update etmek için
   const existingDbItemIds = useRef<Set<string>>(new Set());
 
-  // drawer (inline editor)
+  // drawer
   const [slot, setSlot] = useState<InsertSlot>(null);
   const [catId, setCatId] = useState('');
   const [varId, setVarId] = useState('');
@@ -170,10 +189,16 @@ export default function EditOrderPage() {
   const [width, setWidth] = useState(0);
   const [height, setHeight] = useState(0);
   const [lineNote, setLineNote] = useState('');
-  const [fileDensity, setFileDensity] = useState(1.0); // default 1.0
+  const [fileDensity, setFileDensity] = useState(1.0);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [targetSlotIndex, setTargetSlotIndex] = useState<number | null>(null);
-  const [lineStatus, setLineStatus] = useState<Status>('pending'); // ✅ drawer için
+  const [lineStatus, setLineStatus] = useState<Status>('pending');
+
+  // Yeni varyant modal
+  const [showVarModal, setShowVarModal] = useState(false);
+  const [newVarName, setNewVarName] = useState('');
+  const [newVarPrice, setNewVarPrice] = useState<string>('');
+  const [savingVariant, setSavingVariant] = useState(false);
 
   /* ==== Load ==== */
   useEffect(() => {
@@ -189,16 +214,14 @@ export default function EditOrderPage() {
         ]);
         if (!alive) return;
 
-        // categories
         setCategories(cats);
 
-        // order
         setOrderId(ord.id);
         setCustomerName(ord.customerName || '');
         setCustomerPhone(ord.customerPhone || '');
         setOrderNote(ord.note || '');
-        setOrderSeq(typeof ord.seq === 'number' ? ord.seq : ord.id);
         setStatus(ord.status ?? 'pending');
+        setDeliveryAt(toYMD(ord.deliveryAt)); // <- deliveryAt'ten oku
 
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
@@ -207,30 +230,22 @@ export default function EditOrderPage() {
           const unitPrice = Number(i.unitPrice ?? 0);
           const density = Number(i.fileDensity ?? 1);
           const sub = unitPrice * (((width / 100) * density) || 1) * qty;
-          const ls: Status =
-            (i.lineStatus as Status) ||
-            // çok eski verilerde lineStatus yoksa sipariş durumuna düş:
-            (ord.status as Status) ||
-            'pending';
+          const ls: Status = (i.lineStatus as Status) || (ord.status as Status) || 'pending';
           return {
             id: i.id || uid(),
             categoryId: i.categoryId,
             variantId: i.variantId,
-            qty,
-            width,
-            height,
-            unitPrice,
+            qty, width, height, unitPrice,
             fileDensity: density,
             note: i.note ?? null,
             subtotal: sub,
             slotIndex: Number.isFinite(i.slotIndex) ? Number(i.slotIndex) : null,
-            lineStatus: ls, // ✅
+            lineStatus: ls,
           };
         });
         setItems(normalized);
         existingDbItemIds.current = new Set((ord.items || []).map((it: any) => it.id));
 
-        // profile + header branches
         setProfile(prof);
         const hb = (brs || [])
           .filter((b) => b.isActive && b.showOnHeader)
@@ -242,33 +257,19 @@ export default function EditOrderPage() {
         setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false };
   }, [id]);
 
   /* ==== Derived ==== */
-  const selectedCategory = useMemo(
-    () => categories.find((c) => c.id === catId),
-    [categories, catId]
-  );
+  const selectedCategory = useMemo(() => categories.find((c) => c.id === catId), [categories, catId]);
   const variants = selectedCategory?.variants ?? [];
-  const selectedVariant = useMemo(
-    () => variants.find((v) => v.id === varId),
-    [variants, varId]
-  );
+  const selectedVariant = useMemo(() => variants.find((v) => v.id === varId), [variants, varId]);
 
   useEffect(() => {
-    if (!selectedCategory) {
-      setVarId('');
-      return;
-    }
-    if (variants.length > 0 && !variants.find((v) => v.id === varId)) {
-      setVarId(variants[0].id);
-    }
+    if (!selectedCategory) { setVarId(''); return }
+    if (variants.length > 0 && !variants.find((v) => v.id === varId)) setVarId(variants[0].id);
   }, [selectedCategory, variants, varId]);
 
-  // Önizleme: unitPrice * ((width/100) * fileDensity || 1) * qty
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0;
     const p = Number(selectedVariant.unitPrice) || 0;
@@ -278,18 +279,13 @@ export default function EditOrderPage() {
     return p * (((w / 100) * d) || 1) * q;
   }, [selectedVariant, qty, width, fileDensity]);
 
-  // Maps
-  const catById = useMemo(
-    () => new Map(categories.map((c) => [c.id, c])),
-    [categories]
-  );
+  const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const variantById = useMemo(() => {
     const m = new Map<string, Variant>();
     for (const c of categories) for (const v of c.variants) m.set(v.id, v);
     return m;
   }, [categories]);
 
-  // Tüm kalemleri kategori adına grupla
   const groupedByCategoryName = useMemo(() => {
     const g = new Map<string, LineItem[]>();
     for (const it of items) {
@@ -300,73 +296,34 @@ export default function EditOrderPage() {
     return g;
   }, [items, catById]);
 
-  // Slotted kategoriler: kutulara yerleştir
   const slottedByCategoryName = useMemo(() => {
     const m = new Map<string, (LineItem | undefined)[]>();
-
-    for (const titleRaw of Object.keys(BOX_COUNTS)) {
-      m.set(titleRaw, Array(BOX_COUNTS[titleRaw]).fill(undefined));
-    }
-
+    for (const titleRaw of Object.keys(BOX_COUNTS)) m.set(titleRaw, Array(BOX_COUNTS[titleRaw]).fill(undefined));
     for (const it of items) {
       const catName = catById.get(it.categoryId)?.name?.trim() || 'Kategori';
       const key = Object.keys(BOX_COUNTS).find((k) => normalize(k) === normalize(catName));
-      if (!key) continue; // slotted değilse atla
-
+      if (!key) continue;
       const arr = m.get(key)!;
-
-      // hedef slot uygunsa oraya, doluysa ilk boş
-      let target =
-        Number.isFinite(it.slotIndex) && it.slotIndex !== null
-          ? Math.max(0, Math.min(arr.length - 1, Number(it.slotIndex)))
-          : -1;
-
-      if (target >= 0 && arr[target] === undefined) {
-        arr[target] = it;
-        continue;
-      }
-
+      let target = Number.isFinite(it.slotIndex) && it.slotIndex !== null
+        ? Math.max(0, Math.min(arr.length - 1, Number(it.slotIndex)))
+        : -1;
+      if (target >= 0 && arr[target] === undefined) { arr[target] = it; continue }
       const firstEmpty = arr.findIndex((x) => x === undefined);
-      if (firstEmpty !== -1) {
-        arr[firstEmpty] = it;
-        continue;
-      }
-
-      // tüm kutular doluysa: şimdilik taşma yapmıyoruz
+      if (firstEmpty !== -1) { arr[firstEmpty] = it; continue }
     }
-
     return m;
   }, [items, catById]);
 
-  const sectionTitles = useMemo(() => {
-    const arr = Array.from(groupedByCategoryName.keys());
-    const priority = ['TÜL PERDE', 'FON PERDE', 'GÜNEŞLİK'];
-    const sorted: string[] = [];
-    for (const p of priority) {
-      if (!arr.find((a) => a.toLowerCase() === p.toLowerCase())) {
-        sorted.push(p); // boş da olsa göster
-      } else {
-        sorted.push(arr.find((a) => a.toLowerCase() === p.toLowerCase())!);
-      }
-    }
-    const others = arr.filter((a) => !priority.find((p) => p.toLowerCase() === a.toLowerCase()));
-    others.sort((a, b) => a.localeCompare(b, 'tr'));
-    return [...sorted, ...others];
-  }, [groupedByCategoryName]);
-
-  const total = useMemo(
-    () => items.reduce((a, b) => a + (Number(b.subtotal) || 0), 0),
-    [items]
-  );
+  const total = useMemo(() => items.reduce((a, b) => a + (Number(b.subtotal) || 0), 0), [items]);
 
   function LegendDot({ c, label }: { c: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      <span className={`inline-block h-2.5 w-2.5 rounded-full ${c}`} />
-      {label}
-    </span>
-  )
-}
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span className={`inline-block h-2.5 w-2.5 rounded-full ${c}`} />
+        {label}
+      </span>
+    );
+  }
 
   /* ===== actions ===== */
   const openAddAt = (title: string, index: number) => {
@@ -374,14 +331,8 @@ export default function EditOrderPage() {
     const match = categories.find((c) => normalize(c.name) === normalize(title));
     setCatId(match?.id || '');
     if (match?.variants?.length) setVarId(match.variants[0].id);
-    setQty(1);
-    setWidth(0);
-    setHeight(0);
-    setLineNote('');
-    setFileDensity(1.0);
-    setEditingLineId(null);
-    setTargetSlotIndex(index); // hedef kutu
-    setLineStatus('pending');  // ✅ varsayılan
+    setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0);
+    setEditingLineId(null); setTargetSlotIndex(index); setLineStatus('pending');
   };
 
   const openQuickFor = (categoryName: string, index: number) => {
@@ -389,20 +340,11 @@ export default function EditOrderPage() {
     setSlot({ title: categoryName, index });
     setCatId(cat?.id || '');
     if (cat?.variants?.length) setVarId(cat.variants[0].id);
-    setQty(1);
-    setWidth(0);
-    setHeight(0);
-    setLineNote('');
-    setFileDensity(1.0);
-    setEditingLineId(null);
-    setTargetSlotIndex(null); // slotted olmayan
-    setLineStatus('pending');  // ✅ varsayılan
+    setQty(1); setWidth(0); setHeight(0); setLineNote(''); setFileDensity(1.0);
+    setEditingLineId(null); setTargetSlotIndex(null); setLineStatus('pending');
   };
 
-  const closeDrawer = () => {
-    setSlot(null);
-    setEditingLineId(null);
-  };
+  const closeDrawer = () => { setSlot(null); setEditingLineId(null) };
 
   const addOrUpdateLine = () => {
     if (!selectedCategory || !selectedVariant) return;
@@ -411,130 +353,88 @@ export default function EditOrderPage() {
     const price = Number(selectedVariant.unitPrice) || 0;
     const d = Number(fileDensity) || 1;
     const sub = price * (((w / 100) * d) || 1) * q;
-
     const selectedCatName = catById.get(selectedCategory.id)?.name || '';
     const isSlotted = BOX_COUNTS[normalize(selectedCatName)] != null;
 
     if (editingLineId) {
-      setItems((prev) =>
-        prev.map((it) =>
-          it.id === editingLineId
-            ? {
-                ...it,
-                categoryId: selectedCategory.id,
-                variantId: selectedVariant.id,
-                qty: q,
-                width: w,
-                height,
-                unitPrice: price,
-                note: lineNote || null,
-                fileDensity: d,
-                subtotal: sub,
-                slotIndex: isSlotted ? (targetSlotIndex ?? it.slotIndex ?? 0) : null,
-                lineStatus, // ✅ güncelle
-              }
-            : it
-        )
-      );
+      setItems(prev => prev.map(it => it.id === editingLineId ? {
+        ...it,
+        categoryId: selectedCategory.id,
+        variantId: selectedVariant.id,
+        qty: q, width: w, height,
+        unitPrice: price, note: lineNote || null,
+        fileDensity: d, subtotal: sub,
+        slotIndex: isSlotted ? (targetSlotIndex ?? it.slotIndex ?? 0) : null,
+        lineStatus,
+      } : it));
     } else {
       const line: LineItem = {
         id: uid(),
         categoryId: selectedCategory.id,
         variantId: selectedVariant.id,
-        qty: q,
-        width: w,
-        height,
-        unitPrice: price,
-        note: lineNote || undefined,
-        fileDensity: d,
-        subtotal: sub,
+        qty: q, width: w, height,
+        unitPrice: price, note: lineNote || undefined,
+        fileDensity: d, subtotal: sub,
         slotIndex: isSlotted ? (targetSlotIndex ?? 0) : null,
-        lineStatus, // ✅
+        lineStatus,
       };
-      setItems((prev) => [...prev, line]);
+      setItems(prev => [...prev, line]);
     }
     closeDrawer();
   };
 
-  const removeLine = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id));
-
+  const removeLine = (id: string) => setItems(prev => prev.filter(i => i.id !== id));
   const editLine = (line: LineItem) => {
     setEditingLineId(line.id);
-    setSlot({
-      title: catById.get(line.categoryId)?.name || 'Kategori',
-      index: 0,
-    });
-    setCatId(line.categoryId);
-    setVarId(line.variantId);
-    setQty(line.qty);
-    setWidth(line.width);
-    setHeight(line.height);
-    setLineNote(line.note || '');
-    setFileDensity(line.fileDensity || 1.0);
+    setSlot({ title: catById.get(line.categoryId)?.name || 'Kategori', index: 0 });
+    setCatId(line.categoryId); setVarId(line.variantId);
+    setQty(line.qty); setWidth(line.width); setHeight(line.height);
+    setLineNote(line.note || ''); setFileDensity(line.fileDensity || 1.0);
     setTargetSlotIndex(Number.isFinite(line.slotIndex as any) ? (line.slotIndex as number) : null);
-    setLineStatus(line.lineStatus || 'pending'); // ✅
+    setLineStatus(line.lineStatus || 'pending');
   };
-
-  // Aynı kategori içinde slot değiş-tokuşu (drag & drop)
   const swapInCategory = (title: string, from: number, to: number) => {
-    setItems((prev) => {
+    setItems(prev => {
       const slots = slottedByCategoryName.get(title) || [];
-      const a = slots[from];
-      const b = slots[to];
-      return prev.map((it) => {
+      const a = slots[from]; const b = slots[to];
+      return prev.map(it => {
         if (a && it.id === a.id) return { ...it, slotIndex: to };
         if (b && it.id === b.id) return { ...it, slotIndex: from };
         return it;
       });
     });
   };
-
-  // ✅ kart içinden hızlı durum değiştirme
   const updateLineStatus = (id: string, s: Status) =>
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, lineStatus: s } : it)));
+    setItems(prev => prev.map(it => (it.id === id ? { ...it, lineStatus: s } : it)));
 
   const saveOrder = async () => {
-    if (!customerName.trim() || !customerPhone.trim()) {
-      toast.error('Müşteri adı ve telefon zorunlu.');
-      return;
-    }
-    if (items.length === 0) {
-      toast.error('En az bir satır ekleyin.');
-
-      return;
-    }
+    if (!customerName.trim() || !customerPhone.trim()) { toast.error('Müşteri adı ve telefon zorunlu.'); return }
+    if (items.length === 0) { toast.error('En az bir satır ekleyin.'); return }
     setSaving(true);
     try {
-      // SADECE DB'de var olan id'ler update edilsin; yeniler create olsun
-      const payloadItems = items.map((i) => {
+      const payloadItems = items.map(i => {
         const base: any = {
-          categoryId: i.categoryId,
-          variantId: i.variantId,
-          qty: i.qty,
-          width: i.width,
-          height: i.height,
-          unitPrice: i.unitPrice,
-          fileDensity: i.fileDensity,
-          note: i.note ?? null,
+          categoryId: i.categoryId, variantId: i.variantId, qty: i.qty,
+          width: i.width, height: i.height, unitPrice: i.unitPrice,
+          fileDensity: i.fileDensity, note: i.note ?? null,
           slotIndex: Number.isFinite(i.slotIndex as any) ? i.slotIndex : null,
-          lineStatus: i.lineStatus, // ✅ PATCH payload’a ekle
+          lineStatus: i.lineStatus,
         };
         if (existingDbItemIds.current.has(i.id)) base.id = i.id;
         return base;
       });
 
-      const currentIds = new Set(items.map((i) => i.id));
+      const currentIds = new Set(items.map(i => i.id));
       const deletedIds: string[] = [];
-      existingDbItemIds.current.forEach((oldId) => {
-        if (!currentIds.has(oldId)) deletedIds.push(oldId);
-      });
-      const deleteOps = deletedIds.map((x) => ({ id: x, _action: 'delete' as const }));
+      existingDbItemIds.current.forEach(oldId => { if (!currentIds.has(oldId)) deletedIds.push(oldId) });
+      const deleteOps = deletedIds.map(x => ({ id: x, _action: 'delete' as const }));
 
       const payload = {
         customerName,
         customerPhone,
         note: orderNote || null,
         status,
+        deliveryAt: deliveryAt || null, // <- PATCH'te deliveryAt
         items: [...payloadItems, ...deleteOps],
       };
 
@@ -544,12 +444,10 @@ export default function EditOrderPage() {
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        console.error('PATCH /api/orders/:id failed:', txt);
+        console.error('PATCH /api/orders/:id failed:', await res.text().catch(() => ''));
         toast.error('Değişiklikler kaydedilemedi.');
         return;
       }
-
       toast.success('Sipariş güncellendi!');
       router.refresh?.();
     } finally {
@@ -557,7 +455,6 @@ export default function EditOrderPage() {
     }
   };
 
-  // Özel bölümler (slotted olmayan)
   const storItems = useMemo(() => groupedByCategoryName.get('STOR PERDE') || [], [groupedByCategoryName]);
   const aksesuarItems = useMemo(() => groupedByCategoryName.get('AKSESUAR') || [], [groupedByCategoryName]);
 
@@ -581,27 +478,36 @@ export default function EditOrderPage() {
 
       {/* A4 Alanı */}
       <div className="m-auto w-[210mm] min-h-[297mm] print:w-auto print:min-h-[auto]">
-        {/* Header – Dinamik profil + header şubeleri */}
         <Header
-          orderSeq={orderSeq ?? '—'}
           customerName={customerName}
           customerPhone={customerPhone}
           status={status}
           profile={profile}
           headerBranches={headerBranches}
+          deliveryAt={deliveryAt}
         />
 
-        {/* Müşteri alanları (ekranda düzenlenebilir) */}
-        <div className="grid grid-cols-2 gap-3 my-4 print:hidden">
+        {/* Düzenlenebilir alanlar */}
+        <div className="grid grid-cols-4 gap-3 my-4 print:hidden">
           <div>
-            <label className="text-sm">Durum</label>
-            <select className="select mt-1" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
+            <label className="text-sm block">Durum</label>
+            <select className="select mt-1 w-[150px]" value={status} onChange={(e) => setStatus(e.target.value as Status)}>
               <option value="pending">Beklemede</option>
               <option value="processing">İşlemde</option>
               <option value="completed">Tamamlandı</option>
               <option value="cancelled">İptal</option>
             </select>
           </div>
+          <div>
+            <label className="text-sm block">Teslim Tarihi</label>
+            <input
+              type="date"
+              className="select mt-1 w-[150px]"
+              value={deliveryAt}
+              onChange={(e) => setDeliveryAt(e.target.value)}
+            />
+          </div>
+          <div></div>
           <div className="mt-4 text-[10px] flex gap-4 print:hidden justify-end">
             <LegendDot c={statusDot.pending} label="Beklemede" />
             <LegendDot c={statusDot.processing} label="İşlemde" />
@@ -610,7 +516,7 @@ export default function EditOrderPage() {
           </div>
         </div>
 
-        {/* Kategoriler (slotted grid) — sadece BOX_COUNTS’ta olanlar */}
+        {/* Slotted kategoriler */}
         {Object.keys(BOX_COUNTS).map((title) => {
           const key = normalize(title);
           const boxCount = BOX_COUNTS[key];
@@ -632,34 +538,28 @@ export default function EditOrderPage() {
                 }
               }}
               onSwapSlots={(from, to) => swapInCategory(title, from, to)}
-              onStatusChange={updateLineStatus}   // ✅ inline durum
+              onStatusChange={updateLineStatus}
             />
           );
         })}
 
-        {/* Özel bölümler (slotted olmayan) */}
+        {/* Slotted olmayanlar */}
         <SectionQuickPlus
           title="STOR PERDE"
           items={storItems}
           variantById={variantById}
           onAddAt={(i) => openQuickFor('STOR PERDE', i)}
-          onEdit={(id) => {
-            const line = items.find((x) => x.id === id);
-            if (line) editLine(line);
-          }}
+          onEdit={(id) => { const line = items.find((x) => x.id === id); if (line) editLine(line) }}
         />
         <SectionQuickPlus
           title="AKSESUAR"
           items={aksesuarItems}
           variantById={variantById}
           onAddAt={(i) => openQuickFor('AKSESUAR', i)}
-          onEdit={(id) => {
-            const line = items.find((x) => x.id === id);
-            if (line) editLine(line);
-          }}
+          onEdit={(id) => { const line = items.find((x) => x.id === id); if (line) editLine(line) }}
         />
 
-        {/* Genel Not & Toplam */}
+        {/* Not & Toplam */}
         <div className="grid grid-cols-3 gap-4 mt-6">
           <div className="col-span-2">
             <input
@@ -678,7 +578,6 @@ export default function EditOrderPage() {
           </div>
         </div>
 
-        {/* Alt uyarı */}
         <div className="mt-4 text-[10px] tracking-wide">
           ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>.
           MÜŞTERİDEN KAYNAKLI HATALI ÖLÇÜLERDE <b>TERZİ ÜCRETİ ALINMAKTADIR</b>.
@@ -688,48 +587,41 @@ export default function EditOrderPage() {
       {/* Drawer */}
       {slot && (
         <div className="fixed inset-0 bg-black/40 z-50 print:hidden" onClick={closeDrawer}>
-          <div
-            className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto" onClick={(e)=>e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <div className="text-lg font-semibold">
                 {editingLineId ? 'Satırı Düzenle' : `${slot.title} - Kutucuk #${slot.index + 1}`}
               </div>
-              <button className="btn-secondary" onClick={closeDrawer}>
-                Kapat
-              </button>
+              <button className="btn-secondary" onClick={closeDrawer}>Kapat</button>
             </div>
 
-            {/* Kategori & Varyant */}
+            {/* Kategori & Varyant (+Yeni) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-sm">Kategori</label>
                 <select className="select mt-1" value={catId} onChange={(e) => setCatId(e.target.value)}>
                   <option value="">Seçin</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="text-sm">Varyant</label>
-                <select
-                  className="select mt-1"
-                  value={varId}
-                  onChange={(e) => setVarId(e.target.value)}
-                  disabled={!selectedCategory}
-                >
-                  {!selectedCategory && <option>Önce kategori seçin</option>}
-                  {selectedCategory && selectedCategory.variants.length === 0 && <option>Varyant yok</option>}
-                  {selectedCategory?.variants.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="mt-1 flex items-center gap-2">
+                  <select className="select flex-1" value={varId} onChange={(e) => setVarId(e.target.value)} disabled={!selectedCategory}>
+                    {!selectedCategory && <option>Önce kategori seçin</option>}
+                    {selectedCategory && selectedCategory.variants.length === 0 && <option>Varyant yok</option>}
+                    {selectedCategory?.variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
+                    disabled={!selectedCategory}
+                    onClick={() => { setNewVarName(''); setNewVarPrice(''); setShowVarModal(true) }}
+                    title="Yeni varyant ekle"
+                  >
+                    + Yeni
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -737,74 +629,37 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div>
                 <label className="text-sm">Adet</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={qty}
-                  onChange={(e) => setQty(parseInt(e.target.value || '1'))}
-                />
+                <input className="input mt-1 text-right" type="number" min={1} step={1} value={qty} onChange={(e)=>setQty(parseInt(e.target.value || '1'))}/>
               </div>
               <div>
                 <label className="text-sm">En (cm)</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={width}
-                  onChange={(e) => setWidth(parseInt(e.target.value || '0'))}
-                />
+                <input className="input mt-1 text-right" type="number" min={0} step={1} value={width} onChange={(e)=>setWidth(parseInt(e.target.value || '0'))}/>
               </div>
               <div>
                 <label className="text-sm">Boy (cm)</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={height}
-                  onChange={(e) => setHeight(parseInt(e.target.value || '0'))}
-                />
+                <input className="input mt-1 text-right" type="number" min={0} step={1} value={height} onChange={(e)=>setHeight(parseInt(e.target.value || '0'))}/>
               </div>
             </div>
 
-            {/* File Sıklığı + Birim Fiyat */}
+            {/* File Sıklığı + Birim Fiyat (readonly) */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-sm">File Sıklığı</label>
-                <select
-                  className="select mt-1"
-                  value={String(fileDensity)}
-                  onChange={(e) => setFileDensity(parseFloat(e.target.value))}
-                >
-                  <option value="1">1.0x</option>
-                  <option value="1.5">1.5x</option>
-                  <option value="2">2.0x</option>
-                  <option value="2.5">2.5x</option>
-                  <option value="3">3.0x</option>
+                <select className="select mt-1" value={String(fileDensity)} onChange={(e)=>setFileDensity(parseFloat(e.target.value))}>
+                  <option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option>
+                  <option value="2.5">2.5x</option><option value="3">3.0x</option>
                 </select>
               </div>
               <div>
                 <label className="text-sm">Birim Fiyat</label>
-                <input
-                  className="input mt-1 text-right"
-                  value={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : ''}
-                  readOnly
-                  placeholder="—"
-                />
+                <input className="input mt-1 text-right" value={selectedVariant ? fmt(Number(selectedVariant.unitPrice)) : ''} readOnly placeholder="—" />
               </div>
             </div>
 
-            {/* ✅ Satır Durumu */}
+            {/* Satır Durumu */}
             <div className="mb-4">
               <label className="text-sm">Satır Durumu</label>
-              <select
-                className="select mt-1 w-full"
-                value={lineStatus}
-                onChange={(e) => setLineStatus(e.target.value as Status)}
-              >
+              <select className="select mt-1 w-full" value={lineStatus} onChange={(e)=>setLineStatus(e.target.value as Status)}>
                 <option value="pending">Beklemede</option>
                 <option value="processing">İşlemde</option>
                 <option value="completed">Tamamlandı</option>
@@ -816,36 +671,18 @@ export default function EditOrderPage() {
             <div className="grid grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="text-sm">Ara Toplam</label>
-                <input
-                  className="input mt-1 text-right"
-                  value={selectedVariant ? fmt(previewSubtotal) : ''}
-                  readOnly
-                  placeholder="—"
-                />
+                <input className="input mt-1 text-right" value={selectedVariant ? fmt(previewSubtotal) : ''} readOnly placeholder="—" />
               </div>
               <div>
                 <label className="text-sm">Satır Notu</label>
-                <input
-                  className="input mt-1"
-                  value={lineNote}
-                  onChange={(e) => setLineNote(e.target.value)}
-                  placeholder="Bu satıra özel not…"
-                />
+                <input className="input mt-1" value={lineNote} onChange={(e)=>setLineNote(e.target.value)} placeholder="Bu satıra özel not…" />
               </div>
             </div>
 
             <div className="flex gap-2">
-              <button className="btn" onClick={addOrUpdateLine}>
-                {editingLineId ? 'Kaydet' : 'Kutucuğa Ekle'}
-              </button>
+              <button className="btn" onClick={addOrUpdateLine}>{editingLineId ? 'Kaydet' : 'Kutucuğa Ekle'}</button>
               {editingLineId && (
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    if (editingLineId) removeLine(editingLineId);
-                    closeDrawer();
-                  }}
-                >
+                <button className="btn-secondary" onClick={() => { if (editingLineId) removeLine(editingLineId); closeDrawer() }}>
                   Satırı Sil
                 </button>
               )}
@@ -854,41 +691,72 @@ export default function EditOrderPage() {
         </div>
       )}
 
+      {/* Yeni Varyant Modal */}
+      {showVarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" role="dialog" aria-modal="true" onClick={()=>setShowVarModal(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl" onClick={(e)=>e.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <div className="text-base font-semibold">Yeni Varyant</div>
+              <button className="inline-flex size-8 items-center justify-center rounded-xl border border-neutral-200 hover:bg-neutral-50" onClick={() => setShowVarModal(false)} aria-label="Kapat">✕</button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm">Kategori</label>
+                <input className="input mt-1 w-full" value={selectedCategory?.name || '—'} readOnly />
+              </div>
+              <div>
+                <label className="text-sm">Varyant Adı *</label>
+                <input className="input mt-1 w-full" value={newVarName} onChange={(e)=>setNewVarName(e.target.value)} placeholder="Örn: Deluxe 280 cm" />
+              </div>
+              <div>
+                <label className="text-sm">Birim Fiyat (₺) *</label>
+                <input className="input mt-1 w-full text-right" inputMode="decimal" placeholder="0,00" value={newVarPrice} onChange={(e)=>setNewVarPrice(e.target.value)} />
+                <p className="mt-1 text-[11px] text-neutral-500">Ondalık için virgül veya nokta kullanabilirsiniz.</p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button type="button" className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50" onClick={()=>setShowVarModal(false)}>Vazgeç</button>
+              <button
+                type="button"
+                className="h-9 rounded-xl bg-neutral-900 px-3 text-sm font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
+                disabled={!selectedCategory || !newVarName.trim() || !newVarPrice.trim() || savingVariant}
+                onClick={async ()=>{
+                  if (!selectedCategory) return;
+                  const price = parseFloat(newVarPrice.replace(',', '.'));
+                  if (!Number.isFinite(price) || price < 0) { toast.error('Geçerli bir fiyat girin.'); return }
+                  try {
+                    setSavingVariant(true);
+                    const created = await createVariant(selectedCategory.id, { name: newVarName.trim(), unitPrice: price });
+                    setCategories(prev => prev.map(c => c.id !== selectedCategory.id ? c : { ...c, variants: [...c.variants, created] }));
+                    setVarId(created.id);
+                    toast.success('Varyant eklendi');
+                    setShowVarModal(false);
+                  } catch (err: any) {
+                    toast.error(err?.message || 'Varyant eklenemedi');
+                  } finally {
+                    setSavingVariant(false);
+                  }
+                }}
+              >
+                {savingVariant ? 'Kaydediliyor…' : 'Ekle'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Print styles */}
       <style jsx global>{`
         @media print {
-          @page {
-            size: A4 portrait;
-            margin: 0;
-          }
-          html,
-          body {
-            background: white !important;
-          }
-          .btn,
-          .btn-secondary,
-          .print\\:hidden {
-            display: none !important;
-          }
-          input,
-          select,
-          textarea {
-            border: none !important;
-            outline: none !important;
-          }
+          @page { size: A4 portrait; margin: 0; }
+          html, body { background: white !important; }
+          .btn, .btn-secondary, .print\\:hidden { display: none !important; }
+          input, select, textarea { border: none !important; outline: none !important; }
         }
-        input,
-        select,
-        textarea {
-          outline: none !important;
-          box-shadow: none !important;
-        }
-        input:focus,
-        select:focus,
-        textarea:focus {
-          outline: none !important;
-          box-shadow: none !important;
-        }
+        input, select, textarea { outline: none !important; box-shadow: none !important; }
+        input:focus, select:focus, textarea:focus { outline: none !important; box-shadow: none !important; }
       `}</style>
     </div>
   );
@@ -897,22 +765,20 @@ export default function EditOrderPage() {
 /* ========= Sub Components ========= */
 
 function Header({
-  orderSeq,
   customerName,
   customerPhone,
   status,
   profile,
   headerBranches,
+  deliveryAt, // YYYY-MM-DD
 }: {
-  orderSeq: number | string;
   customerName: string;
   customerPhone: string;
   status: Status;
   profile: Profile | null;
   headerBranches: Branch[];
+  deliveryAt?: string | null;
 }) {
-  const seqStr = typeof orderSeq === 'number' ? orderSeq.toString().padStart(6, '0') : orderSeq.toString();
-
   return (
     <div className="flex items-start justify-between">
       <div>
@@ -923,19 +789,12 @@ function Header({
         <div className="mt-2 text-xs leading-5">
           {headerBranches.map((b) => (
             <div key={b.id} className="mt-1">
-              <b>{b.code == 'MAIN' ? 'Merkez' : b.code}:</b>
-              <br />
+              <b>{b.code == 'MAIN' ? 'Merkez' : b.code}:</b><br />
               <span>{b.address || '—'}</span>
-              {b.phone ? (
-                <div>
-                  <b>Gsm:</b> {b.phone}
-                </div>
-              ) : null}
+              {b.phone ? (<div><b>Gsm:</b> {b.phone}</div>) : null}
             </div>
           ))}
-          {profile?.instagram && (
-            <div className="mt-1 flex items-center gap-1">@{profile.instagram.replace(/^@/, '')}</div>
-          )}
+          {profile?.instagram && <div className="mt-1 flex items-center gap-1">@{profile.instagram.replace(/^@/, '')}</div>}
         </div>
       </div>
 
@@ -956,7 +815,10 @@ function Header({
           <span className="inline-block min-w-[140px] text-right">{statusLabelMap[status]}</span>
         </div>
         <div className="mt-3 font-semibold">
-          SIRA No: <span className="inline-block min-w-[80px] text-red-700">{seqStr}</span>
+          Teslim Tarihi:{' '}
+          <span className="inline-block min-w-[96px] text-red-700">
+            {ymdToLocal(deliveryAt || undefined)}
+          </span>
         </div>
       </div>
     </div>
@@ -965,7 +827,7 @@ function Header({
 
 function SectionEditable({
   title,
-  slots, // (LineItem | undefined)[]
+  slots,
   boxCount,
   variantById,
   onAddAt,
@@ -985,17 +847,9 @@ function SectionEditable({
   onStatusChange: (id: string, s: Status) => void;
 }) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-
   const handleDragStart = (i: number) => () => setDragIdx(i);
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-  const handleDrop = (i: number) => (e: React.DragEvent) => {
-    e.preventDefault();
-    if (dragIdx === null || dragIdx === i) return;
-    onSwapSlots(dragIdx, i);
-    setDragIdx(null);
-  };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault() };
+  const handleDrop = (i: number) => (e: React.DragEvent) => { e.preventDefault(); if (dragIdx===null || dragIdx===i) return; onSwapSlots(dragIdx, i); setDragIdx(null) };
 
   return (
     <div className="mt-5 break-inside-avoid">
@@ -1004,38 +858,24 @@ function SectionEditable({
         {Array.from({ length: boxCount }).map((_, i) => {
           const it = slots[i];
           const variant = it ? variantById.get(it.variantId) : null;
+          const statusColor = it ? statusDot[it.lineStatus] : '';
 
           return (
             <div
               key={i}
-              className={`min-h-[60px] border border-black/70 p-2 border-l-0 border-b-0 relative group ${
-                dragIdx === i ? 'bg-black/5' : ''
-              }`}
+              className={`min-h-[60px] border border-black/70 p-2 border-l-0 border-b-0 relative group ${statusColor} ${dragIdx === i ? 'bg-black/5' : ''}`}
               onDragOver={handleDragOver}
               onDrop={handleDrop(i)}
             >
               {!it ? (
-                <button
-                  className="absolute inset-0 w-full h-full flex items-center justify-center text-sm text-gray-600 hover:text-black hover:bg-black/5 print:hidden"
-                  onClick={() => onAddAt(i)}
-                >
+                <button className="absolute inset-0 w-full h-full flex items-center justify-center text-sm text-gray-600 hover:text-black hover:bg-black/5 print:hidden" onClick={() => onAddAt(i)}>
                   + Ekle
                 </button>
               ) : (
-                <div
-                  className={`text-[8px] leading-3 ${statusDot[it.lineStatus]}`}
-                  draggable
-                  onDragStart={handleDragStart(i)}
-                  title="Sürükleyip başka kutuya bırakın"
-                >
-                  {/* Sağ üstte durum göstergesi + hızlı değişim */}
+                <div className="text-[8px] leading-3" draggable onDragStart={handleDragStart(i)} title="Sürükleyip başka kutuya bırakın">
                   <div className="absolute right-1 top-1 flex items-center gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
                     <span className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot[it.lineStatus]}`} />
-                    <select
-                      className="border text-[10px] rounded px-1 py-0.5 bg-white"
-                      value={it.lineStatus}
-                      onChange={(e) => onStatusChange(it.id, e.target.value as Status)}
-                    >
+                    <select className="border text-[10px] rounded px-1 py-0.5 bg-white" value={it.lineStatus} onChange={(e) => onStatusChange(it.id, e.target.value as Status)}>
                       <option value="pending">Beklemede</option>
                       <option value="processing">İşlemde</option>
                       <option value="completed">Tamamlandı</option>
@@ -1043,26 +883,17 @@ function SectionEditable({
                     </select>
                   </div>
 
-                  
                   <div>
-                    <b>Tür :</b> {variant?.name || '—'}
-                    <br />
-                    <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×{it.height} cm
-                    <br />
-                    <b>File Sıklığı :</b> {it.fileDensity}x
-                    <br />
-                    <b>Birim :</b> {fmt(Number(it.unitPrice))}
-                    <br />
+                    <b>Tür :</b> {variant?.name || '—'}<br />
+                    <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×{it.height} cm<br />
+                    <b>File Sıklığı :</b> {it.fileDensity}x<br />
+                    <b>Birim :</b> {fmt(Number(it.unitPrice))}<br />
                     <b>Tutar :</b> {fmt(Number(it.subtotal))}
                   </div>
                   {it.note && <div className="text-[10px] text-gray-700 mt-1">Not: {it.note}</div>}
                   <div className="absolute right-1 bottom-1 flex gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
-                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onEdit(it.id)}>
-                      Düzenle
-                    </button>
-                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onRemove(it.id)}>
-                      Sil
-                    </button>
+                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onEdit(it.id)}>Düzenle</button>
+                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onRemove(it.id)}>Sil</button>
                   </div>
                 </div>
               )}

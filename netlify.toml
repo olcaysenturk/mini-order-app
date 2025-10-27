@@ -1,0 +1,5 @@
+# netlify.toml
+[[scheduled.functions]]
+name = "cron-ping"
+# 00:30 UTC = İstanbul 03:30
+cron = "30 0 * * *"

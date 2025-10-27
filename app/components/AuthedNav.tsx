@@ -76,11 +76,6 @@ export function AuthedNav() {
   const isActive = (href: string) => pathname.startsWith(href)
 
   const items: NavItem[] = [
-    // {
-    //   href: '/company',
-    //   label: 'Şirketim',
-    //   icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14l4-4h12a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"/></svg>,
-    // },
     {
       href: '/category',
       label: 'Kategoriler',
@@ -90,6 +85,16 @@ export function AuthedNav() {
       href: '/orders',
       label: 'Siparişler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>,
+    },
+    // ✅ Takvim eklendi
+    {
+      href: '/calendar',
+      label: 'Takvim',
+      icon: (
+        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+          <path fill="currentColor" d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v3H3V6a2 2 0 0 1 2-2h2V2zm15 7v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9h20zM7 13h4v4H7v-4z"/>
+        </svg>
+      ),
     },
     {
       href: '/customers',
@@ -147,7 +152,7 @@ export function AuthedNav() {
             aria-label="Gezinti"
             className="absolute left-0 right-auto top-full z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-lg"
           >
-            <nav className="py-2 max-h-[70vh] overflow-y-auto">
+            <nav className="max-h-[70vh] overflow-y-auto py-2">
               {[...items, ...(isSuperAdmin ? [adminItem] as NavItem[] : [])].map((it) => {
                 const active = isActive(it.href) || (it.href.startsWith('/admin') && pathname.startsWith('/admin'))
                 return (
@@ -183,8 +188,9 @@ export function AuthedNav() {
         {items.map((it) => (
           <NavButton key={it.href} item={it} active={isActive(it.href)} />
         ))}
-
-        
+        {/* İsterseniz desktop’ta da admin sekmesini gösterebilirsiniz:
+        {isSuperAdmin && <NavButton item={adminItem} active={isActive(adminItem.href)} />}
+        */}
       </nav>
     </div>
   )
