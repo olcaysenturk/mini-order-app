@@ -25,7 +25,7 @@ export default function RegisterPage() {
       return
     }
     // başarı -> login sayfasına
-    router.push('/login')
+    router.push('/auth/login')
   }
 
   return (
@@ -44,7 +44,7 @@ export default function RegisterPage() {
         </button>
       </form>
       <div className="mt-3 text-sm">
-        Zaten hesabın var mı? <a className="underline" href="/login">Giriş yap</a>
+        Zaten hesabın var mı? <a className="underline" href="/auth/login">Giriş yap</a>
       </div>
     </div>
   )

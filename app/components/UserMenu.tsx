@@ -55,7 +55,7 @@ export function UserMenu() {
     return (
       <Link
         className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-        href="/login"
+        href="/auth/login"
       >
         Giriş
       </Link>
@@ -177,7 +177,7 @@ export function UserMenu() {
           <div className="p-2">
             <button
               role="menuitem"
-              onClick={() => signOut({ callbackUrl: '/login' })}
+              onClick={() => signOut({ callbackUrl: '/auth/login' })}
               className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>

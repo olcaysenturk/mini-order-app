@@ -21,7 +21,7 @@ export async function middleware(req: NextRequest) {
   if (token) return NextResponse.next()
 
   // Yoksa login'e yönlendir
-  const url = new URL('/login', req.url)
+  const url = new URL('/auth/login', req.url)
   url.searchParams.set('callbackUrl', req.nextUrl.pathname + req.nextUrl.search)
   return NextResponse.redirect(url)
 }

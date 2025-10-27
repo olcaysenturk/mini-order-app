@@ -3,3 +3,10 @@
 name = "cron-ping"
 # 00:30 UTC = İstanbul 03:30
 cron = "30 0 * * *"
+
+[build]
+command = "next build"
+publish = ".next"
+
+[[plugins]]
+package = "@netlify/plugin-nextjs"

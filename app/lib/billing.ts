@@ -38,7 +38,7 @@ return false;
 export async function requireActiveSubscription() {
 const session = await getServerSession(authOptions);
 const tenantId = (session as any)?.tenantId as string | undefined;
-if (!tenantId) redirect("/login");
+if (!tenantId) redirect("/auth/login");
 
 
 const sub = await prisma.subscription.findUnique({ where: { tenantId } });

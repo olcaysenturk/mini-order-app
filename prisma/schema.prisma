@@ -74,7 +74,8 @@ model User {
   tenantsOwned Tenant[]     @relation("TenantCreatedBy")
 
   // ⬇️ BACK-RELATION: Ödemeleri oluşturan kullanıcı
-  paymentsCreated    OrderPayment[]       @relation("OrderPaymentCreatedBy")
+  paymentsCreated OrderPayment[]       @relation("OrderPaymentCreatedBy")
+  resetTokens     PasswordResetToken[]
 
   @@index([email])
   @@index([role])
@@ -414,6 +415,18 @@ model OrderPayment {
 
   @@index([tenantId, orderId, paidAt])
   @@index([tenantId, paidAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
 }
 
 /**

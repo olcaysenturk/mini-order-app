@@ -1027,7 +1027,100 @@ export default function OrdersPage() {
                           </div>
                         )}
 
-                        {/* ... (kalemler ve ödemeler aynı – kısaltılmış) */}
+                        {/* Kalemler */}
+                        <div className="rounded-2xl border border-neutral-200">
+                          <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">
+                            Kalemler ({order.items.length})
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                              <thead className="bg-neutral-50 text-neutral-600">
+                                <tr>
+                                  <th className="px-3 py-2 text-left">Kategori</th>
+                                  <th className="px-3 py-2 text-left">Varyant</th>
+                                  <th className="px-3 py-2 text-right">Adet</th>
+                                  <th className="px-3 py-2 text-right">En</th>
+                                  <th className="px-3 py-2 text-right">Boy</th>
+                                  <th className="px-3 py-2 text-right">Birim ₺</th>
+                                  <th className="px-3 py-2 text-right">Tutar ₺</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {order.items.map((it) => (
+                                  <tr key={it.id} className="border-t border-neutral-100">
+                                    <td className="px-3 py-2">{it.category.name}</td>
+                                    <td className="px-3 py-2">{it.variant.name}</td>
+                                    <td className="px-3 py-2 text-right">{fmtInt(it.qty)}</td>
+                                    <td className="px-3 py-2 text-right">{fmtInt(it.width)}</td>
+                                    <td className="px-3 py-2 text-right">{fmtInt(it.height)}</td>
+                                    <td className="px-3 py-2 text-right">{fmt(it.unitPrice)}</td>
+                                    <td className="px-3 py-2 text-right">{fmt(it.subtotal)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Ödemeler */}
+                        <div className="rounded-2xl border border-neutral-200">
+                          <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
+                            <div className="text-sm font-semibold">Ödemeler</div>
+                            <button
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                              onClick={() => openPayModal(order.id)}
+                            >
+                              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                                <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                              </svg>
+                              Ödeme Yap
+                            </button>
+                          </div>
+
+                          <div className="p-3">
+                            {detailLoading[order.id] && <Skeleton />}
+                            {detailError[order.id] && (
+                              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                {detailError[order.id]}
+                              </div>
+                            )}
+                            {!detailLoading[order.id] && !detailError[order.id] && (
+                              <>
+                                {d && d.payments.length > 0 ? (
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full text-sm">
+                                      <thead className="bg-neutral-50 text-neutral-600">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left">Tarih</th>
+                                          <th className="px-3 py-2 text-left">Yöntem</th>
+                                          <th className="px-3 py-2 text-right">Tutar ₺</th>
+                                          <th className="px-3 py-2 text-left">Not</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {d.payments.map((p) => (
+                                          <tr key={p.id} className="border-t border-neutral-100">
+                                            <td className="px-3 py-2">
+                                              {new Intl.DateTimeFormat("tr-TR", {
+                                                dateStyle: "medium",
+                                                timeStyle: "short",
+                                              }).format(new Date(p.paidAt))}
+                                            </td>
+                                            <td className="px-3 py-2">{methodLabel[p.method]}</td>
+                                            <td className="px-3 py-2 text-right">{fmt(p.amount)}</td>
+                                            <td className="px-3 py-2">{p.note ?? "—"}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </section>
@@ -1086,9 +1179,117 @@ export default function OrdersPage() {
             </button>
           </div>
         </div>
-
-     
       </main>
+
+      {/* ===== Pay Modal ===== */}
+      {payModalOpenId && (
+        <div
+          ref={modalBackdropRef}
+          onClick={onBackdropClick}
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40"
+          aria-modal="true"
+          role="dialog"
+        >
+          <div className="w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl bg-white shadow-xl p-4 sm:p-6">
+            {(() => {
+              const d = detailById[payModalOpenId!];
+              const saving = !!paySaving[payModalOpenId!];
+              const amount = payAmount[payModalOpenId!] ?? "";
+              const method = payMethod[payModalOpenId!] ?? "CASH";
+              const note = payNote[payModalOpenId!] ?? "";
+
+              return (
+                <>
+                  <div className="mb-3 flex items-start justify-between">
+                    <h2 className="text-lg font-semibold">Ödeme Yap</h2>
+                    <button
+                      onClick={closePayModal}
+                      className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100"
+                      aria-label="Kapat"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-5"><path fill="currentColor" d="M18 6L6 18M6 6l12 12"/></svg>
+                    </button>
+                  </div>
+
+                  {!d ? (
+                    <div className="py-8 text-center text-sm text-neutral-600">
+                      Detay yükleniyor…
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div className="rounded-lg bg-neutral-50 p-2">
+                          <div className="text-neutral-500">Net</div>
+                          <div className="font-semibold">{fmt(d.netTotal)} ₺</div>
+                        </div>
+                        <div className="rounded-lg bg-emerald-50 p-2">
+                          <div className="text-emerald-700">Ödenen</div>
+                          <div className="font-semibold text-emerald-700">{fmt(d.paidTotal)} ₺</div>
+                        </div>
+                        <div className="rounded-lg bg-amber-50 p-2">
+                          <div className="text-amber-700">Kalan</div>
+                          <div className="font-semibold text-amber-700">{fmt(d.balance)} ₺</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium">Tutar</label>
+                        <input
+                          className="input w-full"
+                          placeholder="0,00"
+                          value={amount}
+                          onChange={(e) => setPayAmount(m => ({ ...m, [payModalOpenId!]: e.target.value }))}
+                          inputMode="decimal"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium">Yöntem</label>
+                        <select
+                          className="select w-full"
+                          value={method}
+                          onChange={(e) => setPayMethod(m => ({ ...m, [payModalOpenId!]: e.target.value as PaymentMethod }))}
+                        >
+                          <option value="CASH">Nakit</option>
+                          <option value="TRANSFER">Havale/EFT</option>
+                          <option value="CARD">Kredi Kartı</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-sm font-medium">Not (opsiyonel)</label>
+                        <textarea
+                          className="textarea w-full"
+                          rows={3}
+                          value={note}
+                          onChange={(e) => setPayNote(m => ({ ...m, [payModalOpenId!]: e.target.value }))}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          className="rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm hover:bg-neutral-50"
+                          onClick={closePayModal}
+                          disabled={saving}
+                        >
+                          İptal
+                        </button>
+                        <button
+                          className="rounded-xl bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                          onClick={() => addPayment(payModalOpenId!)}
+                          disabled={saving}
+                        >
+                          {saving ? "Kaydediliyor…" : "Kaydet"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </>
   );
 }
