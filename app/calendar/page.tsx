@@ -737,12 +737,12 @@ export default function OrdersCalendarPage() {
                     >
                       Düzenle
                     </a>
-                    <a
+                    {/* <a
                       href={`/orders/${o.id}?pay=1`}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
                     >
                       Ödeme Ekle
-                    </a>
+                    </a> */}
                   </div>
                 </li>
               );

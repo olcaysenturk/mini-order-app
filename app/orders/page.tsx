@@ -34,6 +34,7 @@ type Order = {
   status: Status;
   paidTotal?: number;
   totalPaid?: number;
+  discount?: any;
   balance?: number;
   netTotal?: number;
   deliveryDate?: string; // "YYYY-MM-DD"
@@ -228,7 +229,9 @@ function InlineLoader() {
     <div className="flex items-center justify-center py-12">
       <div className="flex flex-col items-center gap-3">
         <div className="size-8 rounded-full border-2 border-neutral-300 border-t-indigo-600 animate-spin" />
-        <div className="text-sm font-medium text-neutral-700">Siparişler yükleniyor…</div>
+        <div className="text-sm font-medium text-neutral-700">
+          Siparişler yükleniyor…
+        </div>
       </div>
     </div>
   );
@@ -246,7 +249,9 @@ export default function OrdersPage() {
   const [q, setQ] = useState("");
 
   // filters
-  const [paymentStatus, setPaymentStatus] = useState<"all" | "unpaid" | "partial" | "paid">("all");
+  const [paymentStatus, setPaymentStatus] = useState<
+    "all" | "unpaid" | "partial" | "paid"
+  >("all");
   const [methodFilters, setMethodFilters] = useState<PaymentMethod[]>([]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>("default");
@@ -260,7 +265,9 @@ export default function OrdersPage() {
 
   // Bayileri tekilleştir
   const dealers = useMemo(() => {
-    const names = orders.map((o) => (o.dealer?.name ?? "").trim()).filter(Boolean);
+    const names = orders
+      .map((o) => (o.dealer?.name ?? "").trim())
+      .filter(Boolean);
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, "tr"));
   }, [orders]);
 
@@ -274,9 +281,15 @@ export default function OrdersPage() {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
 
   // detay cache
-  const [detailById, setDetailById] = useState<Record<string, OrderDetail | undefined>>({});
-  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
-  const [detailError, setDetailError] = useState<Record<string, string | null>>({});
+  const [detailById, setDetailById] = useState<
+    Record<string, OrderDetail | undefined>
+  >({});
+  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [detailError, setDetailError] = useState<Record<string, string | null>>(
+    {}
+  );
 
   // payment form
   const [payAmount, setPayAmount] = useState<Record<string, string>>({});
@@ -305,8 +318,14 @@ export default function OrdersPage() {
     setLoading(true);
     setError(null);
     try {
-      const qs = headerFilter === "completed" ? `?status=${encodeURIComponent("completed")}` : "";
-      const res = await fetch(`/api/orders${qs}`, { cache: "no-store", signal });
+      const qs =
+        headerFilter === "completed"
+          ? `?status=${encodeURIComponent("completed")}`
+          : "";
+      const res = await fetch(`/api/orders${qs}`, {
+        cache: "no-store",
+        signal,
+      });
       if (!res.ok) throw new Error("Siparişler alınamadı");
       const data: Order[] = await res.json();
       setOrders(data);
@@ -342,7 +361,8 @@ export default function OrdersPage() {
           data.balance ??
             Math.max(
               0,
-              Number(data.netTotal ?? data.total ?? 0) - Number(data.paidTotal ?? data.totalPaid ?? 0)
+              Number(data.netTotal ?? data.total ?? 0) -
+                Number(data.paidTotal ?? data.totalPaid ?? 0)
             )
         ),
       };
@@ -414,7 +434,8 @@ export default function OrdersPage() {
     if (d && !(payAmount[payModalOpenId] ?? "").trim()) {
       setPayAmount((m) => ({
         ...m,
-        [payModalOpenId]: d.balance > 0 ? String(d.balance).replace(".", ",") : "",
+        [payModalOpenId]:
+          d.balance > 0 ? String(d.balance).replace(".", ",") : "",
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -486,19 +507,28 @@ export default function OrdersPage() {
         const net = Number(o.netTotal ?? o.total ?? 0);
         const paid = Number(o.paidTotal ?? o.totalPaid ?? 0);
         const bal = Number(o.balance ?? Math.max(0, net - paid));
-        if (paymentStatus === "unpaid" && !(paid === 0 && net > 0)) return false;
+        if (paymentStatus === "unpaid" && !(paid === 0 && net > 0))
+          return false;
         if (paymentStatus === "partial" && !(bal > 0 && paid > 0)) return false;
         if (paymentStatus === "paid" && !(bal <= 0 && net >= 0)) return false;
       }
       if (methodFilters.length > 0) {
         const d = detailById[o.id];
         if (!d) return true; // detay yüklenene kadar dışlama
-        const hasMethod = d.payments.some((p) => methodFilters.includes(p.method));
+        const hasMethod = d.payments.some((p) =>
+          methodFilters.includes(p.method)
+        );
         if (!hasMethod) return false;
       }
       return true;
     });
-  }, [statusHeaderFiltered, paymentStatus, methodFilters, detailById, dealerFilter]);
+  }, [
+    statusHeaderFiltered,
+    paymentStatus,
+    methodFilters,
+    detailById,
+    dealerFilter,
+  ]);
 
   // Teslim tarihine göre sıralama
   const displayed = useMemo(() => {
@@ -551,7 +581,16 @@ export default function OrdersPage() {
   // Filtre/sıralama/arama/limit değişince 1. sayfaya dön
   useEffect(() => {
     setPage(1);
-  }, [q, headerFilter, paymentStatus, methodFilters, dealerFilter, sortMode, pageSize, orders.length]);
+  }, [
+    q,
+    headerFilter,
+    paymentStatus,
+    methodFilters,
+    dealerFilter,
+    sortMode,
+    pageSize,
+    orders.length,
+  ]);
 
   // List aggregates (tüm filtrelenmiş listeye göre)
   const listAgg = useMemo(() => {
@@ -572,7 +611,16 @@ export default function OrdersPage() {
   const downloadOrdersCSV = () => {
     if (!displayed.length) return;
     const rows = [
-      ["ID", "Tarih", "Müşteri", "Durum", "Teslim", "NET (₺)", "Ödenen (₺)", "Kalan (₺)"],
+      [
+        "ID",
+        "Tarih",
+        "Müşteri",
+        "Durum",
+        "Teslim",
+        "NET (₺)",
+        "Ödenen (₺)",
+        "Kalan (₺)",
+      ],
       ...displayed.map((o) => {
         const net = Number(o.netTotal ?? o.total ?? 0);
         const paid = Number(o.paidTotal ?? o.totalPaid ?? 0);
@@ -638,6 +686,7 @@ export default function OrdersPage() {
       setPayAmount((m) => ({ ...m, [id]: "" }));
       setPayNote((m) => ({ ...m, [id]: "" }));
       toast.success("Ödeme kaydedildi");
+      closePayModal();
     } catch (e: any) {
       toast.error(e?.message || "Ödeme kaydedilemedi");
     } finally {
@@ -679,7 +728,9 @@ export default function OrdersPage() {
                   aria-selected={headerFilter === k}
                   onClick={() => setHeaderFilter(k)}
                   className={`px-3 py-1.5 text-sm rounded-[10px] transition ${
-                    headerFilter === k ? "bg-indigo-600 text-white" : "text-neutral-700 hover:bg-neutral-50"
+                    headerFilter === k
+                      ? "bg-indigo-600 text-white"
+                      : "text-neutral-700 hover:bg-neutral-50"
                   }`}
                 >
                   {label}
@@ -709,7 +760,10 @@ export default function OrdersPage() {
               title="Yenile"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z" />
+                <path
+                  fill="currentColor"
+                  d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z"
+                />
               </svg>
               {loading ? "Yükleniyor…" : "Yenile"}
             </button>
@@ -721,7 +775,10 @@ export default function OrdersPage() {
               title="CSV indir (filtre+sort)"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z" />
+                <path
+                  fill="currentColor"
+                  d="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"
+                />
               </svg>
               CSV
             </button>
@@ -731,7 +788,10 @@ export default function OrdersPage() {
               className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
             >
               <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
+                <path
+                  fill="currentColor"
+                  d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z"
+                />
               </svg>
               Yeni Sipariş
             </a>
@@ -754,7 +814,10 @@ export default function OrdersPage() {
                 viewBox="0 0 24 24"
                 aria-hidden
               >
-                <path fill="currentColor" d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z" />
+                <path
+                  fill="currentColor"
+                  d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
+                />
               </svg>
             </div>
 
@@ -766,17 +829,27 @@ export default function OrdersPage() {
                 aria-expanded={filtersOpen}
               >
                 <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                  <path fill="currentColor" d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z" />
+                  <path
+                    fill="currentColor"
+                    d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z"
+                  />
                 </svg>
                 Filtreler
               </button>
             </div>
           </div>
 
-          <div className={["mt-3 grid gap-2 sm:mt-4 sm:grid-cols-4", filtersOpen ? "grid" : "hidden sm:grid"].join(" ")}>
+          <div
+            className={[
+              "mt-3 grid gap-2 sm:mt-4 sm:grid-cols-4",
+              filtersOpen ? "grid" : "hidden sm:grid",
+            ].join(" ")}
+          >
             {/* Ödeme Durumu */}
             <div className="rounded-xl border border-neutral-200 p-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-500">Ödeme Durumu</div>
+              <div className="mb-2 text-xs font-semibold text-neutral-500">
+                Ödeme Durumu
+              </div>
               <div className="flex flex-wrap gap-2">
                 {[
                   { v: "all", label: "Tümü" },
@@ -806,7 +879,9 @@ export default function OrdersPage() {
 
             {/* Ödeme Yöntemi */}
             <div className="rounded-xl border border-neutral-200 p-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-500">Ödeme Yöntemi</div>
+              <div className="mb-2 text-xs font-semibold text-neutral-500">
+                Ödeme Yöntemi
+              </div>
               <div className="flex flex-wrap gap-2">
                 {(["CASH", "TRANSFER", "CARD"] as PaymentMethod[]).map((m) => {
                   const active = methodFilters.includes(m);
@@ -815,7 +890,11 @@ export default function OrdersPage() {
                       key={m}
                       type="button"
                       onClick={() =>
-                        setMethodFilters((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]))
+                        setMethodFilters((prev) =>
+                          prev.includes(m)
+                            ? prev.filter((x) => x !== m)
+                            : [...prev, m]
+                        )
                       }
                       className={`h-8 rounded-lg border px-3 text-xs ${
                         active
@@ -833,7 +912,9 @@ export default function OrdersPage() {
 
             {/* Bayi */}
             <div className="rounded-xl border border-neutral-200 p-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-500">Bayi</div>
+              <div className="mb-2 text-xs font-semibold text-neutral-500">
+                Bayi
+              </div>
               <select
                 className="select w-full rounded-lg border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
                 value={dealerFilter}
@@ -851,7 +932,9 @@ export default function OrdersPage() {
 
             {/* Sıralama */}
             <div className="rounded-xl border border-neutral-200 p-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-500">Sıralama</div>
+              <div className="mb-2 text-xs font-semibold text-neutral-500">
+                Sıralama
+              </div>
               <select
                 className="select w-full rounded-lg border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
                 value={sortMode}
@@ -863,14 +946,17 @@ export default function OrdersPage() {
                 <option value="deliveryDesc">Teslim (en geç önce)</option>
               </select>
               <div className="mt-2 text-[11px] text-neutral-500">
-                Tarihi olmayan kayıtlar, “en yakın önce”de en sonda; “en geç önce”de en başta gösterilir.
+                Tarihi olmayan kayıtlar, “en yakın önce”de en sonda; “en geç
+                önce”de en başta gösterilir.
               </div>
             </div>
           </div>
         </div>
 
         {/* Uyarılar */}
-        {loading && <p className="mt-3 text-sm text-neutral-500">Yükleniyor…</p>}
+        {loading && (
+          <p className="mt-3 text-sm text-neutral-500">Yükleniyor…</p>
+        )}
         {error && (
           <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {error}{" "}
@@ -885,7 +971,7 @@ export default function OrdersPage() {
         )}
 
         {/* Liste */}
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-4 min-h-[100vh]">
           {loading && orders.length === 0 && <InlineLoader />}
 
           {!loading
@@ -898,70 +984,127 @@ export default function OrdersPage() {
 
                 const net = Number(order.netTotal ?? order.total ?? 0);
                 const paid = Number(order.paidTotal ?? order.totalPaid ?? 0);
-                const balance = Number(order.balance ?? Math.max(0, net - paid));
+                const balance = Number(
+                  order.balance ?? Math.max(0, net - paid)
+                );
                 const ratio = net > 0 ? paid / net : 0;
 
                 return (
-                  <section key={order.id} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+                  <section
+                    key={order.id}
+                    className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+                  >
                     {/* Header */}
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <div className="font-semibold">{order.dealer.name || "—"} - #{num}</div>
+                    <div className="flex flex-col md:flex-row items-start justify-between gap-3">
+                      {/* Sol: başlık + müşteri */}
+                      <div className="flex  w-full md:w-auto flex-1 flex-col gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="shrink-0 font-semibold truncate">
+                            {order.dealer.name || "—"} - #{num}
+                          </div>
                           <StatusBadge s={order.status} />
                           <RatioBadge ratio={ratio} />
                         </div>
 
-                        <div className="text-sm max-w-[240px] break-words sm:max-w-none">
-                          <span className="font-medium">
-                            <b>Müşteri:</b>
-                          </span>{" "}
-                          {order.customerName || "—"}
-                        </div>
-                        <div className="text-sm max-w-[240px] break-words sm:max-w-none">
-                          <span className="font-medium">
-                            <b>Telefon:</b>
-                          </span>{" "}
-                          {order.customerPhone || "—"}
+                        <div className="grid gap-1 text-sm sm:grid-cols-1 sm:gap-2">
+                          <div className="min-w-0">
+                            <span className="font-medium">Müşteri:</span>{" "}
+                            <span className="break-words">
+                              {order.customerName || "—"}
+                            </span>
+                          </div>
+                          <div className="min-w-0">
+                            <span className="font-medium">Telefon:</span>{" "}
+                            <span className="break-words">
+                              {order.customerPhone || "—"}
+                            </span>
+                          </div>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-col w-[250px]">
                           <DuePill info={getDueInfo(order.deliveryDate)} />
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end">
-                        <div className="mb-2.5 flex flex-wrap items-center gap-2">
-                          <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            NET: <strong className="ms-1">{fmt(net)} ₺</strong>
-                          </span>
-                          <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                            Ödenen: <strong className="ms-1">{fmt(paid)} ₺</strong>
-                          </span>
-                          <span className="inline-flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-200">
-                            Kalan: <strong className="ms-1">{fmt(balance)} ₺</strong>
-                          </span>
-                        </div>
-
-                        <div className="mb-2.5">
-                          <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2 py-0.5 text-[11px] text-neutral-600 ring-1 ring-inset ring-neutral-200">
-                            <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
-                              <path fill="currentColor" d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z" />
+                          <span
+                            className="inline-flex mt-2.5 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"
+                            title="Teslim: 30.10.2025"
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="size-3.5"
+                              aria-hidden
+                            >
+                              <path
+                                fill="currentColor"
+                                d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z"
+                              />
                             </svg>
-                            {new Intl.DateTimeFormat("tr-TR", {
+                           {new Intl.DateTimeFormat("tr-TR", {
                               dateStyle: "medium",
                               timeStyle: "short",
                             }).format(new Date(order.createdAt))}
                           </span>
+                       
+                        </div>
+                      </div>
+
+                      {/* Sağ: finans rozetleri + aksiyonlar */}
+                      <div className="flex w-full flex-col items-end gap-2 md:w-auto">
+                        {/* Finans özet (responsive grid) */}
+                        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
+                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                            <span>TOPLAM</span>{" "}
+                            <strong className="ms-1">
+                              {fmt(order.total)} ₺
+                            </strong>
+                          </span>
+                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                            <span>İskonto</span>{" "}
+                            <strong className="ms-1">
+                              {fmt(order.discount)} ₺
+                            </strong>
+                          </span>
+                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                            <span>Ödenen</span>{" "}
+                            <strong className="ms-1">{fmt(paid)} ₺</strong>
+                          </span>
+                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                            <span>Kalan</span>{" "}
+                            <strong className="ms-1">{fmt(balance)} ₺</strong>
+                          </span>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2">
+                        {/* Aksiyonlar: tek tip buton, 2 kolon grid */}
+                        <div className="grid w-full grid-cols-2 gap-2">
+                          <a
+                            href={`/orders/${order.id}/print`}
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                            title="Yazdır"
+                            target="_blank"
+                          >
+                            <svg
+                              className="size-4"
+                              viewBox="0 0 24 24"
+                              aria-hidden
+                            >
+                              <path fill="currentColor" d="M7 3h10v4H7z" />
+                              <path
+                                fill="currentColor"
+                                d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
+                              />
+                              <path fill="currentColor" d="M7 17h10v4H7z" />
+                            </svg>
+                            Yazdır
+                          </a>
+
                           <a
                             href={`/orders/${order.id}`}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
                             title="Düzenle"
                           >
-                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="size-4"
+                              aria-hidden
+                            >
                               <path
                                 fill="currentColor"
                                 d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0 1.42 0l-1.83 1.83l3.75 3.75l1.84-1.82z"
@@ -971,51 +1114,75 @@ export default function OrdersPage() {
                           </a>
 
                           <button
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
                             onClick={() => openPayModal(order.id)}
                             title="Ödeme Yap"
                           >
-                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                              <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="size-4"
+                              aria-hidden
+                            >
+                              <path
+                                fill="currentColor"
+                                d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z"
+                              />
                             </svg>
                             Ödeme Yap
                           </button>
 
                           <button
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                             onClick={() => removeOrder(order.id)}
                             disabled={deletingId === order.id}
                             title="Sil"
                           >
-                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                              <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" />
-                            </svg>
-                            {deletingId === order.id ? "Siliniyor…" : "Sil"}
-                          </button>
-
-                          <button
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
-                            aria-expanded={isOpen}
-                            aria-controls={detailId}
-                            onClick={() => toggleOpen(order.id)}
-                            title={isOpen ? "Detayı gizle" : "Detayı göster"}
-                          >
                             <svg
                               viewBox="0 0 24 24"
-                              className={`size-4 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                              className="size-4"
                               aria-hidden
                             >
-                              <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+                              <path
+                                fill="currentColor"
+                                d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"
+                              />
                             </svg>
-                            {isOpen ? "Gizle" : "Detay"}
+                            {deletingId === order.id ? "Siliniyor…" : "Sil"}
                           </button>
                         </div>
                       </div>
                     </div>
 
+                    {/* Detay toggle: tam genişlikli, chevron’lu buton */}
+                    <div className="mt-3">
+                      <button
+                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                        aria-expanded={isOpen}
+                        aria-controls={detailId}
+                        onClick={() => toggleOpen(order.id)}
+                        title={isOpen ? "Detayı gizle" : "Detayı göster"}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          className={`size-4 transition-transform ${
+                            isOpen ? "rotate-180" : ""
+                          }`}
+                          aria-hidden
+                        >
+                          <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+                        </svg>
+                        {isOpen ? "Detayı Gizle" : "Detayı Göster"}
+                      </button>
+                    </div>
+
                     {/* Tahsilat Progress */}
                     <div className="mt-3">
-                      <Progress value={Math.max(0, Math.min(100, Math.round(ratio * 100)))} />
+                      <Progress
+                        value={Math.max(
+                          0,
+                          Math.min(100, Math.round(ratio * 100))
+                        )}
+                      />
                     </div>
 
                     {/* Detay */}
@@ -1023,7 +1190,8 @@ export default function OrdersPage() {
                       <div id={detailId} className="mt-4 space-y-4">
                         {order.note && (
                           <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-                            <span className="font-medium">Sipariş Notu:</span> {order.note}
+                            <span className="font-medium">Sipariş Notu:</span>{" "}
+                            {order.note}
                           </div>
                         )}
 
@@ -1036,25 +1204,48 @@ export default function OrdersPage() {
                             <table className="min-w-full text-sm">
                               <thead className="bg-neutral-50 text-neutral-600">
                                 <tr>
-                                  <th className="px-3 py-2 text-left">Kategori</th>
+                                  <th className="px-3 py-2 text-left">
+                                    Kategori
+                                  </th>
                                   <th className="px-3 py-2 text-left">Ürün</th>
                                   <th className="px-3 py-2 text-right">Adet</th>
                                   <th className="px-3 py-2 text-right">En</th>
                                   <th className="px-3 py-2 text-right">Boy</th>
-                                  <th className="px-3 py-2 text-right">Birim ₺</th>
-                                  <th className="px-3 py-2 text-right">Tutar ₺</th>
+                                  <th className="px-3 py-2 text-right">
+                                    Birim ₺
+                                  </th>
+                                  <th className="px-3 py-2 text-right">
+                                    Tutar ₺
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody>
                                 {order.items.map((it) => (
-                                  <tr key={it.id} className="border-t border-neutral-100">
-                                    <td className="px-3 py-2">{it.category.name}</td>
-                                    <td className="px-3 py-2">{it.variant.name}</td>
-                                    <td className="px-3 py-2 text-right">{fmtInt(it.qty)}</td>
-                                    <td className="px-3 py-2 text-right">{fmtInt(it.width)}</td>
-                                    <td className="px-3 py-2 text-right">{fmtInt(it.height)}</td>
-                                    <td className="px-3 py-2 text-right">{fmt(it.unitPrice)}</td>
-                                    <td className="px-3 py-2 text-right">{fmt(it.subtotal)}</td>
+                                  <tr
+                                    key={it.id}
+                                    className="border-t border-neutral-100"
+                                  >
+                                    <td className="px-3 py-2">
+                                      {it.category.name}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {it.variant.name}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      {fmtInt(it.qty)}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      {fmtInt(it.width)}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      {fmtInt(it.height)}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      {fmt(it.unitPrice)}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      {fmt(it.subtotal)}
+                                    </td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -1065,13 +1256,22 @@ export default function OrdersPage() {
                         {/* Ödemeler */}
                         <div className="rounded-2xl border border-neutral-200">
                           <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
-                            <div className="text-sm font-semibold">Ödemeler</div>
+                            <div className="text-sm font-semibold">
+                              Ödemeler
+                            </div>
                             <button
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
                               onClick={() => openPayModal(order.id)}
                             >
-                              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                                <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="size-4"
+                                aria-hidden
+                              >
+                                <path
+                                  fill="currentColor"
+                                  d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z"
+                                />
                               </svg>
                               Ödeme Yap
                             </button>
@@ -1084,41 +1284,64 @@ export default function OrdersPage() {
                                 {detailError[order.id]}
                               </div>
                             )}
-                            {!detailLoading[order.id] && !detailError[order.id] && (
-                              <>
-                                {d && d.payments.length > 0 ? (
-                                  <div className="overflow-x-auto">
-                                    <table className="min-w-full text-sm">
-                                      <thead className="bg-neutral-50 text-neutral-600">
-                                        <tr>
-                                          <th className="px-3 py-2 text-left">Tarih</th>
-                                          <th className="px-3 py-2 text-left">Yöntem</th>
-                                          <th className="px-3 py-2 text-right">Tutar ₺</th>
-                                          <th className="px-3 py-2 text-left">Not</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {d.payments.map((p) => (
-                                          <tr key={p.id} className="border-t border-neutral-100">
-                                            <td className="px-3 py-2">
-                                              {new Intl.DateTimeFormat("tr-TR", {
-                                                dateStyle: "medium",
-                                                timeStyle: "short",
-                                              }).format(new Date(p.paidAt))}
-                                            </td>
-                                            <td className="px-3 py-2">{methodLabel[p.method]}</td>
-                                            <td className="px-3 py-2 text-right">{fmt(p.amount)}</td>
-                                            <td className="px-3 py-2">{p.note ?? "—"}</td>
+                            {!detailLoading[order.id] &&
+                              !detailError[order.id] && (
+                                <>
+                                  {d && d.payments.length > 0 ? (
+                                    <div className="overflow-x-auto">
+                                      <table className="min-w-full text-sm">
+                                        <thead className="bg-neutral-50 text-neutral-600">
+                                          <tr>
+                                            <th className="px-3 py-2 text-left">
+                                              Tarih
+                                            </th>
+                                            <th className="px-3 py-2 text-left">
+                                              Yöntem
+                                            </th>
+                                            <th className="px-3 py-2 text-right">
+                                              Tutar ₺
+                                            </th>
+                                            <th className="px-3 py-2 text-left">
+                                              Not
+                                            </th>
                                           </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                ) : (
-                                  <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
-                                )}
-                              </>
-                            )}
+                                        </thead>
+                                        <tbody>
+                                          {d.payments.map((p) => (
+                                            <tr
+                                              key={p.id}
+                                              className="border-t border-neutral-100"
+                                            >
+                                              <td className="px-3 py-2">
+                                                {new Intl.DateTimeFormat(
+                                                  "tr-TR",
+                                                  {
+                                                    dateStyle: "medium",
+                                                    timeStyle: "short",
+                                                  }
+                                                ).format(new Date(p.paidAt))}
+                                              </td>
+                                              <td className="px-3 py-2">
+                                                {methodLabel[p.method]}
+                                              </td>
+                                              <td className="px-3 py-2 text-right">
+                                                {fmt(p.amount)}
+                                              </td>
+                                              <td className="px-3 py-2">
+                                                {p.note ?? "—"}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <div className="text-sm text-neutral-500">
+                                      Henüz ödeme yok.
+                                    </div>
+                                  )}
+                                </>
+                              )}
                           </div>
                         </div>
                       </div>
@@ -1126,13 +1349,14 @@ export default function OrdersPage() {
                   </section>
                 );
               })
-            : "Sonuç bulunamadı."}
+            : ""}
         </div>
 
         {/* ✅ Pagination controls */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <div className="text-sm text-neutral-600">
-            Toplam {fmtInt(paged.total)} kayıt • Sayfa {paged.page}/{paged.totalPages}
+            Toplam {fmtInt(paged.total)} kayıt • Sayfa {paged.page}/
+            {paged.totalPages}
           </div>
 
           <div className="flex items-center gap-1">
@@ -1148,7 +1372,11 @@ export default function OrdersPage() {
             {Array.from({ length: paged.totalPages }, (_, i) => i + 1)
               .filter((n) => {
                 const p = paged.page;
-                return n === 1 || n === paged.totalPages || (n >= p - 2 && n <= p + 2);
+                return (
+                  n === 1 ||
+                  n === paged.totalPages ||
+                  (n >= p - 2 && n <= p + 2)
+                );
               })
               .map((n, idx, arr) => {
                 const prev = arr[idx - 1];
@@ -1207,7 +1435,9 @@ export default function OrdersPage() {
                       className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100"
                       aria-label="Kapat"
                     >
-                      <svg viewBox="0 0 24 24" className="size-5"><path fill="currentColor" d="M18 6L6 18M6 6l12 12"/></svg>
+                      <svg viewBox="0 0 24 24" className="size-5">
+                        <path fill="currentColor" d="M18 6L6 18M6 6l12 12" />
+                      </svg>
                     </button>
                   </div>
 
@@ -1220,35 +1450,56 @@ export default function OrdersPage() {
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div className="rounded-lg bg-neutral-50 p-2">
                           <div className="text-neutral-500">Net</div>
-                          <div className="font-semibold">{fmt(d.netTotal)} ₺</div>
+                          <div className="font-semibold">
+                            {fmt(d.netTotal)} ₺
+                          </div>
                         </div>
                         <div className="rounded-lg bg-emerald-50 p-2">
                           <div className="text-emerald-700">Ödenen</div>
-                          <div className="font-semibold text-emerald-700">{fmt(d.paidTotal)} ₺</div>
+                          <div className="font-semibold text-emerald-700">
+                            {fmt(d.paidTotal)} ₺
+                          </div>
                         </div>
                         <div className="rounded-lg bg-amber-50 p-2">
                           <div className="text-amber-700">Kalan</div>
-                          <div className="font-semibold text-amber-700">{fmt(d.balance)} ₺</div>
+                          <div className="font-semibold text-amber-700">
+                            {fmt(d.balance)} ₺
+                          </div>
                         </div>
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-sm font-medium">Tutar</label>
+                        <label className="block text-sm font-medium">
+                          Tutar
+                        </label>
                         <input
                           className="input w-full"
                           placeholder="0,00"
                           value={amount}
-                          onChange={(e) => setPayAmount(m => ({ ...m, [payModalOpenId!]: e.target.value }))}
+                          onChange={(e) =>
+                            setPayAmount((m) => ({
+                              ...m,
+                              [payModalOpenId!]: e.target.value,
+                            }))
+                          }
                           inputMode="decimal"
                         />
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-sm font-medium">Yöntem</label>
+                        <label className="block text-sm font-medium">
+                          Yöntem
+                        </label>
                         <select
                           className="select w-full"
                           value={method}
-                          onChange={(e) => setPayMethod(m => ({ ...m, [payModalOpenId!]: e.target.value as PaymentMethod }))}
+                          onChange={(e) =>
+                            setPayMethod((m) => ({
+                              ...m,
+                              [payModalOpenId!]: e.target
+                                .value as PaymentMethod,
+                            }))
+                          }
                         >
                           <option value="CASH">Nakit</option>
                           <option value="TRANSFER">Havale/EFT</option>
@@ -1257,12 +1508,19 @@ export default function OrdersPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="block text-sm font-medium">Not (opsiyonel)</label>
+                        <label className="block text-sm font-medium">
+                          Not (opsiyonel)
+                        </label>
                         <textarea
-                          className="textarea w-full"
+                          className="textarea w-full rounded-lg bg-neutral-50 p-3"
                           rows={3}
                           value={note}
-                          onChange={(e) => setPayNote(m => ({ ...m, [payModalOpenId!]: e.target.value }))}
+                          onChange={(e) =>
+                            setPayNote((m) => ({
+                              ...m,
+                              [payModalOpenId!]: e.target.value,
+                            }))
+                          }
                         />
                       </div>
 

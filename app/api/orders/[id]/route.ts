@@ -8,6 +8,13 @@ import { z } from 'zod'
 const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled'])
 const LinesSchema  = z.array(z.string().transform(s => s.trim())).max(6).optional()
 
+// ✅ "YYYY-MM-DD" veya null kabul eden tarih şeması
+const YmdSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .nullable()
+  .optional()
+
 const PatchItemSchema = z.object({
   id: z.string().optional(),
   categoryId: z.string(),
@@ -37,6 +44,9 @@ const PatchBodySchema = z.object({
   items: z.array(PatchItemSchema).optional(),
   storLines: LinesSchema,
   accessoryLines: LinesSchema,
+
+  // ✅ yeni alan
+  deliveryAt: YmdSchema,
 })
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -82,7 +92,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         unitPrice:   Number(it.unitPrice),
         fileDensity: Number(it.fileDensity),
         subtotal:    Number(it.subtotal),
-        // lineStatus ve slotIndex zaten geliyor; açıkça bırakıyoruz
+        // lineStatus ve slotIndex açıkça aktarılıyor
         lineStatus: it.lineStatus,
         slotIndex: it.slotIndex,
       })),
@@ -112,7 +122,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       )
     }
 
-    const { note, customerName, customerPhone, status, items = [], storLines, accessoryLines } = parsed.data
+    const {
+      note,
+      customerName,
+      customerPhone,
+      status,
+      items = [],
+      storLines,
+      accessoryLines,
+      deliveryAt, // ✅ frontend’den gelen "YYYY-MM-DD" | null
+    } = parsed.data
 
     // Bu siparişe ait mevcut kalem id’leri (sahiplik kontrolü)
     const owned = await prisma.orderItem.findMany({ where: { orderId }, select: { id: true } })
@@ -211,6 +230,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (typeof customerPhone !== 'undefined') headerPatch.customerPhone = customerPhone.trim()
     if (typeof storLines !== 'undefined')     headerPatch.storLines = storClean as unknown as Prisma.InputJsonValue
     if (typeof accessoryLines !== 'undefined')headerPatch.accessoryLines = accClean as unknown as Prisma.InputJsonValue
+
+    // ✅ "YYYY-MM-DD" → Date (UTC 00:00) veya null
+    if (typeof deliveryAt !== 'undefined') {
+      headerPatch.deliveryAt = deliveryAt
+        ? new Date(`${deliveryAt}T00:00:00Z`)
+        : null
+    }
 
     if (Object.keys(headerPatch).length) {
       ops.push(prisma.order.update({ where: { id: orderId }, data: headerPatch }))

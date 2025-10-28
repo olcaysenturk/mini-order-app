@@ -53,12 +53,29 @@ export function UserMenu() {
 
   if (!data?.user) {
     return (
+      <div className=''>
+        <Link
+        className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 mr-2"
+        href="/about-us"
+      >
+        Hakkımızda
+      </Link>
+      <Link
+        className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 mr-2"
+        href="/contact"
+      >
+        İletişim
+      </Link>
       <Link
         className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
         href="/auth/login"
       >
         Giriş
       </Link>
+
+      </div>
+      
+      
     )
   }
 

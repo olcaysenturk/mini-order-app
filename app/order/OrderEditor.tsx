@@ -549,7 +549,7 @@ export default function OrderEditor({
                 <div className="mt-1 flex items-center gap-2">
                   <input
                     className="input flex-1 text-right disabled:bg-gray-100"
-                    type="number" min={0} step="0.01"
+                    type="text" min={0} step="0.01"
                     value={Number.isFinite(unitPriceInput) ? unitPriceInput : 0}
                     onChange={(e)=>setUnitPriceInput(parseFloat(e.target.value || '0'))}
                     disabled={!useCustomPrice}
@@ -802,14 +802,22 @@ function Header({
         <div className="mt-2 text-xs leading-5">
           {headerBranches.map(b => (
             <div key={b.id} className="mt-1">
-              <b>{b.code == 'MAIN' ? 'Merkez' : ''} Şubesi:</b>
+              <b>{b.code == 'MAIN' ? 'MERKEZ' : b.code} Şubesi:</b>
               <br />
               {b.address}
               <br />
               GSM: {b.phone}
             </div>
           ))}
-          {profile.instagram && <div className="mt-1 flex items-center gap-1">@{profile.instagram.replace(/^@/,'')}</div>}
+          <span className='flex items-center mt-3'>
+            <svg className="size-5 text-neutral-700" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="5" ry="5" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="12" cy="12" r="4.25" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="17.25" cy="6.75" r="1.25" fill="currentColor"/>
+            </svg>
+            {profile.instagram && <div className="flex items-center gap-1 font-bold">@{profile.instagram.replace(/^@/,'')}</div>}
+          </span>
+          
         </div>
       </div>
       <div className="w-[320px] text-left">
@@ -926,8 +934,8 @@ function SectionEditable({
                   {it.note && <div className="mt-1 text-[10px] text-gray-700">Not: {it.note}</div>}
 
                   <div className="absolute right-1 bottom-1 flex opacity-0 transition group-hover:opacity-100 print:hidden">
-                    <button className="px-1 py-0.5 text-[10px] border" onClick={() => onEdit(it.id)}>Düzenle</button>
-                    <button className="ml-1 px-1 py-0.5 text-[10px] border" onClick={() => onRemove(it.id)}>Sil</button>
+                    <button className="px-1 py-0.5 text-[10px] border bg-white" onClick={() => onEdit(it.id)}>Düzenle</button>
+                    <button className="ml-1 px-1 py-0.5 text-[10px] border bg-white" onClick={() => onRemove(it.id)}>Sil</button>
                   </div>
                 </div>
               )}
@@ -998,7 +1006,7 @@ function NumberField({ label, value, setValue, min=0, step=1 }: {
   return (
     <div>
       <label className="text-sm">{label}</label>
-      <input className="input mt-1 text-right" type="number" min={min} step={step} value={Number.isFinite(value) ? value : 0} onChange={(e)=>setValue(parseFloat(e.target.value || '0'))}/>
+      <input className="input mt-1 text-right" type="text" min={min} step={step} value={Number.isFinite(value) ? value : 0} onChange={(e)=>setValue(parseFloat(e.target.value || '0'))}/>
     </div>
   )
 }
@@ -1031,12 +1039,12 @@ function Totals({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs">İskonto %</label>
-          <input className="input mt-1 text-right" type="number" min={0} max={100} step="0.01"
+          <input className="input mt-1 text-right" type="text" min={0} max={100} step="0.01"
             value={discountPercent} onChange={(e)=>setDiscountPercent(parseFloat(e.target.value || '0'))}/>
         </div>
         <div>
           <label className="text-xs">İskonto (₺)</label>
-          <input className="input mt-1 text-right" type="number" min={0} step="0.01"
+          <input className="input mt-1 text-right" type="text" min={0} step="0.01"
             value={discountAmount} onChange={(e)=>setDiscountAmount(parseFloat(e.target.value || '0'))}/>
         </div>
       </div>
@@ -1055,7 +1063,7 @@ function Totals({
           <label className="text-xs">Alınan Ödeme (₺)</label>
           <input
             className="input mt-1 text-right"
-            type="number" min={0} step="0.01"
+            type="text" min={0} step="0.01"
             value={Number.isFinite(paidAmount) ? paidAmount : 0}
             onChange={(e)=>setPaidAmount(parseFloat(e.target.value || '0'))}
           />

@@ -33,7 +33,7 @@ type Order = {
   customerName: string;
   customerPhone: string;
   status: Status;
-  deliveryAt?: string | null; // <- API'den gelen alan
+  deliveryAt?: string | null;
 };
 
 type InsertSlot = { title: string; index: number } | null;
@@ -69,6 +69,9 @@ const fmt = (n: number) =>
 
 const BOX_COUNTS: Record<string, number> = { 'TÜL PERDE': 10, 'FON PERDE': 5, 'GÜNEŞLİK': 5 };
 const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR');
+
+const isSlottedByName = (name: string) =>
+  Object.keys(BOX_COUNTS).some((k) => normalize(k) === normalize(name));
 
 const statusLabelMap: Record<Status, string> = {
   pending: 'Beklemede',
@@ -128,7 +131,7 @@ async function fetchBranches(): Promise<Branch[]> {
   const res = await fetch('/api/branches?all=1', { cache: 'no-store' });
   if (!res.ok) throw new Error('Şubeler alınamadı');
   const j = await res.json();
-  const arr = Array.isArray(j) ? j : (j?.items ?? []);
+  const arr = Array.isArray(j) ? j : j?.items ?? [];
   return arr.map((b: any) => ({
     id: b.id,
     name: b.name,
@@ -221,7 +224,7 @@ export default function EditOrderPage() {
         setCustomerPhone(ord.customerPhone || '');
         setOrderNote(ord.note || '');
         setStatus(ord.status ?? 'pending');
-        setDeliveryAt(toYMD(ord.deliveryAt)); // <- deliveryAt'ten oku
+        setDeliveryAt(toYMD(ord.deliveryAt)); // GET’ten Date/string → input
 
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
@@ -354,7 +357,7 @@ export default function EditOrderPage() {
     const d = Number(fileDensity) || 1;
     const sub = price * (((w / 100) * d) || 1) * q;
     const selectedCatName = catById.get(selectedCategory.id)?.name || '';
-    const isSlotted = BOX_COUNTS[normalize(selectedCatName)] != null;
+    const isSlotted = isSlottedByName(selectedCatName);
 
     if (editingLineId) {
       setItems(prev => prev.map(it => it.id === editingLineId ? {
@@ -434,7 +437,7 @@ export default function EditOrderPage() {
         customerPhone,
         note: orderNote || null,
         status,
-        deliveryAt: deliveryAt || null, // <- PATCH'te deliveryAt
+        deliveryAt: deliveryAt || null, // ✅ API artık bekliyor (YYYY-MM-DD)
         items: [...payloadItems, ...deleteOps],
       };
 
@@ -467,7 +470,7 @@ export default function EditOrderPage() {
       <div className="flex items-center justify-between gap-3 mb-4 print:hidden p-3">
         <h1 className="text-xl font-semibold">Sipariş Düzenle</h1>
         <div className="flex justify-between gap-3">
-          <button className="btn" onClick={() => window.print()}>🖨️ Yazdır</button>
+          <a className="btn" onClick={() => router.push(`/orders/${orderId}/print`)}>🖨️ Yazdır</a>
           <button className="btn" onClick={() => router.push(`/orders/${orderId}/label`)}>🖨️ Barkod Yazdır</button>
           <button className="btn-secondary disabled:opacity-50" disabled={saving} onClick={saveOrder}>
             {saving ? 'Kaydediliyor…' : 'Değişiklikleri Kaydet'}
