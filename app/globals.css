@@ -14,4 +14,5 @@
   .table th { @apply text-left font-semibold py-2 border-b border-gray-200; }
   .table td { @apply py-2 border-b border-gray-100; }
   button { @apply cursor-pointer; }
+  #content { @apply min-h-screen; }
 }

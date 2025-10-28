@@ -800,48 +800,91 @@ export default function OrdersPage() {
 
         {/* Filtreler */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-80">
-              <input
-                className="h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                placeholder="Arama yap"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                aria-label="Siparişlerde ara"
-              />
-              <svg
-                className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
-                viewBox="0 0 24 24"
-                aria-hidden
+          <div className="grid w-full items-end gap-2 sm:grid-cols-3">
+              {/* Arama */}
+              <div className="rounded-xl border border-neutral-200 bg-white p-3">
+                <label className="mb-1 block text-xs font-semibold text-neutral-500">Ara</label>
+                <div className="relative">
+                  <input
+                    className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    placeholder="Siparişlerde ara"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    aria-label="Siparişlerde ara"
+                  />
+                  <svg
+                    className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
+                    viewBox="0 0 24 24"
+                    aria-hidden
+                  >
+                    <path
+                      fill="currentColor"
+                      d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
+                    />
+                  </svg>
+                </div>
+              </div>
+
+              {/* Bayi */}
+              <div className="rounded-xl border border-neutral-200 bg-white p-3">
+                <label className="mb-1 block text-xs font-semibold text-neutral-500">Bayi</label>
+                <select
+                  className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                  value={dealerFilter}
+                  onChange={(e) => setDealerFilter(e.target.value)}
+                  aria-label="Bayi filtresi"
+                >
+                  <option value="all">Tümü</option>
+                  {dealers.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sıralama */}
+            <div className="rounded-xl border border-neutral-200 p-3">
+              <div className="mb-2 text-xs font-semibold text-neutral-500">
+                Teslim tarihine göre sırala
+              </div>
+              <select
+                className="select w-full rounded-lg border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                aria-label="Sıralama"
               >
-                <path
-                  fill="currentColor"
-                  d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
-                />
-              </svg>
+                <option value="default">Varsayılan</option>
+                <option value="deliveryAsc">Teslim (en yakın önce)</option>
+                <option value="deliveryDesc">Teslim (en geç önce)</option>
+              </select>
+              {/* <div className="mt-2 text-[11px] text-neutral-500">
+                Tarihi olmayan kayıtlar, “en yakın önce”de en sonda; “en geç
+                önce”de en başta gösterilir.
+              </div> */}
             </div>
 
-            <div className="ms-auto flex w-full justify-between gap-2 sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setFiltersOpen((s) => !s)}
-                className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 sm:hidden"
-                aria-expanded={filtersOpen}
-              >
-                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                  <path
-                    fill="currentColor"
-                    d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z"
-                  />
-                </svg>
-                Filtreler
-              </button>
+              {/* Filtreler butonu (mobil görünür, masaüstünde opsiyonel) */}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen((s) => !s)}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 sm:hidden"
+                  aria-expanded={filtersOpen}
+                  aria-controls="filters-panel"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                    <path fill="currentColor" d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z" />
+                  </svg>
+                  Filtreler
+                </button>
+              </div>
             </div>
-          </div>
+
 
           <div
             className={[
-              "mt-3 grid gap-2 sm:mt-4 sm:grid-cols-4",
+              "mt-3 grid gap-2 sm:mt-4 sm:grid-cols-2",
               filtersOpen ? "grid" : "hidden sm:grid",
             ].join(" ")}
           >
@@ -910,46 +953,9 @@ export default function OrdersPage() {
               </div>
             </div>
 
-            {/* Bayi */}
-            <div className="rounded-xl border border-neutral-200 p-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-500">
-                Bayi
-              </div>
-              <select
-                className="select w-full rounded-lg border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
-                value={dealerFilter}
-                onChange={(e) => setDealerFilter(e.target.value)}
-                aria-label="Bayi filtresi"
-              >
-                <option value="all">Tümü</option>
-                {dealers.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            
 
-            {/* Sıralama */}
-            <div className="rounded-xl border border-neutral-200 p-3">
-              <div className="mb-2 text-xs font-semibold text-neutral-500">
-                Sıralama
-              </div>
-              <select
-                className="select w-full rounded-lg border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
-                value={sortMode}
-                onChange={(e) => setSortMode(e.target.value as SortMode)}
-                aria-label="Sıralama"
-              >
-                <option value="default">Varsayılan</option>
-                <option value="deliveryAsc">Teslim (en yakın önce)</option>
-                <option value="deliveryDesc">Teslim (en geç önce)</option>
-              </select>
-              <div className="mt-2 text-[11px] text-neutral-500">
-                Tarihi olmayan kayıtlar, “en yakın önce”de en sonda; “en geç
-                önce”de en başta gösterilir.
-              </div>
-            </div>
+            
           </div>
         </div>
 
@@ -1021,7 +1027,7 @@ export default function OrdersPage() {
                           </div>
                         </div>
 
-                        <div className="flex flex-col w-[250px]">
+                        <div className="flex flex-col w-full md:w-[250px]">
                           <DuePill info={getDueInfo(order.deliveryDate)} />
                           <span
                             className="inline-flex mt-2.5 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"

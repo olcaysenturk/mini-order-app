@@ -4,6 +4,7 @@ import Credentials from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import { prisma } from '@/app/lib/db'
 import bcrypt from 'bcryptjs'
+import { ensureDefaultCategoriesForTenant } from '@/app/lib/seed-default-categories'
 
 // ---- Enums ----
 export enum UserRole {
@@ -30,9 +31,9 @@ declare module 'next-auth' {
       id: string
       role: UserRole
       isActive: boolean
-      plan: BillingPlan           // ✅ plan bilgisi session.user altında
+      plan: BillingPlan
     }
-    isPro?: boolean               // ✅ kolay kullanım için helper
+    isPro?: boolean
     tenantId?: string | null
     tenantRole?: TenantRole | null
   }
@@ -43,7 +44,7 @@ declare module 'next-auth/jwt' {
     id?: string
     role?: UserRole
     isActive?: boolean
-    plan?: BillingPlan           // ✅ plan JWT üzerinde de taşınır
+    plan?: BillingPlan
     tenantId?: string | null
     tenantRole?: TenantRole | null
   }
@@ -51,16 +52,21 @@ declare module 'next-auth/jwt' {
 
 // Kullanıcıya ait en az bir tenant olmasını garanti eder
 async function ensureTenantForUser(userId: string, role?: UserRole) {
+  // Kullanıcının bir üyeliği varsa onu kullan
   const existing = await prisma.membership.findFirst({
     where: { userId },
     orderBy: { createdAt: 'asc' },
     select: { tenantId: true, role: true },
   })
   if (existing) {
+    // Mevcut tenant’ta default kategorileri idempotent şekilde garanti et
+    await ensureDefaultCategoriesForTenant(existing.tenantId)
     return { tenantId: existing.tenantId, tenantRole: existing.role as TenantRole }
   }
 
+  // Sadece SUPERADMIN için otomatik tenant açma kuralın korunuyor
   if (role === UserRole.SUPERADMIN) {
+    // Varsa ilk tenant'a bağla
     const anyTenant = await prisma.tenant.findFirst({
       orderBy: { createdAt: 'asc' },
       select: { id: true },
@@ -72,14 +78,18 @@ async function ensureTenantForUser(userId: string, role?: UserRole) {
         update: { role: 'OWNER' },
         create: { userId, tenantId: anyTenant.id, role: 'OWNER' },
       })
+      // Mevcut tenant’ta default kategorileri garanti et
+      await ensureDefaultCategoriesForTenant(anyTenant.id)
       return { tenantId: anyTenant.id, tenantRole: TenantRole.OWNER }
     }
 
+    // Hiç tenant yoksa yenisini oluştur
     const u = await prisma.user.findUnique({
       where: { id: userId },
       select: { name: true },
     })
 
+    // Not: seed fonksiyonunu transaction DIŞINDA çağıracağız
     const { tenantId } = await prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: { name: `${u?.name || 'Admin'}`, createdById: userId },
@@ -97,9 +107,13 @@ async function ensureTenantForUser(userId: string, role?: UserRole) {
       return { tenantId: tenant.id }
     })
 
+    // ✅ Transaction bitti, şimdi default kategorileri yükle (idempotent)
+    await ensureDefaultCategoriesForTenant(tenantId)
+
     return { tenantId, tenantRole: TenantRole.OWNER }
   }
 
+  // Normal kullanıcılar için burada tenant oluşturma kuralın yoksa null döner
   return { tenantId: null, tenantRole: null }
 }
 
@@ -129,8 +143,7 @@ export const authOptions: NextAuthOptions = {
             passwordHash: true,
             role: true,
             isActive: true,
-            billingPlan: true,               // ✅ DB alanı: billingPlan (FREE|PRO)
-            // billingNextDueAt: true,       // (istersen ileride ekleyebilirsin)
+            billingPlan: true,
           },
         })
         if (!user) return null
@@ -144,7 +157,7 @@ export const authOptions: NextAuthOptions = {
           name: user.name ?? '',
           role: user.role as UserRole,
           isActive: !!user.isActive,
-          plan: (user.billingPlan as BillingPlan) || BillingPlan.FREE, // ✅ plan başlangıç
+          plan: (user.billingPlan as BillingPlan) || BillingPlan.FREE,
         } as any
       },
     }),
@@ -160,20 +173,21 @@ export const authOptions: NextAuthOptions = {
         token.isActive = Boolean((user as any).isActive)
         token.plan = ((user as any).plan as BillingPlan) ?? BillingPlan.FREE
 
+        // 🔑 Tenant garantile + default kategorileri seed et (idempotent)
         const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
         token.tenantId = ensured.tenantId
         token.tenantRole = ensured.tenantRole
         return token
       }
 
-      // Her çağrıda tazele (rol/aktiflik/plan değişimleri anında yansısın)
+      // Her çağrıda tazele (rol/aktiflik/plan)
       if (token.id) {
         const u = await prisma.user.findUnique({
           where: { id: String(token.id) },
           select: {
             isActive: true,
             role: true,
-            billingPlan: true,              // ✅ plan’ı da tazele
+            billingPlan: true,
           },
         })
         if (u) {
@@ -198,9 +212,9 @@ export const authOptions: NextAuthOptions = {
         session.user.id = String(token.id)
         session.user.role = (token.role ?? UserRole.STAFF) as UserRole
         session.user.isActive = Boolean(token.isActive)
-        session.user.plan = (token.plan as BillingPlan) ?? BillingPlan.FREE // ✅ session.user.plan
+        session.user.plan = (token.plan as BillingPlan) ?? BillingPlan.FREE
       }
-      session.isPro = session.user?.plan === BillingPlan.PRO               // ✅ helper
+      session.isPro = session.user?.plan === BillingPlan.PRO
       session.tenantId = (token.tenantId as string | null) ?? null
       session.tenantRole = (token.tenantRole as TenantRole | null) ?? null
       return session
