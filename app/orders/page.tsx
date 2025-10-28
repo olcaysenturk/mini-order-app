@@ -82,7 +82,7 @@ const methodLabel: Record<PaymentMethod, string> = {
 /* ========= Tiny UI helpers ========= */
 function StatusBadge({ s }: { s: Status }) {
   const base =
-    "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border";
+    "inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-medium border";
   const map: Record<Status, string> = {
     pending: `${base} bg-neutral-100 text-neutral-700 border-neutral-200`,
     processing: `${base} bg-blue-50 text-blue-700 border-blue-200`,
@@ -210,7 +210,7 @@ function toneClasses(tone: DueInfo["tone"]) {
 function DuePill({ info }: { info: DueInfo }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${toneClasses(
+      className={`inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${toneClasses(
         info.tone
       )}`}
       title={`Teslim: ${info.dateText}`}
@@ -801,55 +801,59 @@ export default function OrdersPage() {
         {/* Filtreler */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
           <div className="grid w-full items-end gap-2 sm:grid-cols-3">
-              {/* Arama */}
-              <div className="rounded-xl border border-neutral-200 bg-white p-3">
-                <label className="mb-1 block text-xs font-semibold text-neutral-500">Ara</label>
-                <div className="relative">
-                  <input
-                    className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                    placeholder="Siparişlerde ara"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    aria-label="Siparişlerde ara"
-                  />
-                  <svg
-                    className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
-                    viewBox="0 0 24 24"
-                    aria-hidden
-                  >
-                    <path
-                      fill="currentColor"
-                      d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
-                    />
-                  </svg>
-                </div>
-              </div>
-
-              {/* Bayi */}
-              <div className="rounded-xl border border-neutral-200 bg-white p-3">
-                <label className="mb-1 block text-xs font-semibold text-neutral-500">Bayi</label>
-                <select
-                  className="h-9 w-full rounded-lg border border-neutral-200 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50"
-                  value={dealerFilter}
-                  onChange={(e) => setDealerFilter(e.target.value)}
-                  aria-label="Bayi filtresi"
+            {/* Arama */}
+            <div className="rounded-xl border border-neutral-200 bg-white p-3">
+              <label className="mb-1 block text-xs font-semibold text-neutral-500">
+                Ara
+              </label>
+              <div className="relative">
+                <input
+                  className="h-9 w-full rounded-sm border border-neutral-200 bg-white px-3 pe-9 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  placeholder="Siparişlerde ara"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  aria-label="Siparişlerde ara"
+                />
+                <svg
+                  className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
+                  viewBox="0 0 24 24"
+                  aria-hidden
                 >
-                  <option value="all">Tümü</option>
-                  {dealers.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
+                  <path
+                    fill="currentColor"
+                    d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
+                  />
+                </svg>
               </div>
+            </div>
 
-              {/* Sıralama */}
+            {/* Bayi */}
+            <div className="rounded-xl border border-neutral-200 bg-white p-3">
+              <label className="mb-1 block text-xs font-semibold text-neutral-500">
+                Bayi
+              </label>
+              <select
+                className="h-9 w-full rounded-sm border border-neutral-200 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                value={dealerFilter}
+                onChange={(e) => setDealerFilter(e.target.value)}
+                aria-label="Bayi filtresi"
+              >
+                <option value="all">Tümü</option>
+                {dealers.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Sıralama */}
             <div className="rounded-xl border border-neutral-200 p-3">
               <div className="mb-2 text-xs font-semibold text-neutral-500">
                 Teslim tarihine göre sırala
               </div>
               <select
-                className="select w-full rounded-lg border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
+                className="select w-full rounded-sm border border-neutral-200 bg-white px-1 py-1 text-sm text-neutral-700 hover:bg-neutral-50 h-[32px]"
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
                 aria-label="Sıralama"
@@ -864,23 +868,25 @@ export default function OrdersPage() {
               </div> */}
             </div>
 
-              {/* Filtreler butonu (mobil görünür, masaüstünde opsiyonel) */}
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setFiltersOpen((s) => !s)}
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 sm:hidden"
-                  aria-expanded={filtersOpen}
-                  aria-controls="filters-panel"
-                >
-                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                    <path fill="currentColor" d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z" />
-                  </svg>
-                  Filtreler
-                </button>
-              </div>
+            {/* Filtreler butonu (mobil görünür, masaüstünde opsiyonel) */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setFiltersOpen((s) => !s)}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 sm:hidden"
+                aria-expanded={filtersOpen}
+                aria-controls="filters-panel"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z"
+                  />
+                </svg>
+                Filtreler
+              </button>
             </div>
-
+          </div>
 
           <div
             className={[
@@ -906,7 +912,7 @@ export default function OrdersPage() {
                       key={b.v}
                       type="button"
                       onClick={() => setPaymentStatus(b.v as any)}
-                      className={`h-8 rounded-lg border px-3 text-xs ${
+                      className={`h-8 rounded-sm border px-3 text-xs ${
                         active
                           ? "border-amber-600 bg-amber-600 text-white"
                           : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
@@ -939,7 +945,7 @@ export default function OrdersPage() {
                             : [...prev, m]
                         )
                       }
-                      className={`h-8 rounded-lg border px-3 text-xs ${
+                      className={`h-8 rounded-sm border px-3 text-xs ${
                         active
                           ? "border-emerald-600 bg-emerald-600 text-white"
                           : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
@@ -952,10 +958,6 @@ export default function OrdersPage() {
                 })}
               </div>
             </div>
-
-            
-
-            
           </div>
         </div>
 
@@ -1004,75 +1006,91 @@ export default function OrdersPage() {
                     <div className="flex flex-col md:flex-row items-start justify-between gap-3">
                       {/* Sol: başlık + müşteri */}
                       <div className="flex  w-full md:w-auto flex-1 flex-col gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="shrink-0 font-semibold truncate">
-                            {order.dealer.name || "—"} - #{num}
+                        <div className="flex w-full md:w-[350px] justify-between flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-2">
+
+                          <span
+                            className="
+                              inline-flex size-6 items-center justify-center
+                              rounded-sm border border-neutral-300
+                              bg-neutral-50 text-[11px] font-semibold text-neutral-700
+                              ring-1 ring-inset ring-white/50 print:bg-white print:text-black
+                            "
+                            aria-hidden
+                          >
+                            {num}
+                          </span>
+                          <div className="shrink-0 font-semibold truncate text-lg">
+                            {order.dealer.name || "—"}
+                          </div>
                           </div>
                           <StatusBadge s={order.status} />
-                          <RatioBadge ratio={ratio} />
+                          {/* <RatioBadge ratio={ratio} /> */}
                         </div>
 
-                        <div className="grid gap-1 text-sm sm:grid-cols-1 sm:gap-2">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2 sm:gap-2 w-full md:w-[350px]">
                           <div className="min-w-0">
-                            <span className="font-medium">Müşteri:</span>{" "}
-                            <span className="break-words">
-                              {order.customerName || "—"}
+                            <span className="flex flex-col  items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                              <span>MÜŞTERİ</span>{" "}
+                              <strong>{order.customerName || "—"}</strong>
                             </span>
                           </div>
                           <div className="min-w-0">
-                            <span className="font-medium">Telefon:</span>{" "}
-                            <span className="break-words">
-                              {order.customerPhone || "—"}
+                            <span className="flex flex-col  items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                              <span>TELEFON</span>{" "}
+                              <strong>{order.customerPhone || "—"}</strong>
                             </span>
                           </div>
-                        </div>
-
-                        <div className="flex flex-col w-full md:w-[250px]">
-                          <DuePill info={getDueInfo(order.deliveryDate)} />
-                          <span
-                            className="inline-flex mt-2.5 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"
-                            title="Teslim: 30.10.2025"
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              className="size-3.5"
-                              aria-hidden
+                          <div className="min-w-0">
+                            <DuePill info={getDueInfo(order.deliveryDate)} />
+                          </div>
+                          <div className="min-w-0">
+                            <span
+                              className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"
+                              title="Teslim: 30.10.2025"
                             >
-                              <path
-                                fill="currentColor"
-                                d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z"
-                              />
-                            </svg>
-                           {new Intl.DateTimeFormat("tr-TR", {
-                              dateStyle: "medium",
-                              timeStyle: "short",
-                            }).format(new Date(order.createdAt))}
-                          </span>
-                       
+                              <svg
+                                viewBox="0 0 24 24"
+                                className="size-3.5"
+                                aria-hidden
+                              >
+                                <path
+                                  fill="currentColor"
+                                  d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z"
+                                />
+                              </svg>
+                              {new Intl.DateTimeFormat("tr-TR", {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              }).format(new Date(order.createdAt))}
+                            </span>
+                          </div>
                         </div>
+
+                        <div className="flex flex-col w-full md:w-[250px]"></div>
                       </div>
 
                       {/* Sağ: finans rozetleri + aksiyonlar */}
                       <div className="flex w-full flex-col items-end gap-2 md:w-auto">
                         {/* Finans özet (responsive grid) */}
                         <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
-                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
                             <span>TOPLAM</span>{" "}
                             <strong className="ms-1">
                               {fmt(order.total)} ₺
                             </strong>
                           </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
                             <span>İskonto</span>{" "}
                             <strong className="ms-1">
                               {fmt(order.discount)} ₺
                             </strong>
                           </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
                             <span>Ödenen</span>{" "}
                             <strong className="ms-1">{fmt(paid)} ₺</strong>
                           </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
                             <span>Kalan</span>{" "}
                             <strong className="ms-1">{fmt(balance)} ₺</strong>
                           </span>
@@ -1286,7 +1304,7 @@ export default function OrdersPage() {
                           <div className="p-3">
                             {detailLoading[order.id] && <Skeleton />}
                             {detailError[order.id] && (
-                              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                              <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                                 {detailError[order.id]}
                               </div>
                             )}
@@ -1438,7 +1456,7 @@ export default function OrdersPage() {
                     <h2 className="text-lg font-semibold">Ödeme Yap</h2>
                     <button
                       onClick={closePayModal}
-                      className="rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100"
+                      className="rounded-sm p-1.5 text-neutral-500 hover:bg-neutral-100"
                       aria-label="Kapat"
                     >
                       <svg viewBox="0 0 24 24" className="size-5">
@@ -1454,19 +1472,19 @@ export default function OrdersPage() {
                   ) : (
                     <div className="space-y-4">
                       <div className="grid grid-cols-3 gap-2 text-sm">
-                        <div className="rounded-lg bg-neutral-50 p-2">
+                        <div className="rounded-sm bg-neutral-50 p-2">
                           <div className="text-neutral-500">Net</div>
                           <div className="font-semibold">
                             {fmt(d.netTotal)} ₺
                           </div>
                         </div>
-                        <div className="rounded-lg bg-emerald-50 p-2">
+                        <div className="rounded-sm bg-emerald-50 p-2">
                           <div className="text-emerald-700">Ödenen</div>
                           <div className="font-semibold text-emerald-700">
                             {fmt(d.paidTotal)} ₺
                           </div>
                         </div>
-                        <div className="rounded-lg bg-amber-50 p-2">
+                        <div className="rounded-sm bg-amber-50 p-2">
                           <div className="text-amber-700">Kalan</div>
                           <div className="font-semibold text-amber-700">
                             {fmt(d.balance)} ₺
@@ -1518,7 +1536,7 @@ export default function OrdersPage() {
                           Not (opsiyonel)
                         </label>
                         <textarea
-                          className="textarea w-full rounded-lg bg-neutral-50 p-3"
+                          className="textarea w-full rounded-sm bg-neutral-50 p-3"
                           rows={3}
                           value={note}
                           onChange={(e) =>

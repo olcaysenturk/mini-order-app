@@ -237,74 +237,82 @@ export default function PrintOrderPage() {
     <div className="mx-auto my-4 bg-white text-black print:my-0">
       {/* Toolbar (ekranda görünsün) */}
       <div className="print:hidden border-b border-neutral-200 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-  <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-    <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-      {/* Left: title + tiny meta like list header */}
-      <div className="min-w-0">
-        <h1 className="truncate text-base font-semibold text-neutral-900">
-          Yazdırma Önizlemesi
-        </h1>
-        <div className="mt-1 flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-            <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
-              <path fill="currentColor" d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2m8 1.5V8h5.5" />
-            </svg>
-            A4 & Barkod destekli
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-            Önizleme aktif
-          </span>
+        <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+            {/* Left: title + tiny meta like list header */}
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold text-neutral-900">
+                Yazdırma Önizlemesi
+              </h1>
+              <div className="mt-1 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                  <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
+                    <path
+                      fill="currentColor"
+                      d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2m8 1.5V8h5.5"
+                    />
+                  </svg>
+                  A4 & Barkod destekli
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                  Önizleme aktif
+                </span>
+              </div>
+            </div>
+
+            {/* Right: actions (list page style) */}
+            <div className="flex items-center gap-2">
+              {/* Segmented-like pair (desktop) */}
+              <div className="hidden sm:flex overflow-hidden rounded-xl border border-neutral-200 bg-white p-0.5">
+                <button
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                  title="A4 Yazdır"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                    <path fill="currentColor" d="M7 3h10v4H7z" />
+                    <path
+                      fill="currentColor"
+                      d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2zm12.5 4a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"
+                    />
+                    <path fill="currentColor" d="M7 17h10v4H7z" />
+                  </svg>
+                  A4 Yazdır
+                </button>
+                <button
+                  onClick={() => router.push(`/orders/${order.id}/label`)}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                  title="Barkod Yazdır"
+                >
+                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                    <path
+                      fill="currentColor"
+                      d="M3 4h2v16H3V4m3 0h1v16H6V4m3 0h2v16H9V4m3 0h1v16h-1V4m3 0h2v16h-2V4m4 0h1v16h-1V4"
+                    />
+                  </svg>
+                  Barkod Yazdır
+                </button>
+              </div>
+
+              {/* Stacked pair (mobile) */}
+              <div className="grid w-full grid-cols-2 gap-2 sm:hidden">
+                <button
+                  onClick={() => window.print()}
+                  className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                >
+                  A4 Yazdır
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                >
+                  Barkod Yazdır
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-
-      {/* Right: actions (list page style) */}
-      <div className="flex items-center gap-2">
-        {/* Segmented-like pair (desktop) */}
-        <div className="hidden sm:flex overflow-hidden rounded-xl border border-neutral-200 bg-white p-0.5">
-          <button
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-            title="A4 Yazdır"
-          >
-            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-              <path fill="currentColor" d="M7 3h10v4H7z" />
-              <path fill="currentColor" d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2zm12.5 4a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" />
-              <path fill="currentColor" d="M7 17h10v4H7z" />
-            </svg>
-            A4 Yazdır
-          </button>
-          <button
-            onClick={() => router.push(`/orders/${order.id}/label`)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-            title="Barkod Yazdır"
-          >
-            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-              <path fill="currentColor" d="M3 4h2v16H3V4m3 0h1v16H6V4m3 0h2v16H9V4m3 0h1v16h-1V4m3 0h2v16h-2V4m4 0h1v16h-1V4" />
-            </svg>
-            Barkod Yazdır
-          </button>
-        </div>
-
-        {/* Stacked pair (mobile) */}
-        <div className="grid w-full grid-cols-2 gap-2 sm:hidden">
-          <button
-            onClick={() => window.print()}
-            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-          >
-            A4 Yazdır
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-          >
-            Barkod Yazdır
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 
       {/* A4 içerik */}
       <div className="m-auto w-[210mm] h-[297mm] p-[10mm] print:overflow-hidden print:bg-white print:shadow-none">
