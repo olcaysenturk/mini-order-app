@@ -1100,7 +1100,7 @@ export default function OrdersPage() {
                         <div className="grid w-full grid-cols-2 gap-2">
                           <a
                             href={`/orders/${order.id}/print`}
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
                             title="Yazdır"
                             target="_blank"
                           >
@@ -1121,7 +1121,7 @@ export default function OrdersPage() {
 
                           <a
                             href={`/orders/${order.id}`}
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
                             title="Düzenle"
                           >
                             <svg
@@ -1138,7 +1138,7 @@ export default function OrdersPage() {
                           </a>
 
                           <button
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
                             onClick={() => openPayModal(order.id)}
                             title="Ödeme Yap"
                           >
@@ -1156,7 +1156,7 @@ export default function OrdersPage() {
                           </button>
 
                           <button
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                             onClick={() => removeOrder(order.id)}
                             disabled={deletingId === order.id}
                             title="Sil"
@@ -1284,7 +1284,7 @@ export default function OrdersPage() {
                               Ödemeler
                             </div>
                             <button
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                              className="inline-flex items-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
                               onClick={() => openPayModal(order.id)}
                             >
                               <svg
