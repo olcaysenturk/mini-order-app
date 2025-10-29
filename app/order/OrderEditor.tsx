@@ -536,7 +536,8 @@ export default function OrderEditor({
                   title={isStorPerdeByName(selectedCategory?.name || '') ? 'STOR PERDE m² hesabı: file dikkate alınmaz' : undefined}
                 >
                   <option value="1">1.0x</option><option value="1.5">1.5x</option><option value="2">2.0x</option>
-                  <option value="2.5">2.5x</option><option value="3">3.0x</option>
+                  <option value="2.5">2.5x</option><option value="3">3.0x</option><option value="3.5">3.5x</option>
+                  <option value="4">4.0x</option><option value="4.5">4.5x</option><option value="5">5.0x</option>
                 </select>
                 {isStorPerdeByName(selectedCategory?.name || '') && (
                   <div className="mt-1 text-[10px] text-emerald-700 font-medium">

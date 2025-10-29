@@ -602,7 +602,7 @@ export default function EditOrderPage() {
               <div className="hidden sm:flex overflow-hidden rounded-xl border border-neutral-200 bg-white p-0.5">
                 {/* A4 Yazdır */}
                 <button
-                 onClick={() => router.push(`/orders/${orderId}/print`)}
+                  onClick={() => router.push(`/orders/${orderId}/print`)}
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
                   title="A4 Yazdır"
                 >
@@ -987,6 +987,10 @@ export default function EditOrderPage() {
                   <option value="2">2.0x</option>
                   <option value="2.5">2.5x</option>
                   <option value="3">3.0x</option>
+                  <option value="3.5">3.5x</option>
+                  <option value="4">4.0x</option>
+                  <option value="4.5">4.5x</option>
+                  <option value="5">5.0x</option>
                 </select>
               </div>
               <div>
@@ -1291,7 +1295,6 @@ function Header({
             {ymdToLocal(deliveryAt || undefined)}
           </span>
         </div>
-
       </div>
     </div>
   );

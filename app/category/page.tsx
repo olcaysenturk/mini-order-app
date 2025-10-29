@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+/* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number }
 type Category = {
   id: string
@@ -113,7 +114,7 @@ export default function AdminPage() {
     }, 0)
   }, [categories])
 
-  // --- Panelden gelen callback’ler: üstte sayaç ve (varsa) local variants’ı güncelle ---
+  // --- Üst listeyi panelden güncelleyen yardımcılar ---
   const bumpVariantCount = (catId: string, delta: number) => {
     setCategories(prev =>
       prev.map(c => {
@@ -143,7 +144,6 @@ export default function AdminPage() {
         if (c.id !== catId) return c
         return {
           ...c,
-          // Sunucu yeni GET’te _count geleceği için burada hem listeyi hem sayaçı güncelliyoruz
           variants: Array.isArray(c.variants) ? [v, ...c.variants] : c.variants,
           _count: { variants: (c._count?.variants ?? c.variants?.length ?? 0) + 1 },
         }
@@ -301,7 +301,7 @@ export default function AdminPage() {
   )
 }
 
-/* ================= Variants (per panel) ================= */
+/* ================= Variants (per panel) — Tablo görünüm ================= */
 
 type PageResp = {
   items: Variant[]
@@ -340,7 +340,6 @@ function VariantPanel({
   useEffect(() => {
     if (!items.length && nextCursor === undefined) {
       if (cat.variants && cat.variants.length) {
-        // Eski API: kategoriden gelen dizi ile başla
         setItems(cat.variants)
         setNextCursor(null)
       } else {
@@ -366,10 +365,7 @@ function VariantPanel({
     const res = await fetch(`/api/categories/${cat.id}/variants?` + params.toString(), {
       cache: 'no-store',
     })
-    if (!res.ok) {
-      // Eski API’da bu endpoint olmayabilir
-      throw new Error('endpoint_unavailable')
-    }
+    if (!res.ok) throw new Error('endpoint_unavailable')
     const data: PageResp = await res.json()
     return data
   }
@@ -414,9 +410,7 @@ function VariantPanel({
     if (!sentinelRef.current) return
     const el = sentinelRef.current
     const io = new IntersectionObserver((entries) => {
-      entries.forEach((e) => {
-        if (e.isIntersecting) void loadMore()
-      })
+      entries.forEach((e) => { if (e.isIntersecting) void loadMore() })
     }, { rootMargin: '400px 0px' })
     io.observe(el)
     return () => io.unobserve(el)
@@ -548,86 +542,127 @@ function VariantPanel({
         </button>
       </div>
 
-      {/* Liste */}
+      {/* Hata */}
       {error && (
         <div className="mb-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
           {error}
         </div>
       )}
 
-      {shown.length === 0 && !loading && (
-        <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-          Kayıt bulunamadı.
-        </div>
-      )}
+      {/* Tablo (listeleme sayfası stili) */}
+      <div className="overflow-auto rounded-2xl border border-neutral-200 bg-white shadow-sm">
+        <table className="min-w-[720px] w-full text-sm">
+          <thead className="sticky top-0 border-b bg-neutral-50/70 backdrop-blur supports-[backdrop-filter]:bg-neutral-50/60">
+            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-neutral-600">
+              <th className="p-3">#</th>
+              <th className="p-3">Ürün Adı</th>
+              <th className="p-3 w-56">Birim Fiyat</th>
+              <th className="p-3 text-right w-56">Aksiyon</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.length === 0 && !loading && (
+              <tr>
+                <td colSpan={4} className="p-6 text-center text-neutral-600">
+                  Kayıt bulunamadı.
+                </td>
+              </tr>
+            )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map(v => {
-          const draft = globalEditing[v.id]
-          const name = draft ? draft.name : v.name
-          const price = draft ? Number(draft.unitPrice) : Number(v.unitPrice)
+            {shown.map((v, idx) => {
+              const draft = globalEditing[v.id]
+              const name = draft ? draft.name : v.name
+              const price = draft ? Number(draft.unitPrice) : Number(v.unitPrice)
 
-          return (
-            <div
-              key={v.id}
-              className="rounded-xl border border-neutral-200 bg-white p-3 transition hover:shadow-sm"
-            >
-              <div className="mb-1 text-[11px] text-neutral-500">Ürün</div>
-              <input
-                className="mb-2 h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                value={name}
-                onFocus={() => !draft && startEdit(v)}
-                onChange={e => onEditChange(v.id, { name: e.target.value })}
-                placeholder="Ürün adı"
-              />
+              return (
+                <tr key={v.id} className="border-t hover:bg-neutral-50/50">
+                  {/* sıra numarası (list look) */}
+                  <td className="p-3 align-middle text-neutral-500">
+                    <span className="inline-flex size-6 items-center justify-center rounded-lg bg-neutral-100 text-[11px] font-semibold text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                      {idx + 1}
+                    </span>
+                  </td>
 
-              <div className="mb-1 text-[11px] text-neutral-500">Birim Fiyat</div>
-              <div className="flex items-center gap-2">
-                <input
-                  className="h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-right text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={Number.isFinite(price) ? price : 0}
-                  onFocus={() => !draft && startEdit(v)}
-                  onChange={e => onEditChange(v.id, { unitPrice: parseFloat(e.target.value || '0') })}
-                />
-                <span className="text-xs text-neutral-500">₺</span>
-              </div>
+                  {/* Ürün adı */}
+                  <td className="p-3 align-middle">
+                    <input
+                      className="h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                      value={name}
+                      onFocus={() => !draft && startEdit(v)}
+                      onChange={e => onEditChange(v.id, { name: e.target.value })}
+                      placeholder="Ürün adı"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveVariant(v.id)
+                        if (e.key === 'Escape') cancelEdit(v.id)
+                      }}
+                    />
+                  </td>
 
-              <div className="mt-3 flex gap-2">
-                {draft ? (
-                  <>
-                    <button
-                      className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
-                      onClick={() => saveVariant(v.id)}
-                    >
-                      Kaydet
-                    </button>
-                    <button
-                      className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
-                      onClick={() => cancelEdit(v.id)}
-                    >
-                      İptal
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-700 hover:bg-rose-100"
-                    onClick={() => removeVariant(v.id)}
-                  >
-                    Sil
-                  </button>
-                )}
-              </div>
-            </div>
-          )
-        })}
+                  {/* Fiyat */}
+                  <td className="p-3 align-middle">
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="h-9 w-full rounded-xl border border-neutral-200 bg-white px-3 text-right text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                        type="text"
+                        min={0}
+                        step="0.01"
+                        value={Number.isFinite(price) ? price : 0}
+                        onFocus={() => !draft && startEdit(v)}
+                        onChange={e => onEditChange(v.id, { unitPrice: parseFloat(e.target.value || '0') })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveVariant(v.id)
+                          if (e.key === 'Escape') cancelEdit(v.id)
+                        }}
+                      />
+                      <span className="text-xs text-neutral-500">₺</span>
+                    </div>
+                  </td>
+
+                  {/* aksiyonlar */}
+                  <td className="p-3 align-middle text-right">
+                    {draft ? (
+                      <div className="inline-flex items-center gap-2">
+                        <button
+                          className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                          onClick={() => saveVariant(v.id)}
+                          title="Kaydet"
+                        >
+                          Kaydet
+                        </button>
+                        <button
+                          className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
+                          onClick={() => cancelEdit(v.id)}
+                          title="İptal"
+                        >
+                          İptal
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="inline-flex h-9 items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-700 hover:bg-rose-100"
+                        onClick={() => removeVariant(v.id)}
+                        title="Sil"
+                      >
+                        Sil
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+
+            {/* yükleniyor satırı */}
+            {loading && (
+              <tr>
+                <td colSpan={4} className="p-3 text-neutral-500">Yükleniyor…</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
-      {/* Sonsuz kaydırma sentinel + yükleniyor */}
+      {/* Sonsuz kaydırma sentinel + load more fallback */}
       <div ref={sentinelRef} className="h-6 w-full" />
-      {loading && <div className="mt-2 text-sm text-neutral-500">Yükleniyor…</div>}
       {!!nextCursor && !loading && (
         <div className="mt-2">
           <button

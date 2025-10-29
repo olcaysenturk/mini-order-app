@@ -6,6 +6,10 @@ import { prisma } from '@/app/lib/db'
 import bcrypt from 'bcryptjs'
 import { ensureDefaultCategoriesForTenant } from '@/app/lib/seed-default-categories'
 
+// 📨 Gmail SMTP helper'ları (önceki adımda eklemiştik)
+import { sendMail } from '@/app/lib/mailer'
+import { welcomeHtml } from '@/app/emails/welcome-html'
+
 // ---- Enums ----
 export enum UserRole {
   ADMIN = 'ADMIN',
@@ -218,6 +222,25 @@ export const authOptions: NextAuthOptions = {
       session.tenantId = (token.tenantId as string | null) ?? null
       session.tenantRole = (token.tenantRole as TenantRole | null) ?? null
       return session
+    },
+  },
+
+  // 🔔 İlk oturumda tek seferlik Hoş Geldiniz maili
+  events: {
+    async signIn({ user }) {
+      try {
+        // Bu kullanıcı için daha önce hiç session açılmış mı?
+        const previousSessions = await prisma.session.count({ where: { userId: user.id } })
+        if (previousSessions === 0 && user.email) {
+          await sendMail({
+            to: user.email,
+            subject: `${process.env.APP_NAME || 'Perdexa'}’ya Hoş Geldiniz`,
+            html: welcomeHtml({ userName: user.name || undefined }),
+          })
+        }
+      } catch (e) {
+        console.warn('welcome email send failed:', e)
+      }
     },
   },
 

@@ -78,7 +78,7 @@ export function AuthedNav() {
   const items: NavItem[] = [
     {
       href: '/category',
-      label: 'Kategoriler',
+      label: 'Ürünler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/></svg>,
     },
     {

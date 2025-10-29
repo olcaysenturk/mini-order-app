@@ -623,7 +623,7 @@ export default function CustomersPage() {
                           </svg>
                           {removingId === c.id ? 'Siliniyor…' : 'Sil'}
                         </button>
-                        <a
+                        {/* <a
                           className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
                           href={`/order?customerId=${c.id}`}
                         >
@@ -631,7 +631,7 @@ export default function CustomersPage() {
                             <path fill="currentColor" d="M11 11V6h2v5h5v2h-5v5h-2v-5H6v-2z" />
                           </svg>
                           Yeni Sipariş
-                        </a>
+                        </a> */}
                       </div>
 
                       {/* Siparişler */}
