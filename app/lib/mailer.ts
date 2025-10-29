@@ -70,7 +70,7 @@ export function welcomeEmailHtml(params: {
           <h1 style="margin:0;font-size:20px;line-height:28px;color:#111827">${name}</h1>
           <p style="margin:8px 0 0 0;font-size:14px;line-height:22px;color:#374151">
             Perdexa’ya katıldığın için teşekkürler. Perde siparişlerini kategori & varyant bazında yönet,
-            m² ve file sıklığına göre otomatik hesapla, A4 çıktılar al — hepsi tek yerden.
+            m² ve pile sıklığına göre otomatik hesapla, A4 çıktılar al — hepsi tek yerden.
           </p>
         </td>
       </tr>

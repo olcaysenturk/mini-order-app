@@ -123,7 +123,7 @@ export default function AboutPage() {
               </h1>
               <p className="mt-3 text-base sm:text-lg text-neutral-600 max-w-2xl">
                 Perdexa, perde ve tekstil sektöründe teklif, ölçü ve üretim süreçlerini hızlandırmak için tasarlanmış
-                modern bir sipariş yönetimi uygulamasıdır. Kategori & varyant, m² ve file sıklığı, yazdırılabilir A4
+                modern bir sipariş yönetimi uygulamasıdır. Kategori & varyant, m² ve pile sıklığı, yazdırılabilir A4
                 ve güçlü raporlar — hepsi tek yerde.
               </p>
             </div>
@@ -206,7 +206,7 @@ export default function AboutPage() {
               <ul className="mt-2 space-y-2 text-sm text-neutral-700">
                 <li>• <span className="font-medium">Misyon:</span> Perde sipariş süreçlerini herkes için hızlı, hatasız ve ölçülebilir kılmak.</li>
                 <li>• <span className="font-medium">Vizyon:</span> Tekstil & perde dikeyinde en sevilen sipariş yönetim platformu olmak.</li>
-                <li>• <span className="font-medium">Odak:</span> Kategori & varyant, m² ve file sıklığı hesapları, A4 çıktı ve raporlar.</li>
+                <li>• <span className="font-medium">Odak:</span> Kategori & varyant, m² ve pile sıklığı hesapları, A4 çıktı ve raporlar.</li>
               </ul>
             </div>
 
@@ -257,7 +257,7 @@ export default function AboutPage() {
             <div className="rounded-3xl border border-neutral-200 bg-white/70 backdrop-blur p-6 shadow-sm">
               <div className="text-sm font-medium">Neden Perdexa?</div>
               <ul className="mt-3 space-y-2 text-sm text-neutral-700">
-                <li>• m² ve file sıklığına göre otomatik hesaplama</li>
+                <li>• m² ve pile sıklığına göre otomatik hesaplama</li>
                 <li>• Yazdırılabilir A4 çıktılar ve imza alanları</li>
                 <li>• Şube/bayi yönetimi ve rol tabanlı erişim</li>
                 <li>• Raporlama: ciro, tahsilat, durum kırılımları</li>

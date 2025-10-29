@@ -524,10 +524,10 @@ export default function OrderEditor({
               <NumberField label="Boy (cm)" value={height} setValue={v=>setHeight(v)} min={0} step={1}/>
             </div>
 
-            {/* File Sıklığı + Birim Fiyat */}
+            {/* Pile Sıklığı + Birim Fiyat */}
             <div className="mb-3 grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm">File Sıklığı</label>
+                <label className="text-sm">Pile Sıklığı</label>
                 <select
                   className="select mt-1"
                   value={String(fileDensity)}

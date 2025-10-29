@@ -338,7 +338,7 @@ function Label70({
               </>
             )}
           </div>
-          <div><b>File Sıklığı :</b> {density}x</div>
+          <div><b>Pile Sıklığı :</b> {density}x</div>
           <div><b>Birim :</b> {fmt(unit)}</div>
           {showNote && it.note ? (
             <div className="mt-1 line-clamp-3 text-[14px]">

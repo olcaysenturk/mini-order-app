@@ -973,10 +973,10 @@ export default function EditOrderPage() {
               </div>
             </div>
 
-            {/* File Sıklığı + Birim Fiyat (readonly) */}
+            {/* Pile Sıklığı + Birim Fiyat (readonly) */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
-                <label className="text-sm">File Sıklığı</label>
+                <label className="text-sm">Pile Sıklığı</label>
                 <select
                   className="select mt-1"
                   value={String(fileDensity)}
@@ -1391,7 +1391,7 @@ function SectionEditable({
                     <b>Adet :</b> {it.qty} – <b>Ölçü :</b> {it.width}×
                     {it.height} cm
                     <br />
-                    <b>File Sıklığı :</b> {it.fileDensity}x<br />
+                    <b>Pile Sıklığı :</b> {it.fileDensity}x<br />
                     <b>Birim :</b> {fmt(Number(it.unitPrice))}
                     <br />
                     <b>Tutar :</b> {fmt(Number(it.subtotal))}

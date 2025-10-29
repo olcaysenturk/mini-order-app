@@ -575,7 +575,7 @@ function SectionSlottedPrint({
                     <br />
                     <b>Adet :</b> {it.qty}
                     <br />
-                    <b>File Sıklığı :</b> {it.fileDensity}x
+                    <b>Pile Sıklığı :</b> {it.fileDensity}x
                     <br />
                     <b>Birim :</b> {fmt(Number(it.unitPrice))}
                     <br />
