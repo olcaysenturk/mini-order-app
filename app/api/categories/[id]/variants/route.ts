@@ -17,29 +17,54 @@ const BodySchema = z.object({
 
 /** GET /api/categories/:id/variants (tenant scoped) */
 export async function GET(
-  _req: NextRequest,
-  ctx: { params: Promise<{ id: string }> }   // 👈 burada Promise!
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
 ) {
   const { id } = await ctx.params
-
   const session = await getServerSession(authOptions)
   const tenantId = (session as any)?.tenantId as string | undefined
   if (!session?.user || !tenantId) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
 
-  // Kategori bu tenant’a mı ait?
+  const { searchParams } = new URL(req.url)
+  const take = Math.min(Math.max(parseInt(searchParams.get('take') || '20', 10), 1), 100)
+  const q = (searchParams.get('q') || '').trim()
+  const sort = (searchParams.get('sort') || 'name_asc') as 'name_asc' | 'price_asc' | 'price_desc'
+  const cursor = searchParams.get('cursor') // variant.id
+
   const category = await prisma.category.findFirst({
     where: { id, tenantId },
     select: { id: true },
   })
   if (!category) return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
-  const variants = await prisma.variant.findMany({
-    where: { categoryId: category.id, tenantId },
-    orderBy: { name: 'asc' },
+  const where = {
+    tenantId,
+    categoryId: category.id,
+    ...(q
+      ? { name: { contains: q, mode: 'insensitive' as const } }
+      : {}),
+  }
+
+  const orderBy =
+    sort === 'price_asc' ? { unitPrice: 'asc' as const } :
+    sort === 'price_desc' ? { unitPrice: 'desc' as const } :
+    { name: 'asc' as const }
+
+  const rows = await prisma.variant.findMany({
+    where,
+    orderBy,
+    take: take + 1, // nextCursor var mı öğrenmek için
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   })
-  return NextResponse.json(variants)
+
+  const hasNext = rows.length > take
+  const items = hasNext ? rows.slice(0, take) : rows
+  const nextCursor = hasNext ? items[items.length - 1]?.id ?? null : null
+  const total = await prisma.variant.count({ where })
+
+  return NextResponse.json({ items, nextCursor, total })
 }
 
 /** POST /api/categories/:id/variants (tenant scoped) */
