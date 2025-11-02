@@ -68,7 +68,7 @@ export default function OrderLabelsThermal() {
 
     const isOk = (st?: string) => {
       const s = String(st || '').toLowerCase();
-      return s === 'success' || s === 'completed';
+      return s === 'success' || s === 'completed' || s === 'processing';
     };
 
     const filtered = order.items.filter((it) => isOk(it.lineStatus));
@@ -281,7 +281,7 @@ function EmptyState() {
       <div className="mb-2 text-5xl">🧾</div>
       <div className="text-sm font-medium text-zinc-800">Yazdırılacak etiket yok</div>
       <div className="mt-1 text-xs text-zinc-600">
-        Yalnızca <b>Tamamlanmış</b> durumundaki satırlar etiketlenir.
+        Yalnızca <b>İşemde ve tamamlanmış</b> durumundaki satırlar etiketlenir.
       </div>
     </div>
   );
