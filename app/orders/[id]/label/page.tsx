@@ -329,7 +329,8 @@ function Label70({
             <b>Tür :</b> {typeName}
           </div>
           <div>
-            <b>Adet :</b> {qty} <span>–</span>{' '}
+            <b>Adet :</b> {qty}
+            <br/>
             <b>Ölçü :</b> {w}×{h} cm
             {isStor && (
               <>
@@ -339,7 +340,7 @@ function Label70({
             )}
           </div>
           <div><b>Pile Sıklığı :</b> {density}x</div>
-          <div><b>Birim :</b> {fmt(unit)}</div>
+          {/* <div><b>Birim :</b> {fmt(unit)}</div> */}
           {showNote && it.note ? (
             <div className="mt-1 line-clamp-3 text-[14px]">
               <b>Not:</b> {it.note}

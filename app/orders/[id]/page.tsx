@@ -34,6 +34,8 @@ type Order = {
   customerPhone: string;
   status: Status;
   deliveryAt?: string | null;
+  netTotal?: number;
+  discount?: number
 };
 
 type InsertSlot = { title: string; index: number } | null;
@@ -205,13 +207,16 @@ export default function EditOrderPage() {
   const [fileDensity, setFileDensity] = useState(1.0);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [targetSlotIndex, setTargetSlotIndex] = useState<number | null>(null);
-  const [lineStatus, setLineStatus] = useState<Status>("pending");
+  const [lineStatus, setLineStatus] = useState<Status>("processing");
 
   // Yeni varyant modal
   const [showVarModal, setShowVarModal] = useState(false);
   const [newVarName, setNewVarName] = useState("");
   const [newVarPrice, setNewVarPrice] = useState<string>("");
   const [savingVariant, setSavingVariant] = useState(false);
+  const [netTotal, setNetTotal] = useState(0);
+  const [totalPrice, setTotalPrice] = useState(0);
+  const [discount, setDiscount] = useState(0);
 
   /* ==== Load ==== */
   useEffect(() => {
@@ -233,8 +238,12 @@ export default function EditOrderPage() {
         setCustomerName(ord.customerName || "");
         setCustomerPhone(ord.customerPhone || "");
         setOrderNote(ord.note || "");
-        setStatus(ord.status ?? "pending");
+        setStatus(ord.status ?? "processing");
         setDeliveryAt(toYMD(ord.deliveryAt)); // GET’ten Date/string → input
+        setNetTotal(ord.netTotal || 0);
+        setDiscount(ord.discount || 0);
+        setTotalPrice(ord.total || 0);
+
 
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
@@ -244,7 +253,7 @@ export default function EditOrderPage() {
           const density = Number(i.fileDensity ?? 1);
           const sub = unitPrice * ((width / 100) * density || 1) * qty;
           const ls: Status =
-            (i.lineStatus as Status) || (ord.status as Status) || "pending";
+            (i.lineStatus as Status) || (ord.status as Status) || "processing";
           return {
             id: i.id || uid(),
             categoryId: i.categoryId,
@@ -360,10 +369,12 @@ export default function EditOrderPage() {
     return m;
   }, [items, catById]);
 
-  const total = useMemo(
-    () => items.reduce((a, b) => a + (Number(b.subtotal) || 0), 0),
-    [items]
-  );
+  // const total = useMemo(
+  //   () => items.reduce((a, b) => a + (Number(b.subtotal) || 0), 0),
+  //   [items]
+  // );
+
+  
 
   function LegendDot({ c, label }: { c: string; label: string }) {
     return (
@@ -389,7 +400,7 @@ export default function EditOrderPage() {
     setFileDensity(1.0);
     setEditingLineId(null);
     setTargetSlotIndex(index);
-    setLineStatus("pending");
+    setLineStatus("processing");
   };
 
   const openQuickFor = (categoryName: string, index: number) => {
@@ -841,7 +852,7 @@ export default function EditOrderPage() {
           <div className="col-span-2">
             <input
               type="text"
-              className="input mt-1 min-h-[40px] w-full rounded-none"
+              className="input mt-1 min-h-[116px] w-full rounded-none" 
               value={orderNote}
               placeholder="Not:"
               onChange={(e) => setOrderNote(e.target.value)}
@@ -850,7 +861,15 @@ export default function EditOrderPage() {
           <div className="text-sm">
             <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-between text-base tracking-wide">
               <span>Toplam:</span>
-              <span>{fmt(total)} ₺</span>
+              <span>{fmt(totalPrice)} ₺</span>
+            </div>
+            <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-between text-base tracking-wide">
+              <span>İskonto:</span>
+              <span>{fmt(discount)} ₺</span>
+            </div>
+            <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-between text-base tracking-wide">
+              <span>Genel Toplam:</span>
+              <span>{fmt(netTotal)} ₺</span>
             </div>
           </div>
         </div>
