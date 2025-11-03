@@ -950,11 +950,7 @@ export default function OrdersPage() {
 
         {/* Liste */}
         <div className="mt-4 space-y-4 min-h-[100vh]">
-          {typeFiltered.length === 0 && !loading && (
-            <div className="text-sm text-neutral-600">
-              Gösterilecek sipariş yok (sadece Sipariş Teklifi listelenir).
-            </div>
-          )}
+         
           {orders.length === 0 && loading && <InlineLoader />}
 
           {!loading

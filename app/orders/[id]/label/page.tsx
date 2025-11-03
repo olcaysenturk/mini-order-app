@@ -1,8 +1,9 @@
+// app/orders/[id]/labels-thermal/page.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { toast } from 'sonner'
+import { toast } from 'sonner';
 
 type LineStatus = 'pending' | 'processing' | 'completed' | 'cancelled' | 'success';
 
@@ -17,7 +18,6 @@ type OrderItem = {
   fileDensity: number | string;
   category: { name: string };
   variant: { name: string };
-  /** filtre için */
   lineStatus?: LineStatus | string;
 };
 
@@ -33,12 +33,7 @@ const fmt = (n: number) =>
   new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
 const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR');
-
-// ufak yardımcı — koşullu class
 const cx = (...arr: Array<string | false | null | undefined>) => arr.filter(Boolean).join(' ');
-
-/* ====== basit toast ====== */
-
 
 export default function OrderLabelsThermal() {
   const { id } = useParams<{ id: string }>();
@@ -46,11 +41,10 @@ export default function OrderLabelsThermal() {
   const [loading, setLoading] = useState(false);
   const [printing, setPrinting] = useState(false);
 
-  // ekran seçenekleri
-  const [replicateByQty, setReplicateByQty] = useState(true); // adet kadar kopya
-  const [showNotes, setShowNotes] = useState(true); // not göster/gizle
+  // Görünüm seçenekleri
+  const [showNotes, setShowNotes] = useState(true);
 
-  // barkod svg ref’leri
+  // Barkod svg ref’leri
   const barcodeRefs = useRef<Record<string, SVGSVGElement | null>>({});
 
   useEffect(() => {
@@ -60,7 +54,7 @@ export default function OrderLabelsThermal() {
         const res = await fetch(`/api/orders/${id}`, { cache: 'no-store' });
         if (!res.ok) throw new Error('Sipariş alınamadı');
         setOrder(await res.json());
-      } catch (e:any) {
+      } catch (e: any) {
         toast.error(e?.message || 'Sipariş alınamadı');
       } finally {
         setLoading(false);
@@ -69,33 +63,26 @@ export default function OrderLabelsThermal() {
     run();
   }, [id]);
 
-  // processing + success/completed
+  // 🔹 SADECE processing satırlar ve HER ÜRÜN İÇİN TEK ETİKET
   const { labels, filteredCount, totalCount } = useMemo(() => {
     if (!order) return { labels: [] as any[], filteredCount: 0, totalCount: 0 };
 
-    const isOk = (st?: string) => {
-      const s = String(st || '').toLowerCase();
-      return s === 'processing';
-    };
+    const isProcessing = (st?: string) => String(st || '').toLowerCase() === 'processing';
+    const filtered = order.items.filter((it) => isProcessing(it.lineStatus));
 
-    const filtered = order.items.filter((it) => isOk(it.lineStatus));
-    const out: Array<{ base: OrderItem; idx: number; key: string; barcodeValue: string }> = [];
-
-    for (const it of filtered) {
-      const copies = replicateByQty ? Math.max(1, Number(it.qty || 1)) : 1;
-      for (let i = 0; i < copies; i++) {
-        const key = `${it.id}-${i}`;
-        const orderTail = (order.id || '').slice(-6);
-        const itemTail = (it.id || '').slice(-6);
-        const barcodeValue = `${orderTail}-${itemTail}-${(i + 1).toString().padStart(2, '0')}`;
-        out.push({ base: it, idx: i, key, barcodeValue });
-      }
-    }
+    // Her satır için 1 adet etiket (qty ne olursa olsun)
+    const out = filtered.map((it) => {
+      const orderTail = (order.id || '').slice(-6);
+      const itemTail = (it.id || '').slice(-6);
+      const barcodeValue = `${orderTail}-${itemTail}-01`;
+      const key = it.id; // tek kopya olduğu için direkt id
+      return { base: it, key, barcodeValue };
+    });
 
     return { labels: out, filteredCount: filtered.length, totalCount: order.items.length };
-  }, [order, replicateByQty]);
+  }, [order]);
 
-  // barkodları çiz
+  // Barkodları çiz
   useEffect(() => {
     (async () => {
       if (!order || labels.length === 0) return;
@@ -116,12 +103,11 @@ export default function OrderLabelsThermal() {
     })();
   }, [order, labels]);
 
-  /* ====== Yazdır butonu: önce status=processing (atölye/workshop) sonra print ====== */
+  // Atölyeye geçir + yazdır
   const setWorkshopAndPrint = async () => {
     if (!order?.id) return;
     setPrinting(true);
     try {
-      // PATCH ile sipariş durumunu processing yap (workshop aşaması)
       const res = await fetch(`/api/orders/${order.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -132,15 +118,12 @@ export default function OrderLabelsThermal() {
         throw new Error(t || 'Durum güncellenemedi');
       }
       toast.success('Sipariş atölyeye aktarıldı');
-      
-      // İsteğe bağlı: en güncel veriyi tekrar çek
+
       try {
         const refreshed = await fetch(`/api/orders/${order.id}`, { cache: 'no-store' });
         if (refreshed.ok) setOrder(await refreshed.json());
-      } catch {
-        console.log("")
-      }
-      // Ardından yazdır
+      } catch {}
+
       window.print();
     } catch (e: any) {
       toast.error(e?.message || 'İşlem başarısız');
@@ -177,26 +160,20 @@ export default function OrderLabelsThermal() {
                 <h1 className="text-lg font-semibold tracking-tight">Barkod Etiketleri</h1>
                 <div className="flex items-center gap-2">
                   <Badge>Yalnızca<b className="ml-2">İşlemde olan satırlar</b></Badge>
-                  <Badge muted>
-                    Satır: {filteredCount}/{totalCount}
-                  </Badge>
+                  <Badge muted>Satır: {filteredCount}/{totalCount}</Badge>
                   <Badge muted>Etiket: {labelCount}</Badge>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Toggle’lar istenirse açılır:
-                <Toggle
-                  label="Adet kadar çoğalt"
-                  pressed={replicateByQty}
-                  onClick={() => setReplicateByQty((v) => !v)}
-                />
-                <Toggle
-                  label="Notları göster"
-                  pressed={showNotes}
+                {/* İstersen not gizle/göster */}
+                <button
                   onClick={() => setShowNotes((v) => !v)}
-                />
-                */}
+                  className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
+                >
+                  {showNotes ? 'Notları Gizle' : 'Notları Göster'}
+                </button>
+
                 <button
                   className={cx(
                     'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium',
@@ -206,13 +183,7 @@ export default function OrderLabelsThermal() {
                   )}
                   onClick={setWorkshopAndPrint}
                   disabled={labelCount === 0 || printing}
-                  title={
-                    labelCount === 0
-                      ? 'Yazdırılacak satır yok'
-                      : printing
-                      ? 'İşleniyor…'
-                      : 'Atölyeye aktar ve yazdır'
-                  }
+                  title={labelCount === 0 ? 'Yazdırılacak satır yok' : 'Atölyeye aktar ve yazdır'}
                 >
                   {printing ? 'İşleniyor…' : '🖨️ Yazdır (Atölye)'}
                 </button>
@@ -221,14 +192,13 @@ export default function OrderLabelsThermal() {
           </div>
         </div>
 
-        {/* İçerik */}
+        {/* Etiketler */}
         <div className="labels-grid">
           {labels.map(({ base, key, barcodeValue }) => (
             <div className="sheet rounded-xl border border-zinc-200 bg-white shadow-sm" key={key}>
               <Label60x40
                 it={base}
                 showNote={showNotes}
-                qtyOnLabel={replicateByQty ? 1 : Number(base.qty || 1)}
                 barcodeValue={barcodeValue}
                 svgRef={(el) => (barcodeRefs.current[key] = el)}
               />
@@ -251,7 +221,6 @@ export default function OrderLabelsThermal() {
     --pad: 1mm; /* ekran için; print'te 0'a çekiyoruz */
   }
 
-  /* Ekranda grid boşluklu dursun */
   .labels-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(var(--label-w), 1fr));
@@ -264,13 +233,10 @@ export default function OrderLabelsThermal() {
   }
 
   @media print {
-    /* Kağıt boyutu ve sıfır marj */
     @page {
       size: var(--label-w) var(--label-h);
       margin: 0;
     }
-
-    /* Evrensel sıfırlama (print sırasında) */
     * {
       margin: 0 !important;
       padding: 0 !important;
@@ -278,7 +244,6 @@ export default function OrderLabelsThermal() {
       box-shadow: none !important;
       background: transparent !important;
     }
-
     html, body {
       width: var(--label-w) !important;
       height: var(--label-h) !important;
@@ -286,8 +251,6 @@ export default function OrderLabelsThermal() {
       print-color-adjust: exact;
       line-height: 1 !important;
     }
-
-    /* Ekran stillerini iptal et: gradient, container p-4, max-width vs. */
     .min-h-screen { background: #fff !important; }
     .mx-auto, .max-w\\[1200px\\], .p-4 { 
       max-width: none !important;
@@ -295,14 +258,10 @@ export default function OrderLabelsThermal() {
       padding: 0 !important;
       margin: 0 !important;
     }
-
-    /* Grid’i tek öğe akışına çevir, gap=0 */
     .labels-grid {
       display: block !important;
       gap: 0 !important;
     }
-
-    /* Kart kabuğu: tam etiket boyutu, süssüz */
     .sheet {
       width: var(--label-w) !important;
       height: var(--label-h) !important;
@@ -312,15 +271,10 @@ export default function OrderLabelsThermal() {
       page-break-inside: avoid;
       border-radius: 0 !important;
     }
-
-    /* Etiket iç pedini de 0 yap (komponent p-[var(--pad)] kullanıyor) */
     :root { --pad: 0mm; }
-
-    /* Header bar zaten print:hidden, yine de garanti */
     .print\\:hidden { display: none !important; }
   }
 `}</style>
-
     </div>
   );
 }
@@ -339,38 +293,12 @@ function Badge({ children, muted = false }: { children: React.ReactNode; muted?:
   );
 }
 
-function Toggle({ label, pressed, onClick }: { label: string; pressed: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={pressed}
-      className={cx(
-        'inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm font-medium transition',
-        pressed
-          ? 'border-black bg-black text-white shadow-sm'
-          : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
-      )}
-      type="button"
-    >
-      <span
-        className={cx(
-          'h-4 w-7 rounded-full transition',
-          pressed ? 'bg-white/30 ring-1 ring-white/60' : 'bg-zinc-100'
-        )}
-      />
-      {label}
-    </button>
-  );
-}
-
 function EmptyState() {
   return (
     <div className="flex h-[220px] flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-300 bg-zinc-50 text-center">
       <div className="mb-2 text-5xl">🧾</div>
       <div className="text-sm font-medium text-zinc-800">Yazdırılacak etiket yok</div>
-      <div className="mt-1 text-xs text-zinc-600">
-        Yalnızca <b>Hazırlanıyor</b> durumundaki satırlar etiketlenir.
-      </div>
+      <div className="mt-1 text-xs text-zinc-600">Yalnızca <b>Hazırlanıyor</b> durumundaki satırlar etiketlenir.</div>
     </div>
   );
 }
@@ -378,24 +306,20 @@ function EmptyState() {
 /* ==== Tek etiket (60×40 mm) ==== */
 function Label60x40({
   it,
-  qtyOnLabel,
   showNote,
   barcodeValue,
   svgRef,
 }: {
   it: OrderItem;
-  qtyOnLabel: number;
   showNote: boolean;
   barcodeValue: string;
   svgRef: (el: SVGSVGElement | null) => void;
 }) {
   const cat = it.category?.name ?? '';
   const typeName = it.variant?.name ?? '—';
-  const qty = Math.max(1, Number(qtyOnLabel || it.qty || 1));
   const w = Number(it.width || 0);
   const h = Number(it.height || 0);
   const density = Number(it.fileDensity || 1);
-  const unit = Number(it.unitPrice || 0);
   const isStor = normalize(cat) === 'STOR PERDE';
   const area = isStor ? (w / 100) * (h / 100) : 0;
 
@@ -413,24 +337,23 @@ function Label60x40({
         </div>
 
         <div className="space-y-1 text-[14px]">
+          <div><b>Tür :</b> {typeName}</div>
+
           <div>
-            <b>Tür :</b> {typeName}
-          </div>
-          <div>
-            <b>Adet :</b> {qty}
+            <b>Adet :</b> {it.qty}
             <br />
             <b>En :</b> {w} cm
             <br />
             <b>Boy :</b> {h} cm
             {isStor && (
               <>
-                {' '}<span>–</span>{' '}
-                <b>Alan :</b> {fmt(area)} m²
+                {' '}– <b>Alan :</b> {fmt(area)} m²
               </>
             )}
           </div>
-          <b>Pile Sıklığı :</b> {density}x<br/>
-          {/* <div><b>Birim :</b> {fmt(unit)}</div> */}
+
+          <div><b>Pile Sıklığı :</b> {density}x</div>
+
           {showNote && it.note ? (
             <div className="mt-1 line-clamp-3 text-[14px]">
               <b>Not:</b> {it.note}

@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 /* ========= Types ========= */
 type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
 type PaymentMethod = "CASH" | "TRANSFER" | "CARD";
-type HeaderFilter = "active" | "completed" | "all";
+type HeaderFilter = "active" | "completed" | "all" | "workshop";
 type SortMode = "default" | "deliveryAsc" | "deliveryDesc";
 
 type OrderItem = {
@@ -251,7 +251,7 @@ export default function OrdersPage() {
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const [headerFilter, setHeaderFilter] = useState<HeaderFilter>("active");
+  const [headerFilter, setHeaderFilter] = useState<HeaderFilter>("all");
   const [q, setQ] = useState("");
 
   // filters
@@ -330,10 +330,15 @@ export default function OrdersPage() {
     setLoading(true);
     setError(null);
     try {
-      const qs =
-        headerFilter === "completed"
-          ? `?status=${encodeURIComponent("completed")}`
-          : "";
+      // ✅ “Atölyede” filtresi için doğru status query
+      let qs = "";
+      if (headerFilter === "completed") {
+        qs = `?status=${encodeURIComponent("completed")}`;
+      } else if (headerFilter === "workshop") {
+        qs = `?status=${encodeURIComponent("workshop")}`;
+      }
+      // "active" ve "all" için parametre yok (sunucu tarafı geniş set döner)
+
       const res = await fetch(`/api/orders${qs}`, {
         cache: "no-store",
         signal,
@@ -503,12 +508,20 @@ export default function OrdersPage() {
     });
   }, [typeFiltered, q]);
 
-  // Header status filter
+  // Header status filter — ✅ Atölyede desteği eklendi
   const statusHeaderFiltered = useMemo(() => {
-    if (headerFilter === "all") return textFiltered;
-    if (headerFilter === "completed")
-      return textFiltered.filter((o) => o.status === "completed");
-    return textFiltered.filter((o) => o.status !== "cancelled");
+    switch (headerFilter) {
+      case "all":
+        return textFiltered;
+      case "completed":
+        return textFiltered.filter((o) => o.status === "completed");
+      case "workshop":
+        return textFiltered.filter((o) => o.status === "workshop");
+      case "active":
+      default:
+        // Aktif: iptal hariç hepsi (pending, processing, workshop, completed)
+        return textFiltered.filter((o) => o.status !== "cancelled");
+    }
   }, [textFiltered, headerFilter]);
 
   // Payment + bayi filtreleri
@@ -732,10 +745,10 @@ export default function OrdersPage() {
             >
               {(
                 [
-                  { k: "active", label: "Aktif" },
+                  { k: "all", label: "Tümü" },
+                  // { k: "active", label: "Aktif" },
                   { k: "completed", label: "Tamamlanan" },
                   { k: "workshop", label: "Atölyede" },
-                  { k: "all", label: "Tümü" },
                 ] as { k: HeaderFilter; label: string }[]
               ).map(({ k, label }) => (
                 <button
@@ -992,11 +1005,6 @@ export default function OrdersPage() {
 
         {/* Liste */}
         <div className="mt-4 space-y-4 min-h-[100vh]">
-          {typeFiltered.length === 0 && !loading && (
-            <div className="text-sm text-neutral-600">
-              Gösterilecek sipariş yok (sadece orderType=0 listelenir).
-            </div>
-          )}
           {orders.length === 0 && loading && <InlineLoader />}
 
           {!loading
