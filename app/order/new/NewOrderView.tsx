@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Search, UserPlus, Users, AlertCircle, Loader2, ChevronRight, Calendar as CalendarIcon } from 'lucide-react'
 import { useOrderSetupStore } from '@/app/lib/orderSetupStore'
 
-/** Company altındaki şube (bayi) tipi */
+/** ========= Types ========= */
 type Branch = {
   id: string
   name: string
@@ -16,6 +16,8 @@ type BranchesResp = { ok: boolean; items: Branch[]; total?: number }
 
 type Customer = { id: string; name: string; phone: string; email?: string | null }
 type CustomersResp = { ok: boolean; items: Customer[]; total?: number }
+
+type OrderType = 0 | 1 // 0: Yeni Sipariş, 1: Fiyat Teklifi
 
 /* ====== helpers: tarih ====== */
 function toInputDate(d: Date) {
@@ -58,6 +60,9 @@ export default function NewOrderView() {
   }, [])
   const [deliveryDate, setDeliveryDate] = useState<string>(() => toInputDate(addDays(new Date(), 7)))
   const minDateStr = useMemo(() => toInputDate(today), [today])
+
+  // Sipariş tipi (controlled)
+  const [orderType, setOrderType] = useState<OrderType>(0)
 
   // Ortak
   const [note, setNote] = useState('')
@@ -190,10 +195,11 @@ export default function NewOrderView() {
         customerPhone: customerPayload!.phone,
         note: note.trim() || '',
         deliveryDate: deliveryDate, // YYYY-MM-DD
+        orderType: orderType,       // ✅ store’a yazıldı
       }
       setSetup(payload)
 
-      // 3) URL’e parametre basmadan editor’a geç
+      // 3) editor’a geç
       router.push('/order')
     } catch (err: any) {
       toast(err?.message || 'Hata oluştu', 'error')
@@ -407,6 +413,21 @@ export default function NewOrderView() {
                     +14
                   </button>
                 </div>
+              </div>
+            </section>
+
+            {/* Sipariş Tipi */}
+            <section>
+              <label className="mb-1 block text-sm font-medium">Sipariş Tipi</label>
+              <div>
+                <select
+                  value={String(orderType)}
+                  onChange={(e) => setOrderType(Number(e.target.value) as OrderType)}
+                  className="w-full cursor-pointer rounded-xl border border-[var(--surface-300,#d1d5db)] px-3 py-2 pr-9 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-500,#6366F1)] focus-visible:ring-offset-2"
+                >
+                  <option value="0">Yeni Sipariş</option>
+                  <option value="1">Fiyat Teklifi</option>
+                </select>
               </div>
             </section>
 

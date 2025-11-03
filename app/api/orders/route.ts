@@ -55,6 +55,7 @@ const BodySchema = z.object({
   discount: z.union([z.number(), z.string()]).optional(), // TL
   items: z.array(ItemSchema).min(1),
   deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // ✅ yeni alan
+  orderType: z.union([z.literal(0), z.literal(1)]).default(0),      // ✅ 0: Yeni, 1: Teklif
 }).refine((d) => !!(d.branchId || d.dealerId), {
   message: 'branchId (veya legacy dealerId) zorunlu',
   path: ['branchId'],
@@ -183,6 +184,7 @@ export async function GET(req: NextRequest) {
         paidTotal,            // ✅ FE tarafından kullanılan asıl alan
         totalPaid: paidTotal, // ✅ legacy alias
         balance,              // ✅ borç
+        orderType: o.orderType, // ✅ FE’de filtre/etiket için
         items: o.items.map((it) => ({
           id: it.id,
           qty: it.qty,
@@ -239,6 +241,7 @@ export async function POST(req: NextRequest) {
       discount,
       items,
       deliveryDate,
+      orderType, // ✅ buradan al
     } = parsed.data
 
     // ✅ Tek giriş değişkeni: branchIdInput
@@ -356,6 +359,7 @@ export async function POST(req: NextRequest) {
         discount: discountClamped,
         netTotal: net,
         deliveryAt: parseYMDToLocalDate(deliveryDate) ?? undefined, // ✅ teslim tarihi
+        orderType, // ✅ Int olarak DB’ye yaz
         items: { create: prepared },
       },
       include: {
@@ -381,6 +385,7 @@ export async function POST(req: NextRequest) {
       totalPaid: 0,     // ✅ legacy alias
       balance:   netNumber,
       deliveryDate: created.deliveryAt ? created.deliveryAt.toISOString().slice(0,10) : null,
+      orderType: created.orderType, // ✅ FE’ye geri dön
       items: created.items.map(it => ({
         id: it.id,
         categoryId: it.categoryId,

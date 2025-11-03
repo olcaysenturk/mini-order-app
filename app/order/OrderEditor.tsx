@@ -178,6 +178,7 @@ export default function OrderEditor({
   const [newVarName, setNewVarName] = useState('')
   const [newVarPrice, setNewVarPrice] = useState<string>('') // virgül desteği
   const [savingVariant, setSavingVariant] = useState(false)
+  const [orderType, setOrderType] = useState(0);
 
   /* ==== setup’dan prefill ==== */
   useEffect(() => {
@@ -196,6 +197,8 @@ export default function OrderEditor({
     setCustomerPhone(setup.customerPhone || '')
     setOrderDeliveryDate(setup.deliveryDate || '')
     setOrderNote(setup.note || '')
+    setOrderType(setup.orderType || 0)
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setup])
 
@@ -364,7 +367,7 @@ export default function OrderEditor({
       <PageOverlay show={pageBusy} label="Kaydediliyor…" />
       {/* Toolbar */}
       <div className=" m-auto w-[210mm] print:w-auto print:min-h-[auto] flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold">Yeni Sipariş</h1>
+        <h1 className="text-xl font-semibold">{orderType == 0 ? "Yeni Sipariş" : "Sipariş Teklifi" }</h1>
         <div className="flex items-center gap-2">
           {profile.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -710,6 +713,7 @@ export default function OrderEditor({
               customerName, customerPhone, note: (orderNote || ''), status,
               discount: computedDiscount,
               deliveryDate: orderDeliveryDate,
+              orderType: orderType,
               items: items.map(i => ({
                 categoryId: i.categoryId,
                 variantId: i.variantId,

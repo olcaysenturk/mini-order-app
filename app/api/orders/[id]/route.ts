@@ -44,9 +44,10 @@ const PatchBodySchema = z.object({
   items: z.array(PatchItemSchema).optional(),
   storLines: LinesSchema,
   accessoryLines: LinesSchema,
-
-  // ✅ yeni alan
   deliveryAt: YmdSchema,
+
+  // ✅ sadece orderType eklendi (0: Yeni Sipariş, 1: Fiyat Teklifi)
+  orderType: z.union([z.literal(0), z.literal(1)]).optional(),
 })
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -87,6 +88,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       total:    Number(order.total),
       discount: Number(order.discount),
       netTotal: Number(order.netTotal),
+      orderType: Number(order.orderType ?? 0), // ✅ eklendi
       items: order.items.map(it => ({
         ...it,
         unitPrice:   Number(it.unitPrice),
@@ -131,6 +133,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       storLines,
       accessoryLines,
       deliveryAt, // ✅ frontend’den gelen "YYYY-MM-DD" | null
+      orderType,  // ✅ eklendi
     } = parsed.data
 
     // Bu siparişe ait mevcut kalem id’leri (sahiplik kontrolü)
@@ -238,6 +241,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         : null
     }
 
+    // ✅ orderType güncelle
+    if (typeof orderType !== 'undefined') {
+      headerPatch.orderType = orderType;
+    }
+
     if (Object.keys(headerPatch).length) {
       ops.push(prisma.order.update({ where: { id: orderId }, data: headerPatch }))
     }
@@ -296,6 +304,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       total:    Number(updated.total),
       discount: Number(updated.discount),
       netTotal: Number(updated.netTotal),
+      orderType: Number(updated.orderType ?? 0), // ✅ eklendi
       items: updated.items.map(it => ({
         ...it,
         unitPrice:   Number(it.unitPrice),

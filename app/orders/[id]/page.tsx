@@ -35,7 +35,8 @@ type Order = {
   status: Status;
   deliveryAt?: string | null;
   netTotal?: number;
-  discount?: number
+  discount?: number;
+  orderType?: number;
 };
 
 type InsertSlot = { title: string; index: number } | null;
@@ -189,6 +190,7 @@ export default function EditOrderPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [status, setStatus] = useState<Status>("pending");
+  const [orderType, setOrderType] = useState(0);
   const [deliveryAt, setDeliveryAt] = useState<string>(""); // YYYY-MM-DD
 
   const [saving, setSaving] = useState(false);
@@ -243,6 +245,7 @@ export default function EditOrderPage() {
         setNetTotal(ord.netTotal || 0);
         setDiscount(ord.discount || 0);
         setTotalPrice(ord.total || 0);
+        setOrderType(ord.orderType || 0);
 
 
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
@@ -559,6 +562,7 @@ export default function EditOrderPage() {
         note: orderNote || null,
         status,
         deliveryAt: deliveryAt || null, // ✅ API artık bekliyor (YYYY-MM-DD)
+        orderType: orderType,
         items: [...payloadItems, ...deleteOps],
       };
 
@@ -761,11 +765,11 @@ export default function EditOrderPage() {
         />
 
         {/* Düzenlenebilir alanlar */}
-        <div className="grid grid-cols-4 gap-3 my-4 print:hidden">
+        <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
           <div>
             <label className="text-sm block">Durum</label>
             <select
-              className="select mt-1 w-[150px]"
+              className="select mt-1 w-full"
               value={status}
               onChange={(e) => setStatus(e.target.value as Status)}
             >
@@ -779,10 +783,21 @@ export default function EditOrderPage() {
             <label className="text-sm block">Teslim Tarihi</label>
             <input
               type="date"
-              className="select mt-1 w-[150px]"
+              className="select mt-1 w-full"
               value={deliveryAt}
               onChange={(e) => setDeliveryAt(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="text-sm block">Sipariş Tipi</label>
+            <select
+              className="select mt-1 w-full"
+              value={orderType}
+              onChange={(e) => setOrderType(Number(e.target.value))}
+            >
+              <option value="0">Yeni Sipariş</option>
+              <option value="1">Sipariş Teklifi</option>
+            </select>
           </div>
           <div></div>
           <div className="mt-4 text-[10px] flex gap-4 print:hidden justify-end">

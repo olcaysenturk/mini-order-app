@@ -354,6 +354,7 @@ model Order {
   accessoryLines Json?
   deletedAt      DateTime?
   deliveryAt     DateTime?
+  orderType      Int         @default(0)
 
   // ✅ only Branch relation (no Dealer)
   branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Restrict)

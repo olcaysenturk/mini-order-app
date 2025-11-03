@@ -86,6 +86,11 @@ export function AuthedNav() {
       label: 'Siparişler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>,
     },
+     {
+      href: '/offers',
+      label: 'Teklifler',
+      icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>,
+    },
     // ✅ Takvim eklendi
     {
       href: '/calendar',

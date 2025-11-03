@@ -269,7 +269,7 @@ export default function OrdersPage() {
 
   // 🔹 Yalnızca orderType = 0 olanları temel liste olarak kullan
   const typeFiltered = useMemo(
-    () => orders.filter((o) => o.orderType === 0),
+    () => orders.filter((o) => o.orderType === 1),
     [orders]
   );
 
@@ -340,7 +340,7 @@ export default function OrdersPage() {
       const data: Order[] = await res.json();
 
       // 🔹 Sadece orderType = 0 olanları al
-      const onlyOrders = data.filter((o) => o.orderType === 0);
+      const onlyOrders = data.filter((o) => o.orderType === 1);
       setOrders(onlyOrders);
     } catch (e: any) {
       if (e?.name !== "AbortError") setError(e?.message || "Bilinmeyen hata");
@@ -723,48 +723,7 @@ export default function OrdersPage() {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Siparişler</h1>
           <div className="flex flex-wrap items-center gap-2">
-            <div
-              role="tablist"
-              aria-label="Durum filtresi"
-              className="inline-flex rounded-xl border border-neutral-200 bg-white p-0.5"
-            >
-              {(
-                [
-                  { k: "active", label: "Aktif" },
-                  { k: "completed", label: "Tamamlanan" },
-                  { k: "all", label: "Tümü" },
-                ] as { k: HeaderFilter; label: string }[]
-              ).map(({ k, label }) => (
-                <button
-                  key={k}
-                  role="tab"
-                  aria-selected={headerFilter === k}
-                  onClick={() => setHeaderFilter(k)}
-                  className={`px-3 py-1.5 text-sm rounded-[10px] transition ${
-                    headerFilter === k
-                      ? "bg-indigo-600 text-white"
-                      : "text-neutral-700 hover:bg-neutral-50"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Sayfa boyutu */}
-            <div className="hidden sm:flex items-center gap-2 ms-2">
-              <span className="text-xs text-neutral-500">Sayfa:</span>
-              <select
-                className="select h-8 px-2 text-xs"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value) as any)}
-                aria-label="Sayfa boyutu"
-              >
-                <option value={10}>10</option>
-                <option value={20}>20</option>
-                <option value={50}>50</option>
-              </select>
-            </div>
+            
 
             <button
               className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
@@ -813,7 +772,7 @@ export default function OrdersPage() {
 
         {/* Filtreler */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-3 sm:p-4">
-          <div className="grid w-full items-end gap-2 sm:grid-cols-3">
+          <div className="grid w-full items-end gap-2 sm:grid-cols-2">
             {/* Arama */}
             <div className="rounded-xl border border-neutral-200 bg-white p-3">
               <label className="mb-1 block text-xs font-semibold text-neutral-500">
@@ -861,7 +820,7 @@ export default function OrdersPage() {
             </div>
 
             {/* Sıralama */}
-            <div className="rounded-xl border border-neutral-200 p-3">
+            <div className="rounded-xl border border-neutral-200 p-3 hidden">
               <div className="mb-2 text-xs font-semibold text-neutral-500">
                 Teslim tarihine göre sırala
               </div>
@@ -904,7 +863,7 @@ export default function OrdersPage() {
             ].join(" ")}
           >
             {/* Ödeme Durumu */}
-            <div className="rounded-xl border border-neutral-200 p-3">
+            <div className="rounded-xl border border-neutral-200 p-3 hidden">
               <div className="mb-2 text-xs font-semibold text-neutral-500">
                 Ödeme Durumu
               </div>
@@ -936,7 +895,7 @@ export default function OrdersPage() {
             </div>
 
             {/* Ödeme Yöntemi */}
-            <div className="rounded-xl border border-neutral-200 p-3">
+            <div className="rounded-xl border border-neutral-200 p-3 hidden">
               <div className="mb-2 text-xs font-semibold text-neutral-500">
                 Ödeme Yöntemi
               </div>
@@ -991,7 +950,7 @@ export default function OrdersPage() {
         <div className="mt-4 space-y-4 min-h-[100vh]">
           {typeFiltered.length === 0 && !loading && (
             <div className="text-sm text-neutral-600">
-              Gösterilecek sipariş yok (sadece orderType=0 listelenir).
+              Gösterilecek sipariş yok (sadece Sipariş Teklifi listelenir).
             </div>
           )}
           {orders.length === 0 && loading && <InlineLoader />}
@@ -1037,7 +996,7 @@ export default function OrdersPage() {
                               {order.dealer.name || "—"}
                             </div>
                           </div>
-                          <StatusBadge s={order.status} />
+                          {/* <StatusBadge s={order.status} /> */}
                         </div>
 
                         <div className="grid gap-2 text-sm sm:grid-cols-2 sm:gap-2 w-full md:w-[350px]">
@@ -1053,10 +1012,10 @@ export default function OrdersPage() {
                               <strong>{order.customerPhone || "—"}</strong>
                             </span>
                           </div>
-                          <div className="min-w-0 flex">
+                          <div className="min-w-0 flex hidden">
                             <DuePill info={getDueInfo(order.deliveryDate)} />
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 hidden">
                             <span
                               className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"
                               title="Oluşturma"
@@ -1083,7 +1042,7 @@ export default function OrdersPage() {
                       {/* Sağ: finans rozetleri + aksiyonlar */}
                       <div className="flex w-full flex-col items-end gap-2 md:w-auto">
                         {/* Finans özet (responsive grid) */}
-                        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
+                        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 hidden">
                           <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
                             <span>TOPLAM</span>{" "}
                             <strong className="ms-1">
@@ -1148,8 +1107,8 @@ export default function OrdersPage() {
                             Önizleme / Düzenle
                           </button>
 
-                          <button
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                          {/* <button
+                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 hidden "
                             onClick={() => openPayModal(order.id)}
                             title="Ödeme Ekle"
                           >
@@ -1164,7 +1123,8 @@ export default function OrdersPage() {
                               />
                             </svg>
                             Ödeme Ekle
-                          </button>
+                          </button> */}
+                          <div></div>
 
                           <button
                             className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
@@ -1211,7 +1171,7 @@ export default function OrdersPage() {
                     </div>
 
                     {/* Tahsilat Progress */}
-                    <div className="mt-3">
+                    <div className="mt-3 hidden">
                       <Progress
                         value={Math.max(
                           0,
@@ -1289,7 +1249,7 @@ export default function OrdersPage() {
                         </div>
 
                         {/* Ödemeler */}
-                        <div className="rounded-2xl border border-neutral-200">
+                        <div className="rounded-2xl border border-neutral-200 hidden">
                           <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
                             <div className="text-sm font-semibold">
                               Ödemeler
