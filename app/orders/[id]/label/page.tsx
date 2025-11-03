@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { toast } from 'sonner'
 
 type LineStatus = 'pending' | 'processing' | 'completed' | 'cancelled' | 'success';
 
@@ -36,10 +37,14 @@ const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR');
 // ufak yardımcı — koşullu class
 const cx = (...arr: Array<string | false | null | undefined>) => arr.filter(Boolean).join(' ');
 
+/* ====== basit toast ====== */
+
+
 export default function OrderLabelsThermal() {
   const { id } = useParams<{ id: string }>();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   // ekran seçenekleri
   const [replicateByQty, setReplicateByQty] = useState(true); // adet kadar kopya
@@ -55,6 +60,8 @@ export default function OrderLabelsThermal() {
         const res = await fetch(`/api/orders/${id}`, { cache: 'no-store' });
         if (!res.ok) throw new Error('Sipariş alınamadı');
         setOrder(await res.json());
+      } catch (e:any) {
+        toast.error(e?.message || 'Sipariş alınamadı');
       } finally {
         setLoading(false);
       }
@@ -68,7 +75,7 @@ export default function OrderLabelsThermal() {
 
     const isOk = (st?: string) => {
       const s = String(st || '').toLowerCase();
-      return s === 'processing' || s === 'success' || s === 'completed';
+      return s === 'processing';
     };
 
     const filtered = order.items.filter((it) => isOk(it.lineStatus));
@@ -109,6 +116,39 @@ export default function OrderLabelsThermal() {
     })();
   }, [order, labels]);
 
+  /* ====== Yazdır butonu: önce status=processing (atölye/workshop) sonra print ====== */
+  const setWorkshopAndPrint = async () => {
+    if (!order?.id) return;
+    setPrinting(true);
+    try {
+      // PATCH ile sipariş durumunu processing yap (workshop aşaması)
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'workshop' }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(t || 'Durum güncellenemedi');
+      }
+      toast.success('Sipariş atölyeye aktarıldı');
+      
+      // İsteğe bağlı: en güncel veriyi tekrar çek
+      try {
+        const refreshed = await fetch(`/api/orders/${order.id}`, { cache: 'no-store' });
+        if (refreshed.ok) setOrder(await refreshed.json());
+      } catch {
+        console.log("")
+      }
+      // Ardından yazdır
+      window.print();
+    } catch (e: any) {
+      toast.error(e?.message || 'İşlem başarısız');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-6">
@@ -136,7 +176,7 @@ export default function OrderLabelsThermal() {
               <div className="flex flex-col gap-1">
                 <h1 className="text-lg font-semibold tracking-tight">Barkod Etiketleri</h1>
                 <div className="flex items-center gap-2">
-                  <Badge>Yalnızca <b className="ml-2">Hazırlanıyor + Tamamlanan satırlar</b></Badge>
+                  <Badge>Yalnızca<b className="ml-2">İşlemde olan satırlar</b></Badge>
                   <Badge muted>
                     Satır: {filteredCount}/{totalCount}
                   </Badge>
@@ -145,7 +185,7 @@ export default function OrderLabelsThermal() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* 
+                {/* Toggle’lar istenirse açılır:
                 <Toggle
                   label="Adet kadar çoğalt"
                   pressed={replicateByQty}
@@ -155,20 +195,26 @@ export default function OrderLabelsThermal() {
                   label="Notları göster"
                   pressed={showNotes}
                   onClick={() => setShowNotes((v) => !v)}
-                /> 
+                />
                 */}
                 <button
                   className={cx(
                     'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium',
-                    labelCount === 0
+                    labelCount === 0 || printing
                       ? 'bg-zinc-200 text-zinc-500 cursor-not-allowed'
                       : 'bg-black text-white hover:bg-black/90'
                   )}
-                  onClick={() => window.print()}
-                  disabled={labelCount === 0}
-                  title={labelCount === 0 ? 'Yazdırılacak satır yok' : 'Yazdır'}
+                  onClick={setWorkshopAndPrint}
+                  disabled={labelCount === 0 || printing}
+                  title={
+                    labelCount === 0
+                      ? 'Yazdırılacak satır yok'
+                      : printing
+                      ? 'İşleniyor…'
+                      : 'Atölyeye aktar ve yazdır'
+                  }
                 >
-                  🖨️ Yazdır
+                  {printing ? 'İşleniyor…' : '🖨️ Yazdır (Atölye)'}
                 </button>
               </div>
             </div>
@@ -198,7 +244,7 @@ export default function OrderLabelsThermal() {
       </div>
 
       {/* Global stiller (mm ölçüleri + print) */}
-<style jsx global>{`
+      <style jsx global>{`
   :root {
     --label-w: 60mm;
     --label-h: 40mm;
@@ -323,7 +369,7 @@ function EmptyState() {
       <div className="mb-2 text-5xl">🧾</div>
       <div className="text-sm font-medium text-zinc-800">Yazdırılacak etiket yok</div>
       <div className="mt-1 text-xs text-zinc-600">
-        Yalnızca <b>Hazırlanıyor</b> ve <b>Tamamlanan</b> durumundaki satırlar etiketlenir.
+        Yalnızca <b>Hazırlanıyor</b> durumundaki satırlar etiketlenir.
       </div>
     </div>
   );

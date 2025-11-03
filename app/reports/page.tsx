@@ -19,7 +19,7 @@ import {
 } from "recharts";
 
 /* -------------------- helpers -------------------- */
-type Status = "pending" | "processing" | "completed" | "cancelled";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
 type FilterKey = "active" | "completed" | "all";
 const STATUS_PRESETS: Record<FilterKey, string> = {
   active: "pending,processing,completed",

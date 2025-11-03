@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 /* ========= Types ========= */
-type Status = "pending" | "processing" | "completed" | "cancelled";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
 type HeaderFilter = "active" | "completed" | "all";
 
 type Order = {
@@ -28,12 +28,14 @@ const statusLabel: Record<Status, string> = {
   processing: "İşlemde",
   completed: "Tamamlandı",
   cancelled: "İptal",
+  workshop: "Atölyede"
 };
 const statusDot: Record<Status, string> = {
   pending: "bg-amber-500",
   processing: "bg-blue-600",
   completed: "bg-emerald-600",
   cancelled: "bg-rose-600",
+  workshop: "bg-blue-100",
 };
 const fmt = (n: number) =>
   new Intl.NumberFormat("tr-TR", {
@@ -445,6 +447,7 @@ export default function OrdersCalendarPage() {
                 <option value="processing">Durum: İşlemde</option>
                 <option value="completed">Durum: Tamamlandı</option>
                 <option value="cancelled">Durum: İptal</option>
+                <option value="workshop">Durum: Atölyede</option>
               </select>
             </div>
             <div>

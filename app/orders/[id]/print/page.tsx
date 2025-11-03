@@ -6,7 +6,7 @@ import { parseYMDToLocalDate } from "@/app/lib/date";
 import { PageOverlay } from "@/app/components/PageOverlay";
 
 /* ========= Types ========= */
-type Status = "pending" | "processing" | "completed" | "cancelled";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
 type Variant = { id: string; name: string; unitPrice: number };
 type Category = { id: string; name: string; variants: Variant[] };
 type LineItem = {
@@ -81,6 +81,7 @@ const statusLabelMap: Record<Status, string> = {
   processing: "İşlemde",
   completed: "Tamamlandı",
   cancelled: "İptal",
+  workshop: "Atölyede"
 };
 
 /* ========= Component ========= */

@@ -76,6 +76,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Toaster 
               richColors        // daha canlı renkler
               position="bottom-right"
+              className="print:hidden"
               theme="light"    // 'light' | 'dark' | 'system'
               closeButton
               expand            // aynı tip toasları gruplayıp genişletir

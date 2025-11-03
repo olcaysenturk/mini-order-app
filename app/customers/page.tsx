@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
-type Status = 'pending' | 'processing' | 'completed' | 'cancelled'
+type Status = 'pending' | 'processing' | 'completed' | 'cancelled' | 'workshop'
 
 type Customer = {
   id: string
@@ -39,6 +39,7 @@ const statusLabel: Record<Status, string> = {
   processing: 'İşlemde',
   completed: 'Tamamlandı',
   cancelled: 'İptal',
+  workshop: "Atölyede"
 }
 
 function StatusBadge({ s }: { s: Status }) {
@@ -48,6 +49,7 @@ function StatusBadge({ s }: { s: Status }) {
     processing: `${base} bg-blue-50 text-blue-700 border-blue-200`,
     completed: `${base} bg-emerald-50 text-emerald-700 border-emerald-200`,
     cancelled: `${base} bg-rose-50 text-rose-700 border-rose-200`,
+    workshop: `${base} bg-blue-50 text-blue-700 border-blue-200`,
   }
   return <span className={cls[s]}>{statusLabel[s]}</span>
 }

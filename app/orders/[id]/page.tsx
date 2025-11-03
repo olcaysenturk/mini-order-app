@@ -7,7 +7,7 @@ import { toast } from "sonner";
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
 type Category = { id: string; name: string; variants: Variant[] };
-type Status = "pending" | "processing" | "completed" | "cancelled";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
 
 type LineItem = {
   id: string;
@@ -88,12 +88,14 @@ const statusLabelMap: Record<Status, string> = {
   processing: "İşlemde",
   completed: "Tamamlandı",
   cancelled: "İptal",
+  workshop: "Atölyede"
 };
 const statusDot: Record<Status, string> = {
   pending: "bg-amber-500",
   processing: "bg-blue-500",
   completed: "bg-emerald-600",
   cancelled: "bg-rose-600",
+  workshop: "bg-blue-100",
 };
 
 // ISO/Date → YYYY-MM-DD (input için)
@@ -775,6 +777,7 @@ export default function EditOrderPage() {
             >
               <option value="pending">Beklemede</option>
               <option value="processing">İşlemde</option>
+              <option value="workshop">Atölyede</option>
               <option value="completed">Tamamlandı</option>
               <option value="cancelled">İptal</option>
             </select>
@@ -805,6 +808,7 @@ export default function EditOrderPage() {
             <LegendDot c={statusDot.processing} label="İşlemde" />
             <LegendDot c={statusDot.completed} label="Tamamlandı" />
             <LegendDot c={statusDot.cancelled} label="İptal" />
+            <LegendDot c={statusDot.workshop} label="Atölyede" />
           </div>
         </div>
 
