@@ -198,9 +198,9 @@ export default function OrderLabelsThermal() {
       {/* Global stiller (mm ölçüleri + print) */}
       <style jsx global>{`
         :root {
-          --label-w: 70mm;
-          --label-h: 70mm;
-          --pad: 3mm;
+          --label-w: 60mm;
+          --label-h: 40mm;
+          --pad: 1mm;
         }
         .labels-grid {
           display: grid;
@@ -324,7 +324,7 @@ function Label70({
           )}
         </div>
 
-        <div className="space-y-1 text-[22px]">
+        <div className="space-y-1 text-[14px]">
           <div>
             <b>Tür :</b> {typeName}
           </div>
