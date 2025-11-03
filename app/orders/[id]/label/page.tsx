@@ -62,13 +62,13 @@ export default function OrderLabelsThermal() {
     run();
   }, [id]);
 
-  // SADECE success/completed
+  // processing + success/completed
   const { labels, filteredCount, totalCount } = useMemo(() => {
     if (!order) return { labels: [] as any[], filteredCount: 0, totalCount: 0 };
 
     const isOk = (st?: string) => {
       const s = String(st || '').toLowerCase();
-      return s === 'success' || s === 'completed' || s === 'processing';
+      return s === 'processing' || s === 'success' || s === 'completed';
     };
 
     const filtered = order.items.filter((it) => isOk(it.lineStatus));
@@ -113,7 +113,7 @@ export default function OrderLabelsThermal() {
     return (
       <div className="p-6">
         <div className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4">
-          <div className="h-6 w-44 rounded bg-gray-200 mb-4" />
+          <div className="mb-4 h-6 w-44 rounded bg-gray-200" />
           <div className="grid grid-cols-2 gap-3">
             <div className="h-16 rounded bg-gray-100" />
             <div className="h-16 rounded bg-gray-100" />
@@ -130,13 +130,13 @@ export default function OrderLabelsThermal() {
     <div className="min-h-screen bg-gradient-to-b from-zinc-50 to-white print:bg-white print:from-white print:to-white">
       <div className="mx-auto max-w-[1200px] p-4 print:p-0">
         {/* Üst çubuk */}
-        <div className="print:hidden sticky top-0 z-10 mb-4">
+        <div className="sticky top-0 z-10 mb-4 print:hidden">
           <div className="rounded-2xl border border-zinc-200 bg-white/70 backdrop-blur supports-[backdrop-filter]:bg-white/60 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3 p-4">
               <div className="flex flex-col gap-1">
                 <h1 className="text-lg font-semibold tracking-tight">Barkod Etiketleri</h1>
                 <div className="flex items-center gap-2">
-                  <Badge>Yalnızca <b className='ml-2'>Tamamlanan siparişler</b></Badge>
+                  <Badge>Yalnızca <b className="ml-2">Hazırlanıyor + Tamamlanan satırlar</b></Badge>
                   <Badge muted>
                     Satır: {filteredCount}/{totalCount}
                   </Badge>
@@ -145,7 +145,8 @@ export default function OrderLabelsThermal() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* <Toggle
+                {/* 
+                <Toggle
                   label="Adet kadar çoğalt"
                   pressed={replicateByQty}
                   onClick={() => setReplicateByQty((v) => !v)}
@@ -154,7 +155,8 @@ export default function OrderLabelsThermal() {
                   label="Notları göster"
                   pressed={showNotes}
                   onClick={() => setShowNotes((v) => !v)}
-                /> */}
+                /> 
+                */}
                 <button
                   className={cx(
                     'inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium',
@@ -177,7 +179,7 @@ export default function OrderLabelsThermal() {
         <div className="labels-grid">
           {labels.map(({ base, key, barcodeValue }) => (
             <div className="sheet rounded-xl border border-zinc-200 bg-white shadow-sm" key={key}>
-              <Label70
+              <Label60x40
                 it={base}
                 showNote={showNotes}
                 qtyOnLabel={replicateByQty ? 1 : Number(base.qty || 1)}
@@ -196,43 +198,83 @@ export default function OrderLabelsThermal() {
       </div>
 
       {/* Global stiller (mm ölçüleri + print) */}
-      <style jsx global>{`
-        :root {
-          --label-w: 60mm;
-          --label-h: 40mm;
-          --pad: 1mm;
-        }
-        .labels-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(var(--label-w), 1fr));
-          gap: 14px;
-        }
-        .sheet {
-          width: var(--label-w);
-          height: var(--label-h);
-          page-break-after: always;
-        }
-        @media print {
-          @page { size: var(--label-w) var(--label-h); margin: 0; }
-          html, body {
-            width: var(--label-w);
-            height: var(--label-h);
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            background: #fff !important;
-          }
-          .labels-grid { display: block; }
-          .sheet {
-            width: var(--label-w) !important;
-            height: var(--label-h) !important;
-            border: none !important;
-            box-shadow: none !important;
-            break-after: page;
-            page-break-after: always;
-            border-radius: 0 !important;
-          }
-        }
-      `}</style>
+<style jsx global>{`
+  :root {
+    --label-w: 60mm;
+    --label-h: 40mm;
+    --pad: 1mm; /* ekran için; print'te 0'a çekiyoruz */
+  }
+
+  /* Ekranda grid boşluklu dursun */
+  .labels-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--label-w), 1fr));
+    gap: 14px;
+  }
+  .sheet {
+    width: var(--label-w);
+    height: var(--label-h);
+    page-break-after: always;
+  }
+
+  @media print {
+    /* Kağıt boyutu ve sıfır marj */
+    @page {
+      size: var(--label-w) var(--label-h);
+      margin: 0;
+    }
+
+    /* Evrensel sıfırlama (print sırasında) */
+    * {
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent !important;
+    }
+
+    html, body {
+      width: var(--label-w) !important;
+      height: var(--label-h) !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      line-height: 1 !important;
+    }
+
+    /* Ekran stillerini iptal et: gradient, container p-4, max-width vs. */
+    .min-h-screen { background: #fff !important; }
+    .mx-auto, .max-w\\[1200px\\], .p-4 { 
+      max-width: none !important;
+      width: var(--label-w) !important;
+      padding: 0 !important;
+      margin: 0 !important;
+    }
+
+    /* Grid’i tek öğe akışına çevir, gap=0 */
+    .labels-grid {
+      display: block !important;
+      gap: 0 !important;
+    }
+
+    /* Kart kabuğu: tam etiket boyutu, süssüz */
+    .sheet {
+      width: var(--label-w) !important;
+      height: var(--label-h) !important;
+      background: #fff !important;
+      page-break-after: always;
+      break-after: page;
+      page-break-inside: avoid;
+      border-radius: 0 !important;
+    }
+
+    /* Etiket iç pedini de 0 yap (komponent p-[var(--pad)] kullanıyor) */
+    :root { --pad: 0mm; }
+
+    /* Header bar zaten print:hidden, yine de garanti */
+    .print\\:hidden { display: none !important; }
+  }
+`}</style>
+
     </div>
   );
 }
@@ -281,14 +323,14 @@ function EmptyState() {
       <div className="mb-2 text-5xl">🧾</div>
       <div className="text-sm font-medium text-zinc-800">Yazdırılacak etiket yok</div>
       <div className="mt-1 text-xs text-zinc-600">
-        Yalnızca <b>İşemde ve tamamlanmış</b> durumundaki satırlar etiketlenir.
+        Yalnızca <b>Hazırlanıyor</b> ve <b>Tamamlanan</b> durumundaki satırlar etiketlenir.
       </div>
     </div>
   );
 }
 
-/* ==== Tek etiket (70×70 mm) ==== */
-function Label70({
+/* ==== Tek etiket (60×40 mm) ==== */
+function Label60x40({
   it,
   qtyOnLabel,
   showNote,
@@ -330,8 +372,10 @@ function Label70({
           </div>
           <div>
             <b>Adet :</b> {qty}
-            <br/>
-            <b>Ölçü :</b> {w}×{h} cm
+            <br />
+            <b>En :</b> {w} cm
+            <br />
+            <b>Boy :</b> {h} cm
             {isStor && (
               <>
                 {' '}<span>–</span>{' '}
@@ -339,7 +383,7 @@ function Label70({
               </>
             )}
           </div>
-          <div><b>Pile Sıklığı :</b> {density}x</div>
+          <b>Pile Sıklığı :</b> {density}x<br/>
           {/* <div><b>Birim :</b> {fmt(unit)}</div> */}
           {showNote && it.note ? (
             <div className="mt-1 line-clamp-3 text-[14px]">

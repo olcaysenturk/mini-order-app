@@ -189,7 +189,7 @@ export default async function Home() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
           <h2 className="text-2xl sm:text-3xl font-bold text-center">İhtiyacın olan her şey</h2>
           <p className="mt-2 text-center text-neutral-600">
-            Kategoriler, ürünlerlar, otomatik fiyat hesaplama ve tek tıkla yazdırma.
+            Kategoriler, ürünler, otomatik fiyat hesaplama ve tek tıkla yazdırma.
           </p>
 
           <div className="mt-8 grid md:grid-cols-3 gap-5">
@@ -273,7 +273,7 @@ export default async function Home() {
               <h3 className="text-xl font-semibold">Nasıl çalışır?</h3>
               <ol className="mt-4 grid grid-cols-1 gap-3 text-sm">
                 {[
-                  { t: "1) Katalog oluştur", d: "Kategori & ürünları tanımla. Fiyat gir." },
+                  { t: "1) Katalog oluştur", d: "Kategori & ürünleri tanımla. Fiyat gir." },
                   { t: "2) Sipariş gir", d: "Müşteri bilgisi, ölçüler, pile sıklığı; sistem otomatik hesaplar." },
                   { t: "3) Yazdır & paylaş", d: "A4 düzeniyle çıktı al veya PDF paylaş." },
                 ].map((s) => (
