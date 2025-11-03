@@ -7,24 +7,32 @@ import { authOptions } from '@/app/api/auth/[...nextauth]/options'
 
 export const runtime = 'nodejs'
 
-/* ---------- Date helpers ---------- */
-const startOfDay = (d = new Date()) => { const x = new Date(d); x.setHours(0,0,0,0); return x }
-const endOfDay   = (d = new Date()) => { const x = new Date(d); x.setHours(23,59,59,999); return x }
-const startOfWeek = (d = new Date()) => {
-  const x = new Date(d); const day = (x.getDay() + 6) % 7; x.setHours(0,0,0,0); x.setDate(x.getDate() - day); return x
+/* ---------- Consts ---------- */
+const IST_TZ = 'Europe/Istanbul' as const
+
+/* ---------- Date helpers (yalnızca aralık param/parsing için) ---------- */
+const parseISODate = (s: string | null) => {
+  if (!s) return null
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d
 }
-const startOfMonth = (d = new Date()) => new Date(d.getFullYear(), d.getMonth(), 1, 0,0,0,0)
-const startOfYear  = (d = new Date()) => new Date(d.getFullYear(), 0, 1, 0,0,0,0)
 
 const DEFAULT_STATUSES: OrderStatus[] = ['pending','processing','completed']
 function parseStatuses(s: string | null): OrderStatus[] {
   if (!s) return DEFAULT_STATUSES
-  const allowed: OrderStatus[] = ['pending','processing','completed','cancelled']
+  const allowed: OrderStatus[] = ['pending','processing','completed','cancelled','workshop']
   const set = new Set(
     s.split(',').map(x => x.trim()).filter(Boolean) as OrderStatus[]
   )
   const valid = [...set].filter(x => allowed.includes(x))
   return valid.length ? (valid as OrderStatus[]) : DEFAULT_STATUSES
+}
+
+// Opsiyonel branch filtresi SQL parçası
+function branchFilterSql(branchId: string | null) {
+  return branchId
+    ? Prisma.sql` AND o."branchId" = ${branchId} `
+    : Prisma.sql``
 }
 
 /* ---------- Handler ---------- */
@@ -37,60 +45,71 @@ export async function GET(req: NextRequest) {
     const section = (req.nextUrl.searchParams.get('section') || 'overview').toLowerCase()
     const statuses = parseStatuses(req.nextUrl.searchParams.get('status'))
 
-    const now = new Date()
-    const sod = startOfDay(now)
-    const eod = endOfDay(now)
-    const sow = startOfWeek(now)
-    const som = startOfMonth(now)
-    const soy = startOfYear(now)
-
+    // Status array
     const statusArray = Prisma.sql`ARRAY[${Prisma.join(statuses)}]::"OrderStatus"[]`
+    // Global kural: orderType = 1 dahil edilmez
+    const orderTypeFilter = Prisma.sql` AND COALESCE(o."orderType", 0) <> 1 `
 
-    /* ======= SECTION: OVERVIEW ======= */
+    /* ======= SECTION: OVERVIEW (İstanbul gün/hafta/ay/yıl) ======= */
     if (section === 'overview') {
       const totalsRow = await prisma.$queryRaw<
         { day: number | null; week: number | null; month: number | null; year: number | null }[]
       >(Prisma.sql`
+        WITH now_ist AS (
+          SELECT (NOW() AT TIME ZONE ${IST_TZ}) AS ts
+        ),
+        bounds AS (
+          SELECT
+            (SELECT ts::date               FROM now_ist) AS today_d,
+            (SELECT date_trunc('week',  ts)::date FROM now_ist) AS sow_d,
+            (SELECT date_trunc('month', ts)::date FROM now_ist) AS som_d,
+            (SELECT date_trunc('year',  ts)::date FROM now_ist) AS soy_d
+        )
         SELECT
-          COALESCE(SUM(CASE WHEN o."createdAt" >= ${sod} AND o."createdAt" <= ${eod} THEN o."netTotal" ELSE 0 END), 0)::float AS day,
-          COALESCE(SUM(CASE WHEN o."createdAt" >= ${sow} AND o."createdAt" <= ${eod} THEN o."netTotal" ELSE 0 END), 0)::float AS week,
-          COALESCE(SUM(CASE WHEN o."createdAt" >= ${som} AND o."createdAt" <= ${eod} THEN o."netTotal" ELSE 0 END), 0)::float AS month,
-          COALESCE(SUM(CASE WHEN o."createdAt" >= ${soy} AND o."createdAt" <= ${eod} THEN o."netTotal" ELSE 0 END), 0)::float AS year
-        FROM "Order" o
+          COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date = b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS day,
+          COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date >= b.sow_d   AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date <= b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS week,
+          COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date >= b.som_d   AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date <= b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS month,
+          COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date >= b.soy_d   AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date <= b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS year
+        FROM "Order" o, bounds b
         WHERE o."tenantId" = ${tenantId}
           AND o."status" = ANY(${statusArray})
+          ${orderTypeFilter}
       `)
       const totals = totalsRow[0] ?? { day: 0, week: 0, month: 0, year: 0 }
 
-      const days = 30
-      const since = startOfDay(new Date(now))
-      since.setDate(since.getDate() - (days - 1))
+      // Son 30 gün (İstanbul gününe göre)
       const rows = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
         Prisma.sql`
-          SELECT
-            DATE_TRUNC('day', o."createdAt")::date AS d,
-            COALESCE(SUM(o."netTotal"), 0)::float AS total
-          FROM "Order" o
-          WHERE o."tenantId" = ${tenantId}
-            AND o."createdAt" >= ${since} AND o."createdAt" <= ${eod}
-            AND o."status" = ANY(${statusArray})
-          GROUP BY 1
-          ORDER BY 1 ASC
+          WITH days AS (
+            SELECT generate_series(
+              (NOW() AT TIME ZONE ${IST_TZ})::date - INTERVAL '29 day',
+              (NOW() AT TIME ZONE ${IST_TZ})::date,
+              INTERVAL '1 day'
+            )::date AS d
+          ),
+          agg AS (
+            SELECT
+              (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
+              COALESCE(SUM(o."netTotal"), 0)::float AS total
+            FROM "Order" o
+            WHERE o."tenantId" = ${tenantId}
+              AND o."status" = ANY(${statusArray})
+              ${orderTypeFilter}
+            GROUP BY 1
+          )
+          SELECT d.d, COALESCE(a.total, 0)::float AS total
+          FROM days d
+          LEFT JOIN agg a ON a.d = d.d
+          ORDER BY d.d ASC
         `
       )
-      const map = new Map<string, number>()
-      for (const r of rows) {
-        const key = r.d.toISOString().slice(0,10)
-        map.set(key, Number(r.total ?? 0))
-      }
-      const series: { date: string; total: number }[] = []
-      for (let i = 30 - 1; i >= 0; i--) {
-        const d = new Date(now); d.setDate(d.getDate() - i)
-        const key = d.toISOString().slice(0,10)
-        series.push({ date: key, total: map.get(key) ?? 0 })
-      }
 
-      const payload = {
+      const series = rows.map(r => ({
+        date: r.d.toISOString().slice(0,10),
+        total: Number(r.total ?? 0),
+      }))
+
+      return NextResponse.json({
         mode: 'from_orders_netTotal',
         statuses,
         currency: 'TRY',
@@ -101,8 +120,7 @@ export async function GET(req: NextRequest) {
           year: Number(totals.year ?? 0),
         },
         series30d: series,
-      }
-      return NextResponse.json(payload, { headers: { 'Cache-Control': 'private, max-age=60' } })
+      }, { headers: { 'Cache-Control': 'private, max-age=60' } })
     }
 
     /* ======= SECTION: PAYMENTS ======= */
@@ -117,7 +135,10 @@ export async function GET(req: NextRequest) {
           WITH paid AS (
             SELECT op."orderId", SUM(op."amount")::float AS paid
             FROM "OrderPayment" op
-            JOIN "Order" o2 ON o2."id" = op."orderId" AND o2."tenantId" = ${tenantId} AND o2."status" = ANY(${statusArray})
+            JOIN "Order" o2 ON o2."id" = op."orderId"
+                           AND o2."tenantId" = ${tenantId}
+                           AND o2."status" = ANY(${statusArray})
+                           AND COALESCE(o2."orderType",0) <> 1
             WHERE op."tenantId" = ${tenantId}
             GROUP BY op."orderId"
           )
@@ -130,6 +151,7 @@ export async function GET(req: NextRequest) {
           LEFT JOIN paid p ON p."orderId" = o."id"
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
         `
       )
       const s = summary[0] ?? { paid_amount: 0, paid_count: 0, unpaid_amount: 0, unpaid_count: 0 }
@@ -144,54 +166,64 @@ export async function GET(req: NextRequest) {
           WHERE op."tenantId" = ${tenantId}
             AND o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY 1
           ORDER BY amount DESC
         `
       )
 
-      const days = 30
-      const since = startOfDay(new Date(now))
-      since.setDate(since.getDate() - (days - 1))
-
-      const byOrder = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
+      // Son 30 gün kümülatif (İstanbul gününe göre)
+      const rowsOrders = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
         Prisma.sql`
-          SELECT DATE_TRUNC('day', o."createdAt")::date AS d,
+          SELECT (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
                  COALESCE(SUM(o."netTotal"), 0)::float  AS total
           FROM "Order" o
           WHERE o."tenantId" = ${tenantId}
-            AND o."createdAt" >= ${since} AND o."createdAt" <= ${eod}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY 1
-          ORDER BY 1 ASC
         `
       )
-      const byPay = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
+      const rowsPaid = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
         Prisma.sql`
-          SELECT DATE_TRUNC('day', op."paidAt")::date AS d,
+          SELECT (op."paidAt" AT TIME ZONE ${IST_TZ})::date AS d,
                  COALESCE(SUM(op."amount"), 0)::float  AS paid
           FROM "OrderPayment" op
           JOIN "Order" o ON o."id" = op."orderId"
           WHERE op."tenantId" = ${tenantId}
             AND o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
-            AND op."paidAt" >= ${since} AND op."paidAt" <= ${eod}
+            AND op."paidAt" IS NOT NULL
+            ${orderTypeFilter}
           GROUP BY 1
-          ORDER BY 1 ASC
         `
       )
+
+      // 30 günlük gün dizisi
+      const daysRows = await prisma.$queryRaw<{ d: Date }[]>(
+        Prisma.sql`
+          SELECT generate_series(
+            (NOW() AT TIME ZONE ${IST_TZ})::date - INTERVAL '29 day',
+            (NOW() AT TIME ZONE ${IST_TZ})::date,
+            INTERVAL '1 day'
+          )::date AS d
+        `
+      )
+
       const mOrders = new Map<string, number>()
-      for (const r of byOrder) mOrders.set(r.d.toISOString().slice(0,10), Number(r.total ?? 0))
+      for (const r of rowsOrders) mOrders.set(r.d.toISOString().slice(0,10), Number(r.total ?? 0))
       const mPaid = new Map<string, number>()
-      for (const r of byPay) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
-      const cumulative: { date: string; paid: number; unpaid: number }[] = []
+      for (const r of rowsPaid) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
+
       let accOrders = 0, accPaid = 0
-      for (let i = days - 1; i >= 0; i--) {
-        const d = new Date(now); d.setDate(d.getDate() - i)
-        const key = d.toISOString().slice(0,10)
-        accOrders += mOrders.get(key) ?? 0
-        accPaid   += mPaid.get(key) ?? 0
-        cumulative.push({ date: key, paid: accPaid, unpaid: Math.max(0, accOrders - accPaid) })
-      }
+      const cumulative = daysRows
+        .sort((a,b) => +a.d - +b.d)
+        .map(({ d }) => {
+          const key = d.toISOString().slice(0,10)
+          accOrders += mOrders.get(key) ?? 0
+          accPaid   += mPaid.get(key) ?? 0
+          return { date: key, paid: accPaid, unpaid: Math.max(0, accOrders - accPaid) }
+        })
 
       return NextResponse.json({
         paid:   { amount: Number(s.paid_amount ?? 0),   count: Number(s.paid_count ?? 0) },
@@ -217,6 +249,7 @@ export async function GET(req: NextRequest) {
         LEFT JOIN "Category" c ON c."id" = oi."categoryId"
         WHERE o."tenantId" = ${tenantId}
           AND o."status" = ANY(${statusArray})
+          ${orderTypeFilter}
         GROUP BY 1
         ORDER BY amount DESC
       `)
@@ -232,50 +265,52 @@ export async function GET(req: NextRequest) {
       }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
-    /* ======= SECTION: DAILY ======= */
+    /* ======= SECTION: DAILY (son 30 gün, İstanbul günü) ======= */
     if (section === 'daily') {
-      const days = 30
-      const since = startOfDay(new Date(now))
-      since.setDate(since.getDate() - (days - 1))
-
-      const byOrder = await prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(
+      const rowsRev = await prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(
         Prisma.sql`
-          SELECT DATE_TRUNC('day', o."createdAt")::date AS d,
+          SELECT (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
                  COALESCE(SUM(o."netTotal"), 0)::float  AS revenue
           FROM "Order" o
           WHERE o."tenantId" = ${tenantId}
-            AND o."createdAt" >= ${since} AND o."createdAt" <= ${eod}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY 1
-          ORDER BY 1 ASC
         `
       )
-      const byPay = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
+      const rowsPaid = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
         Prisma.sql`
-          SELECT DATE_TRUNC('day', op."paidAt")::date AS d,
+          SELECT (op."paidAt" AT TIME ZONE ${IST_TZ})::date AS d,
                  COALESCE(SUM(op."amount"), 0)::float  AS paid
           FROM "OrderPayment" op
           JOIN "Order" o ON o."id" = op."orderId"
           WHERE op."tenantId" = ${tenantId}
             AND o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
-            AND op."paidAt" >= ${since} AND op."paidAt" <= ${eod}
+            AND op."paidAt" IS NOT NULL
+            ${orderTypeFilter}
           GROUP BY 1
-          ORDER BY 1 ASC
         `
       )
-
+      const daysRows = await prisma.$queryRaw<{ d: Date }[]>(
+        Prisma.sql`
+          SELECT generate_series(
+            (NOW() AT TIME ZONE ${IST_TZ})::date - INTERVAL '29 day',
+            (NOW() AT TIME ZONE ${IST_TZ})::date,
+            INTERVAL '1 day'
+          )::date AS d
+        `
+      )
       const mRev = new Map<string, number>()
-      for (const r of byOrder) mRev.set(r.d.toISOString().slice(0,10), Number(r.revenue ?? 0))
+      for (const r of rowsRev) mRev.set(r.d.toISOString().slice(0,10), Number(r.revenue ?? 0))
       const mPaid = new Map<string, number>()
-      for (const r of byPay) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
-
-      const last30d: { date: string; revenue: number; paid: number }[] = []
-      for (let i = days - 1; i >= 0; i--) {
-        const d = new Date(now); d.setDate(d.getDate() - i)
-        const key = d.toISOString().slice(0,10)
-        last30d.push({ date: key, revenue: mRev.get(key) ?? 0, paid: mPaid.get(key) ?? 0 })
-      }
+      for (const r of rowsPaid) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
+      const last30d = daysRows
+        .sort((a,b) => +a.d - +b.d)
+        .map(({ d }) => {
+          const key = d.toISOString().slice(0,10)
+          return { date: key, revenue: mRev.get(key) ?? 0, paid: mPaid.get(key) ?? 0 }
+        })
 
       return NextResponse.json({ last30d }, { headers: { 'Cache-Control': 'private, max-age=60' } })
     }
@@ -292,6 +327,7 @@ export async function GET(req: NextRequest) {
           JOIN "Category" c ON c."id" = oi."categoryId"
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY c."name"
           ORDER BY amount DESC
         `
@@ -313,6 +349,7 @@ export async function GET(req: NextRequest) {
           JOIN "Category" c ON c."id" = oi."categoryId"
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY v."name", c."name"
           ORDER BY amount DESC
           LIMIT 20
@@ -332,6 +369,7 @@ export async function GET(req: NextRequest) {
           LEFT JOIN "Customer" c ON c."id" = o."customerId"
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY 1
           ORDER BY amount DESC
           LIMIT 20
@@ -340,14 +378,89 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ topCustomers: rows }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
+    /* ======= SECTION: PRODUCTS (tüm ürünler, sayfalama + arama + sıralama) ======= */
+    if (section === 'products') {
+      const q = (req.nextUrl.searchParams.get('q') || '').trim();
+      const page = Math.max(1, parseInt(req.nextUrl.searchParams.get('page') || '1', 10));
+      const pageSize = Math.min(200, Math.max(1, parseInt(req.nextUrl.searchParams.get('pageSize') || '20', 10)));
+      const sort = (req.nextUrl.searchParams.get('sort') || 'amount').toLowerCase();
+      const dir = (req.nextUrl.searchParams.get('dir') || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
+      // Sıralama sütunu
+      const sortSql =
+        sort === 'qty'  ? Prisma.sql`qty ${Prisma.raw(dir)}`
+      : sort === 'area' ? Prisma.sql`area_m2 ${Prisma.raw(dir)}`
+      : sort === 'product' ? Prisma.sql`product ${Prisma.raw(dir)}`
+      : Prisma.sql`amount ${Prisma.raw(dir)}`; // default amount
+
+      // Arama koşulu (ürün adına)
+      const whereSearch = q
+        ? Prisma.sql` AND COALESCE(v."name",'Ürün') ILIKE ${'%' + q + '%'} `
+        : Prisma.sql``;
+
+      // TOPLAM adet için ayrı sayım (distinct ürün adına göre)
+      const totalRows = await prisma.$queryRaw<{ total: number }[]>(Prisma.sql`
+        SELECT COUNT(*)::int AS total FROM (
+          SELECT COALESCE(v."name",'Ürün') AS product
+          FROM "OrderItem" oi
+          JOIN "Order" o ON o."id" = oi."orderId"
+          LEFT JOIN "Variant" v ON v."id" = oi."variantId"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            AND COALESCE(o."orderType",0) <> 1
+            ${whereSearch}
+          GROUP BY 1
+        ) t
+      `);
+      const total = Number(totalRows?.[0]?.total ?? 0);
+      const offset = (page - 1) * pageSize;
+
+      const rows = await prisma.$queryRaw<{ product: string; qty: number; area_m2: number; amount: number }[]>(Prisma.sql`
+        SELECT
+          COALESCE(v."name",'Ürün') AS product,
+          COALESCE(SUM(oi."qty"), 0)::int AS qty,
+          COALESCE(SUM( ((oi."width" * oi."height") / 10000.0) * oi."qty" ), 0)::float AS area_m2, -- cm*cm -> m2
+          COALESCE(SUM(oi."subtotal"), 0)::float AS amount
+        FROM "OrderItem" oi
+        JOIN "Order" o ON o."id" = oi."orderId"
+        LEFT JOIN "Variant" v ON v."id" = oi."variantId"
+        WHERE o."tenantId" = ${tenantId}
+          AND o."status" = ANY(${statusArray})
+          AND COALESCE(o."orderType",0) <> 1
+          ${whereSearch}
+        GROUP BY 1
+        ORDER BY ${sortSql}
+        LIMIT ${pageSize} OFFSET ${offset}
+      `);
+
+      return NextResponse.json({
+        rows: rows.map(r => ({
+          product: r.product,
+          qty: Number(r.qty ?? 0),
+          areaM2: Number(r.area_m2 ?? 0),
+          amount: Number(r.amount ?? 0),
+        })),
+        total,
+        page,
+        pageSize,
+      }, { headers: { 'Cache-Control': 'private, max-age=30' } });
+    }
+
+
     /* ======= SECTION: BRANCHES (Şube bazlı ciro & tahsilat) ======= */
     if (section === 'branches') {
-      const rows = await prisma.$queryRaw<{ branchId: string | null; branch: string | null; code: string | null; orders: number; revenue: number; paid: number }[]>(
+      const rows = await prisma.$queryRaw<{
+        branchId: string | null; branch: string | null; code: string | null;
+        orders: number; revenue: number; paid: number
+      }[]>(
         Prisma.sql`
           WITH p AS (
             SELECT op."orderId", SUM(op."amount")::float AS paid
             FROM "OrderPayment" op
-            JOIN "Order" o1 ON o1."id" = op."orderId" AND o1."tenantId" = ${tenantId} AND o1."status" = ANY(${statusArray})
+            JOIN "Order" o1 ON o1."id" = op."orderId"
+                           AND o1."tenantId" = ${tenantId}
+                           AND o1."status" = ANY(${statusArray})
+                           AND COALESCE(o1."orderType",0) <> 1
             WHERE op."tenantId" = ${tenantId}
             GROUP BY op."orderId"
           )
@@ -363,6 +476,7 @@ export async function GET(req: NextRequest) {
           LEFT JOIN "Branch" b ON b."id" = o."branchId"
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
           GROUP BY b."id", b."name", b."code"
           ORDER BY revenue DESC
         `
@@ -378,6 +492,113 @@ export async function GET(req: NextRequest) {
       }))
 
       return NextResponse.json({ byBranch }, { headers: { 'Cache-Control': 'private, max-age=120' } })
+    }
+
+    /* ======= NEW: DAILY_BY_BRANCH (tarih aralığı + branchId, İstanbul günü) ======= */
+    if (section === 'daily_by_branch') {
+      const branchId = req.nextUrl.searchParams.get('branchId')
+      const from = parseISODate(req.nextUrl.searchParams.get('from'))
+      const to = parseISODate(req.nextUrl.searchParams.get('to'))
+      if (!branchId || !from || !to) {
+        return NextResponse.json({ lastByBranch: [] }, { headers: { 'Cache-Control': 'private, max-age=30' } })
+      }
+      // Sadece DATE (İstanbul günlerine göre karşılaştıracağız)
+      const fromDate = from.toISOString().slice(0,10)
+      const toDate   = to.toISOString().slice(0,10)
+
+      const rowsOrder = await prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(
+        Prisma.sql`
+          SELECT (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
+                 COALESCE(SUM(o."netTotal"), 0)::float  AS revenue
+          FROM "Order" o
+          WHERE o."tenantId" = ${tenantId}
+            AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date BETWEEN ${fromDate}::date AND ${toDate}::date
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${branchFilterSql(branchId)}
+          GROUP BY 1
+          ORDER BY 1 ASC
+        `
+      )
+
+      const rowsPaid = await prisma.$queryRaw<{ d: Date; paid: number | null }[]>(
+        Prisma.sql`
+          SELECT (op."paidAt" AT TIME ZONE ${IST_TZ})::date AS d,
+                 COALESCE(SUM(op."amount"), 0)::float  AS paid
+          FROM "OrderPayment" op
+          JOIN "Order" o ON o."id" = op."orderId"
+          WHERE op."tenantId" = ${tenantId}
+            AND o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            AND op."paidAt" IS NOT NULL
+            AND (op."paidAt" AT TIME ZONE ${IST_TZ})::date BETWEEN ${fromDate}::date AND ${toDate}::date
+            ${orderTypeFilter}
+            ${branchFilterSql(branchId)}
+          GROUP BY 1
+          ORDER BY 1 ASC
+        `
+      )
+
+      // İstenen aralıkta gün üret (İstanbul günü)
+      const daysRows = await prisma.$queryRaw<{ d: Date }[]>(
+        Prisma.sql`
+          SELECT generate_series(${fromDate}::date, ${toDate}::date, INTERVAL '1 day')::date AS d
+        `
+      )
+
+      const mRev = new Map<string, number>()
+      for (const r of rowsOrder) mRev.set(r.d.toISOString().slice(0,10), Number(r.revenue ?? 0))
+      const mPaid = new Map<string, number>()
+      for (const r of rowsPaid) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
+
+      const lastByBranch = daysRows
+        .sort((a,b) => +a.d - +b.d)
+        .map(({ d }) => {
+          const key = d.toISOString().slice(0,10)
+          return { date: key, revenue: mRev.get(key) ?? 0, paid: mPaid.get(key) ?? 0 }
+        })
+
+      return NextResponse.json({ lastByBranch }, { headers: { 'Cache-Control': 'private, max-age=30' } })
+    }
+
+    /* ======= NEW: METHODS_BY_DATE (tarih aralığı + branchId, İstanbul günü) ======= */
+    if (section === 'methods_by_date') {
+      const branchId = req.nextUrl.searchParams.get('branchId')
+      const from = parseISODate(req.nextUrl.searchParams.get('from'))
+      const to = parseISODate(req.nextUrl.searchParams.get('to'))
+      if (!branchId || !from || !to) {
+        return NextResponse.json({ methods: [] }, { headers: { 'Cache-Control': 'private, max-age=30' } })
+      }
+      const fromDate = from.toISOString().slice(0,10)
+      const toDate   = to.toISOString().slice(0,10)
+
+      const rows = await prisma.$queryRaw<{ d: Date; method: string; amount: number | null }[]>(
+        Prisma.sql`
+          SELECT
+            (op."paidAt" AT TIME ZONE ${IST_TZ})::date AS d,
+            COALESCE(op."method"::text,'UNKNOWN')     AS method,
+            COALESCE(SUM(op."amount"), 0)::float      AS amount
+          FROM "OrderPayment" op
+          JOIN "Order" o ON o."id" = op."orderId"
+          WHERE op."tenantId" = ${tenantId}
+            AND o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            AND op."paidAt" IS NOT NULL
+            AND (op."paidAt" AT TIME ZONE ${IST_TZ})::date BETWEEN ${fromDate}::date AND ${toDate}::date
+            ${orderTypeFilter}
+            ${branchFilterSql(branchId)}
+          GROUP BY 1, 2
+          ORDER BY 1 DESC, 3 DESC
+        `
+      )
+
+      const methods = rows.map(r => ({
+        date: r.d.toISOString().slice(0,10),
+        method: r.method,
+        amount: Number(r.amount ?? 0),
+      }))
+
+      return NextResponse.json({ methods }, { headers: { 'Cache-Control': 'private, max-age=30' } })
     }
 
     return NextResponse.json({ error: 'invalid_section' }, { status: 400 })

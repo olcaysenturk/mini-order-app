@@ -197,12 +197,7 @@ export default function AdminPage() {
       </div>
 
       {/* Bilgi */}
-      <div className="mb-6 rounded-2xl border border-neutral-200 bg-white/80 p-4 shadow-sm backdrop-blur">
-        <div className="text-sm text-neutral-700">
-          Kategoriler sabittir (<b>{DEFAULT_CATEGORIES.join(', ')}</b>). Yeni kategori
-          eklenemez/silinemez. <b>Ürünler</b> panel bazında listelenir ve sayfalanır.
-        </div>
-      </div>
+     
 
       {error && (
         <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
