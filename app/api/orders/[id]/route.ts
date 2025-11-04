@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 
 /* ================= Zod Schemas ================ */
-const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled'])
+const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled', 'workshop'])
 const LinesSchema  = z.array(z.string().transform(s => s.trim())).max(6).optional()
 
 // ✅ "YYYY-MM-DD" veya null kabul eden tarih şeması
