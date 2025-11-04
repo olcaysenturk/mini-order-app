@@ -1,4 +1,4 @@
-// app/reports/page.tsx
+ // app/reports/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -12,10 +12,6 @@ import {
   Tooltip,
   BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
 } from "recharts";
 
 /* -------------------- helpers -------------------- */
@@ -94,8 +90,6 @@ type VariantsResp = {
     qty: number;
   }[];
 };
-
-// KALDIRILDI: CustomersResp
 
 type DailyResp = {
   last30d: { date: string; revenue: number; paid: number }[];
@@ -180,8 +174,6 @@ export default function ReportsPage() {
   const [prodPage, setProdPage] = useState(1);
   const [prodPageSize, setProdPageSize] = useState(20);
 
-  const PIE_COLORS = ["#6366F1","#10B981","#F59E0B","#EF4444","#0EA5E9","#A855F7","#84CC16"];
-
   // Yükleme overlay
   const showOverlay = loading;
 
@@ -258,7 +250,7 @@ export default function ReportsPage() {
 
   // Ürün sorguları (filter/sort/search/page değişince)
   useEffect(() => {
-    setProdPage(1); // filtre/sort/değişince başa dön
+    setProdPage(1);
   }, [filter, prodQuery, prodSort, prodDesc, prodPageSize]);
   useEffect(() => {
     loadProducts(prodPage, prodPageSize);
@@ -301,9 +293,6 @@ export default function ReportsPage() {
     run();
   }, [branch, dateFrom, dateTo]);
 
-  // Şube bazlı liste (UI data)
-  const dailyInRange = branchDaily;
-
   // Üst metrikler için placeholder loading
   const metricsLoading = !over;
 
@@ -338,10 +327,20 @@ export default function ReportsPage() {
   /* -------------------- UI -------------------- */
   return (
     <main className="relative mx-auto max-w-7xl p-4 sm:p-6">
+      {/* Dekoratif grid/halo (site ile uyum) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 [mask-image:radial-gradient(60%_60%_at_50%_20%,#000,transparent)]"
+      >
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(0,0,0,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.04)_1px,transparent_1px)] bg-[size:22px_22px]" />
+        <div className="absolute -top-40 left-1/2 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(79,70,229,.16),transparent)] blur-2xl" />
+        <div className="absolute -bottom-48 right-1/2 h-[420px] w-[820px] translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(16,185,129,.12),transparent)] blur-2xl" />
+      </div>
+
       {/* Loading overlay */}
       {showOverlay && (
         <div className="pointer-events-none absolute inset-0 z-50 flex items-start justify-center rounded-2xl bg-white/60 backdrop-blur-sm">
-          <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-700 shadow-sm">
+          <div className="mt-6 flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-700 shadow-sm">
             <svg className="size-4 animate-spin" viewBox="0 0 24 24" aria-hidden>
               <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" fill="none" opacity=".2" />
               <path d="M22 12a10 10 0 0 1-10 10" fill="none" stroke="currentColor" strokeWidth="3" />
@@ -352,65 +351,77 @@ export default function ReportsPage() {
       )}
 
       {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Raporlar</h1>
-          {/* Şube seçimi */}
-          <div className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-2 py-1">
-            <span className="text-xs text-neutral-500">Şube</span>
-            <select
-              className="h-8 rounded-lg border border-neutral-200 bg-white px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-            >
-              <option value="all">Tüm şubeler</option>
-              {(Array.isArray(branchOptions) ? branchOptions : []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.code ? `${b.name} (${b.code})` : b.name}
-                </option>
-              ))}
-            </select>
-          </div>
+      <header className="mb-5">
+        <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200/60 bg-white/70 px-3 py-1 text-[11px] font-medium text-indigo-700 shadow-sm backdrop-blur">
+          <span aria-hidden className="size-2 rounded-full bg-indigo-600" />
+          Raporlar
         </div>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <div className="max-w-lg">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">İşletme Raporları</h1>
+            <p className="mt-1 text-sm text-neutral-600">
+              Şube karşılaştırmaları, günlük/aylık trendler ve tahsilat akışı—tek ekranda.
+            </p>
+          </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div
-            role="tablist"
-            aria-label="Durum filtresi"
-            className="inline-flex rounded-xl border border-neutral-200 bg-white p-0.5"
-          >
-            {([
-              { k: "active", label: "Aktif" },
-              { k: "completed", label: "Tamamlanan" },
-              { k: "all", label: "Tümü" },
-            ] as { k: FilterKey; label: string }[]).map(({ k, label }) => (
-              <button
-                key={k}
-                role="tab"
-                aria-selected={filter === k}
-                onClick={() => setFilter(k)}
-                className={`px-3 py-1.5 text-sm rounded-[10px] transition ${
-                  filter === k ? "bg-indigo-600 text-white" : "text-neutral-700 hover:bg-neutral-50"
-                }`}
+          {/* Yapışkan toolbar */}
+          <div className="ms-auto inline-flex flex-wrap items-center gap-2 rounded-2xl border border-neutral-200 bg-white/80 p-1 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/60">
+            {/* Şube seçimi */}
+            <label className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-2 py-1">
+              <span className="text-xs text-neutral-500">Şube</span>
+              <select
+                className="h-8 rounded-lg border border-neutral-200 bg-white px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
               >
-                {label}
-              </button>
-            ))}
-          </div>
+                <option value="all">Tüm şubeler</option>
+                {(Array.isArray(branchOptions) ? branchOptions : []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.code ? `${b.name} (${b.code})` : b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <button
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
-            onClick={loadAll}
-            disabled={loading}
-            title="Yenile"
-          >
-            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-              <path fill="currentColor" d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z" />
-            </svg>
-            {loading ? "Yükleniyor…" : "Yenile"}
-          </button>
+            {/* Durum filtresi */}
+            <div
+              role="tablist"
+              aria-label="Durum filtresi"
+              className="inline-flex rounded-xl border border-neutral-200 bg-white p-0.5"
+            >
+              {([
+                { k: "active", label: "Aktif" },
+                { k: "completed", label: "Tamamlanan" },
+                { k: "all", label: "Tümü" },
+              ] as { k: FilterKey; label: string }[]).map(({ k, label }) => (
+                <button
+                  key={k}
+                  role="tab"
+                  aria-selected={filter === k}
+                  onClick={() => setFilter(k)}
+                  className={`px-3 py-1.5 text-sm rounded-[10px] transition ${
+                    filter === k ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-700 hover:bg-neutral-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50"
+              onClick={loadAll}
+              disabled={loading}
+              title="Yenile"
+            >
+              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                <path fill="currentColor" d="M12 6V3L8 7l4 4V8a4 4 0 1 1-4 4H6a6 6 0 1 0 6-6z" />
+              </svg>
+              {loading ? "Yükleniyor…" : "Yenile"}
+            </button>
+          </div>
         </div>
-      </div>
+      </header>
 
       {error && (
         <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -427,9 +438,12 @@ export default function ReportsPage() {
       </section>
 
       {/* Şube Bazlı Ciro */}
-      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="text-sm font-semibold">Şube Bazlı Ciro</div>
+          <div className="inline-flex items-center gap-2 rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+            <span aria-hidden className="size-2 rounded-full bg-indigo-600" />
+            Şube Bazlı Ciro
+          </div>
           <div className="ms-auto flex flex-wrap items-center gap-2">
             <div className="relative">
               <input
@@ -485,11 +499,12 @@ export default function ReportsPage() {
         {!branchesWithBasic.length ? (
           <SkeletonBox />
         ) : branchRows.length === 0 ? (
-          <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-            Kriterlere uyan şube bulunamadı.
-          </div>
+          <EmptyBox
+            title="Kriterlere uyan şube bulunamadı"
+            desc="Arama kriterlerini değiştirerek tekrar deneyin."
+          />
         ) : (
-          <ul className="divide-y rounded-xl border border-neutral-200">
+          <ul className="divide-y rounded-xl border border-neutral-200 bg-white">
             {branchRows.map((b, i) => (
               <li key={`${b.branchId ?? b.label}-${i}`} className="p-3 sm:p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -510,7 +525,7 @@ export default function ReportsPage() {
 
       {/* === YENİ: Tarih Aralığı – Şube Bazlı Günlük Ciro & Alınan (Liste) === */}
       {branch !== "all" && (
-        <section className="mb-6 rounded-2xl border border-neutral-200 bg-white shadow-sm">
+        <section className="mb-6 rounded-2xl border border-neutral-200 bg-white/70 shadow-sm backdrop-blur">
           {/* Sticky toolbar */}
           <div className="sticky top-[64px] z-20 rounded-t-2xl border-b border-neutral-200 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
             <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4">
@@ -525,13 +540,14 @@ export default function ReportsPage() {
                 <DateChip label="Başlangıç" value={dateFrom} onChange={setDateFrom} max={dateTo || undefined} />
                 <DateChip label="Bitiş" value={dateTo} onChange={setDateTo} min={dateFrom || undefined} />
 
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                <ActionButton
+                  title="Günlük liste CSV"
+                  disabled={!branchDaily.length}
                   onClick={() => {
-                    if (!dailyInRange.length) return;
+                    if (!branchDaily.length) return;
                     const rows: (string | number)[][] = [
                       ["Tarih", "Ciro (TRY)", "Alınan (TRY)", "Ödeme Tipleri"],
-                      ...dailyInRange.map((d) => {
+                      ...branchDaily.map((d) => {
                         const meth = (methodsByDate.get(d.date) ?? [])
                           .map((m) => `${METHOD_TR[m.method] ?? m.method}:${fmtMoney(m.amount)}`)
                           .join(" | ");
@@ -547,14 +563,9 @@ export default function ReportsPage() {
                     a.click();
                     URL.revokeObjectURL(url);
                   }}
-                  disabled={!dailyInRange.length}
-                  title="Günlük liste CSV"
-                >
-                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                    <path fill="currentColor" d="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z" />
-                  </svg>
-                  CSV
-                </button>
+                  label="CSV"
+                  iconPath="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"
+                />
               </div>
             </div>
           </div>
@@ -564,28 +575,23 @@ export default function ReportsPage() {
             <Tile label="Seçili Tarih Aralığı" value={`${dateFrom} → ${dateTo}`} mono />
             <Tile
               label="Toplam Ciro"
-              value={`${fmtMoney(dailyInRange.reduce((a, b) => a + Number(b.revenue || 0), 0))} ₺`}
+              value={`${fmtMoney(branchDaily.reduce((a, b) => a + Number(b.revenue || 0), 0))} ₺`}
             />
             <Tile
               label="Toplam Kasa"
-              value={`${fmtMoney(dailyInRange.reduce((a, b) => a + Number(b.paid || 0), 0))} ₺`}
+              value={`${fmtMoney(branchDaily.reduce((a, b) => a + Number(b.paid || 0), 0))} ₺`}
             />
           </div>
 
           {/* Content */}
           {loadingDaily ? (
             <div className="p-4"><SkeletonBox /></div>
-          ) : !dailyInRange.length ? (
+          ) : !branchDaily.length ? (
             <div className="p-4">
-              <div className="h-[220px] rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/70 p-6 text-center">
-                <div className="mx-auto mb-2 mt-6 size-10 rounded-full border border-neutral-200 bg-white p-2">
-                  <svg viewBox="0 0 24 24" className="size-6 text-neutral-500" aria-hidden>
-                    <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v13a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V6a2 2 0 0 0-2-2m0 15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V9h14z" />
-                  </svg>
-                </div>
-                <div className="text-sm font-medium text-neutral-800">Kayıt bulunamadı</div>
-                <div className="mt-1 text-xs text-neutral-600">Tarih aralığını daraltmayı veya farklı bir aralık seçmeyi deneyin.</div>
-              </div>
+              <EmptyBox
+                title="Kayıt bulunamadı"
+                desc="Tarih aralığını daraltmayı veya farklı bir aralık seçmeyi deneyin."
+              />
             </div>
           ) : (
             <>
@@ -602,10 +608,10 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
-                      {dailyInRange.map((d) => {
+                      {branchDaily.map((d) => {
                         const methods = methodsByDate.get(d.date) ?? [];
                         return (
-                          <tr key={d.date} className="hover:bg-neutral-50">
+                          <tr key={d.date} className="hover:bg-neutral-50/60">
                             <td className="px-3 py-2 font-medium text-neutral-900 whitespace-nowrap">{d.date}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(d.revenue)} ₺</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(d.paid)} ₺</td>
@@ -628,10 +634,10 @@ export default function ReportsPage() {
                       <tr className="bg-neutral-50/60">
                         <td className="px-3 py-2 text-xs font-medium text-neutral-600">Toplam</td>
                         <td className="px-3 py-2 text-right text-sm font-semibold">
-                          {fmtMoney(dailyInRange.reduce((a, b) => a + Number(b.revenue || 0), 0))} ₺
+                          {fmtMoney(branchDaily.reduce((a, b) => a + Number(b.revenue || 0), 0))} ₺
                         </td>
                         <td className="px-3 py-2 text-right text-sm font-semibold">
-                          {fmtMoney(dailyInRange.reduce((a, b) => a + Number(b.paid || 0), 0))} ₺
+                          {fmtMoney(branchDaily.reduce((a, b) => a + Number(b.paid || 0), 0))} ₺
                         </td>
                         <td className="px-3 py-2" />
                       </tr>
@@ -642,7 +648,7 @@ export default function ReportsPage() {
 
               {/* Mobile cards */}
               <div className="divide-y sm:hidden">
-                {dailyInRange.map((d) => {
+                {branchDaily.map((d) => {
                   const methods = methodsByDate.get(d.date) ?? [];
                   return (
                     <div key={d.date} className="p-3">
@@ -651,14 +657,8 @@ export default function ReportsPage() {
                         <div className="text-xs text-neutral-500">Gün</div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-                          <div className="text-[11px] text-neutral-500">Ciro</div>
-                          <div className="text-sm font-semibold">{fmtMoney(d.revenue)} ₺</div>
-                        </div>
-                        <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
-                          <div className="text-[11px] text-neutral-500">Alınan</div>
-                          <div className="text-sm font-semibold">{fmtMoney(d.paid)} ₺</div>
-                        </div>
+                        <MiniStat label="Ciro" value={`${fmtMoney(d.revenue)} ₺`} />
+                        <MiniStat label="Alınan" value={`${fmtMoney(d.paid)} ₺`} />
                       </div>
                       <div className="mt-2">
                         <div className="mb-1 text-[11px] font-medium text-neutral-500">Ödeme Tipleri</div>
@@ -682,8 +682,9 @@ export default function ReportsPage() {
       )}
 
       {/* Günlük Ciro + Alınan + Kümülatif Ciro (Son 30 Gün) */}
-      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 text-sm font-semibold">
+      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+          <span aria-hidden className="size-2 rounded-full bg-emerald-600" />
           Günlük Ciro &amp; Alınan + Kümülatif (Son 30 Gün)
         </div>
 
@@ -694,7 +695,6 @@ export default function ReportsPage() {
             <ResponsiveContainer>
               <ComposedChart
                 data={(() => {
-                  // kümülatif revenue hesapla
                   let cumRevenue = 0;
                   return (daily?.last30d ?? []).map((d) => {
                     cumRevenue += Number(d.revenue || 0);
@@ -738,8 +738,11 @@ export default function ReportsPage() {
 
       {/* Kategoriler & Ürün toplamları */}
       <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">Kategori Bazlı Satış (₺)</div>
+        <div className="rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+            <span aria-hidden className="size-2 rounded-full bg-indigo-600" />
+            Kategori Bazlı Satış (₺)
+          </div>
           {!cats?.byCategory?.length ? (
             <SkeletonBox />
           ) : (
@@ -764,8 +767,11 @@ export default function ReportsPage() {
         </div>
 
         {/* Ürün Toplamları (cm) */}
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm font-semibold">Kategori Bazlı Satış</div>
+        <div className="rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+            <span aria-hidden className="size-2 rounded-full bg-emerald-600" />
+            Kategori Bazlı Satış
+          </div>
           {!itemsAgg?.byProduct?.length ? (
             <SkeletonBox />
           ) : (
@@ -782,7 +788,7 @@ export default function ReportsPage() {
                 </thead>
                 <tbody className="divide-y">
                   {itemsAgg.byProduct.map((p, i) => (
-                    <tr key={i} className="[&>td]:px-3 [&>td]:py-2">
+                    <tr key={i} className="[&>td]:px-3 [&>td]:py-2 hover:bg-neutral-50">
                       <td className="font-medium">{p.group}</td>
                       <td className="text-right">{fmtInt(p.qty)}</td>
                       <td className="text-right">{(p.totalWidthCm / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} m</td>
@@ -797,10 +803,13 @@ export default function ReportsPage() {
         </div>
       </section>
 
-      {/* === YENİ === En Çok Satılan Ürünler (tüm ürünler, sayfalama) */}
-      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+      {/* En Çok Satılan Ürünler (tüm ürünler, sayfalama) */}
+      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="text-sm font-semibold">En Çok Satılan Ürünler</div>
+          <div className="inline-flex items-center gap-2 rounded-lg bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-700">
+            <span aria-hidden className="size-2 rounded-full bg-neutral-400" />
+            En Çok Satılan Ürünler
+          </div>
           <div className="ms-auto flex flex-wrap items-center gap-2">
             <div className="relative">
               <input
@@ -855,8 +864,9 @@ export default function ReportsPage() {
             </select>
 
             {/* CSV */}
-            <button
-              className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            <ActionButton
+              title="CSV indir"
+              disabled={!products?.rows?.length}
               onClick={() => {
                 const rows: (string|number)[][] = [
                   ["Ürün", "Adet", "Toplam m²", "Toplam Tutar (TRY)"],
@@ -871,12 +881,9 @@ export default function ReportsPage() {
                 a.click();
                 URL.revokeObjectURL(url);
               }}
-              disabled={!products?.rows?.length}
-              title="CSV indir"
-            >
-              <svg viewBox="0 0 24 24" className="size-4" aria-hidden><path fill="currentColor" d="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"/></svg>
-              CSV
-            </button>
+              label="CSV"
+              iconPath="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"
+            />
           </div>
         </div>
 
@@ -884,9 +891,7 @@ export default function ReportsPage() {
           {!products || prodLoading ? (
             <SkeletonBox />
           ) : (products.rows ?? []).length === 0 ? (
-            <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
-              Kayıt bulunamadı.
-            </div>
+            <EmptyBox title="Kayıt bulunamadı" desc="Filtreleri değiştirerek tekrar deneyin." />
           ) : (
             <>
               <table className="min-w-full text-sm">
@@ -917,14 +922,14 @@ export default function ReportsPage() {
                 </div>
                 <div className="inline-flex items-center gap-2">
                   <button
-                    className="h-8 rounded-xl border border-neutral-200 px-3 text-sm disabled:opacity-50"
+                    className="h-8 rounded-xl border border-neutral-200 bg-white px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
                     onClick={() => setProdPage((p) => Math.max(1, p - 1))}
                     disabled={products.page <= 1}
                   >
                     Önceki
                   </button>
                   <button
-                    className="h-8 rounded-xl border border-neutral-200 px-3 text-sm disabled:opacity-50"
+                    className="h-8 rounded-xl border border-neutral-200 bg-white px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
                     onClick={() => {
                       const last = Math.max(1, Math.ceil(products.total / products.pageSize));
                       setProdPage((p) => Math.min(last, p + 1));
@@ -947,7 +952,7 @@ export default function ReportsPage() {
 function MetricCard({ label, value }: { label: string; value: string | null }) {
   const loading = value === null;
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+    <div className="rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
       <div className="mb-1 flex items-center gap-1.5 text-xs text-neutral-500">
         <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
           <path fill="currentColor" d="M4 20h16v-2H4zM6 16h3V8H6zm5 0h3V4h-3zm5 0h3v-6h-3z" />
@@ -957,7 +962,7 @@ function MetricCard({ label, value }: { label: string; value: string | null }) {
       {loading ? (
         <div className="h-6 w-24 animate-pulse rounded bg-neutral-200" />
       ) : (
-        <div className="text-lg font-semibold tracking-wide">{value} ₺</div>
+        <div className="text-lg font-semibold tracking-wide tabular-nums">{value} ₺</div>
       )}
     </div>
   );
@@ -967,28 +972,16 @@ function SkeletonBox() {
   return <div className="h-[260px] w-full animate-pulse rounded-xl bg-neutral-100" />;
 }
 
-function StatTile({
-  title,
-  amount,
-  count,
-  accent = "indigo",
-}: {
-  title: string;
-  amount: string;
-  count: string;
-  accent?: "indigo" | "emerald" | "rose";
-}) {
-  const tone =
-    accent === "emerald"
-      ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-      : accent === "rose"
-      ? "text-rose-700 bg-rose-50 border-rose-200"
-      : "text-indigo-700 bg-indigo-50 border-indigo-200";
+function EmptyBox({ title, desc }: { title: string; desc?: string }) {
   return (
-    <div className={`rounded-xl border ${tone} p-3`}>
-      <div className="text-xs">{title}</div>
-      <div className="mt-1 text-base font-semibold">{amount}</div>
-      <div className="text-xs">({count} sipariş)</div>
+    <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50/70 p-6 text-center">
+      <div className="mx-auto mb-2 mt-2 size-10 rounded-full border border-neutral-200 bg-white p-2">
+        <svg viewBox="0 0 24 24" className="size-6 text-neutral-500" aria-hidden>
+          <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v13a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V6a2 2 0 0 0-2-2m0 15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V9h14z" />
+        </svg>
+      </div>
+      <div className="text-sm font-medium text-neutral-800">{title}</div>
+      {desc && <div className="mt-1 text-xs text-neutral-600">{desc}</div>}
     </div>
   );
 }
@@ -997,7 +990,16 @@ function KPI({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 text-right">
       <div className="text-[11px] text-neutral-500">{label}</div>
-      <div className={`truncate text-sm font-semibold text-neutral-900`}>{value}</div>
+      <div className="truncate text-sm font-semibold text-neutral-900 tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+      <div className="text-[11px] text-neutral-500">{label}</div>
+      <div className="text-sm font-semibold tabular-nums">{value}</div>
     </div>
   );
 }
@@ -1047,5 +1049,33 @@ function MethodPill({ label, amount }: { label: string; amount: string }) {
       </svg>
       <b className="font-medium">{label}:</b> {amount} ₺
     </span>
+  );
+}
+
+function ActionButton({
+  title,
+  disabled,
+  onClick,
+  label,
+  iconPath,
+}: {
+  title: string;
+  disabled?: boolean;
+  onClick: () => void;
+  label: string;
+  iconPath: string;
+}) {
+  return (
+    <button
+      className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+    >
+      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+        <path fill="currentColor" d={iconPath} />
+      </svg>
+      {label}
+    </button>
   );
 }

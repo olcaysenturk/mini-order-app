@@ -1,10 +1,11 @@
 // app/page.tsx — LIGHT MODE · modern landing (A11Y + SEO)
-// Not: Bu dosya bir SERVER COMPONENT. Client hook kullanılmıyor.
+// Server Component
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/options";
+import VideoHero from "@/app/components/VideoHero";
 
 /** ======= SEO / OpenGraph ======= */
 export const metadata = {
@@ -15,7 +16,7 @@ export const metadata = {
     title: "Perdexa — Perde Siparişlerini Tek Yerden Yönetin",
     description:
       "Perde işinizi hızlandırın: otomatik fiyat, yazdırılabilir A4, raporlama, çoklu kullanıcı, rol & yetki.",
-    url: "https://your-domain.example", // isteğe göre güncelle
+    url: "https://your-domain.example",
     siteName: "Perdexa",
     images: [{ url: "/og/perdexa.png", width: 1200, height: 630, alt: "Perdexa Önizleme" }],
     locale: "tr_TR",
@@ -49,9 +50,6 @@ export default async function Home() {
         <div className="absolute -bottom-48 right-1/2 h-[520px] w-[980px] translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(16,185,129,.14),transparent)] blur-2xl" />
       </div>
 
-      {/* ======= ÜST NAV ======= */}
-      
-
       {/* ======= HERO ======= */}
       <section className="relative z-10 pt-8 sm:pt-12 pb-8">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -62,7 +60,7 @@ export default async function Home() {
                 <span aria-hidden className="size-2 rounded-full bg-indigo-600" /> Yeni: Yazdırılabilir A4 & Pro Raporlar
               </div>
               <h1 className="mt-4 text-3xl sm:text-5xl font-extrabold leading-tight tracking-tight">
-                Perde siparişlerini{" "}
+                Perde siparişlerinizi{" "}
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-emerald-500">
                   tek yerden
                 </span>{" "}
@@ -114,72 +112,8 @@ export default async function Home() {
               </dl>
             </div>
 
-            {/* Visual Mockup */}
-            <div className="relative">
-              <div className="relative rounded-3xl border border-neutral-200 bg-white/70 backdrop-blur-md shadow-xl">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-neutral-200">
-                  <div aria-hidden className="size-3 rounded-full bg-red-400" />
-                  <div aria-hidden className="size-3 rounded-full bg-yellow-400" />
-                  <div aria-hidden className="size-3 rounded-full bg-green-400" />
-                  <div className="ml-3 text-xs text-neutral-500">Siparişler</div>
-                </div>
-                <div className="p-4 sm:p-6">
-                  <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
-                    <div className="px-4 py-3 text-sm font-medium bg-neutral-50 border-b border-neutral-200">
-                      Güncel Siparişler
-                    </div>
-                    <table className="w-full text-sm" aria-label="Güncel sipariş tablosu">
-                      <thead className="bg-white">
-                        <tr className="[&>th]:px-4 [&>th]:py-2 text-left text-neutral-500">
-                          <th scope="col">#</th>
-                          <th scope="col">Müşteri</th>
-                          <th scope="col">Telefon</th>
-                          <th scope="col" className="text-right">
-                            Tutar
-                          </th>
-                          <th scope="col" className="text-right">
-                            Durum
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
-                        {[
-                          { no: 154, name: "Ayşe Yılmaz", tel: "05xx", tutar: "3.250,00", st: "İşlemde" },
-                          { no: 153, name: "Mehmet Demir", tel: "05xx", tutar: "1.980,00", st: "Beklemede" },
-                          { no: 152, name: "Olcay Şentürk", tel: "05xx", tutar: "5.420,00", st: "Tamamlandı" },
-                        ].map((r) => (
-                          <tr key={r.no} className="[&>td]:px-4 [&>td]:py-2">
-                            <td className="font-medium">#{r.no}</td>
-                            <td>{r.name}</td>
-                            <td className="text-neutral-500">{r.tel}</td>
-                            <td className="text-right">{r.tutar} ₺</td>
-                            <td className="text-right">
-                              <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
-                                {r.st}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-                      <div className="text-xs text-neutral-500">Bu Ay</div>
-                      <div className="text-2xl font-bold">64.350 ₺</div>
-                    </div>
-                    <div className="rounded-2xl border border-neutral-200 bg-white p-4">
-                      <div className="text-xs text-neutral-500">Aylık Sipariş</div>
-                      <div className="text-2xl font-bold">27</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Glow */}
-              <div aria-hidden className="absolute -inset-6 rounded-[28px] bg-gradient-to-r from-indigo-500/10 to-emerald-500/10 blur-2xl" />
-            </div>
+            {/* Video Mockup */}
+            <VideoHero />
           </div>
         </div>
       </section>
@@ -310,8 +244,6 @@ export default async function Home() {
         </div>
       </section>
 
- 
-
       {/* ======= Fiyatlandırma ======= */}
       <section id="fiyat" className="relative z-10">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
@@ -421,9 +353,6 @@ export default async function Home() {
           </div>
         </div>
       </section>
-
-      {/* ======= Footer ======= */}
-     
     </main>
   );
 }
