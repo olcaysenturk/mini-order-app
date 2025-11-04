@@ -512,4 +512,5 @@ enum OrderLineStatus {
   processing
   completed
   cancelled
+  workshop
 }
