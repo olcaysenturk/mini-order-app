@@ -66,7 +66,7 @@ export default function VideoHero() {
 
           <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 via-black/10 to-transparent" />
 
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 flex items-start scale-75 md:scale-100 -top-3 md:top-12 justify-center">
             <div className="flex items-center gap-3 rounded-full border border-white/60 bg-white/80 px-4 py-2 shadow-md backdrop-blur transition group-hover:scale-[1.02]">
               <span aria-hidden className="grid place-items-center size-8 rounded-full bg-neutral-900 text-white">
                 <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
