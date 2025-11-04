@@ -74,7 +74,7 @@ export default function VideoHero() {
                 </svg>
               </span>
               <span className="text-sm font-medium text-neutral-900">Videoyu İzle</span>
-              <span className="text-xs text-neutral-500">• 1:12</span>
+              <span className="text-xs text-neutral-500">• 0:58</span>
             </div>
           </div>
         </button>
