@@ -5,12 +5,13 @@ import { PrismaAdapter } from '@next-auth/prisma-adapter'
 import { prisma } from '@/app/lib/db'
 import bcrypt from 'bcryptjs'
 import { ensureDefaultCategoriesForTenant } from '@/app/lib/seed-default-categories'
+import { jwtVerify } from 'jose'
 
-// 📨 Gmail SMTP helper'ları (önceki adımda eklemiştik)
+// 📨 Gmail SMTP helper'ları
 import { sendMail } from '@/app/lib/mailer'
 import { welcomeHtml } from '@/app/emails/welcome-html'
 
-// ---- Enums ----
+/* ================= Enums ================= */
 export enum UserRole {
   ADMIN = 'ADMIN',
   STAFF = 'STAFF',
@@ -28,7 +29,7 @@ export enum BillingPlan {
   PRO = 'PRO',
 }
 
-// ---- next-auth module augment ----
+/* =========== next-auth module augment =========== */
 declare module 'next-auth' {
   interface Session {
     user?: DefaultSession['user'] & {
@@ -40,6 +41,11 @@ declare module 'next-auth' {
     isPro?: boolean
     tenantId?: string | null
     tenantRole?: TenantRole | null
+
+    // ⬇️ Impersonation bilgileri
+    isImpersonated?: boolean
+    impersonatorId?: string | null
+    impersonatedAt?: string | null
   }
 }
 
@@ -51,26 +57,30 @@ declare module 'next-auth/jwt' {
     plan?: BillingPlan
     tenantId?: string | null
     tenantRole?: TenantRole | null
+
+    // ⬇️ Impersonation bilgileri
+    isImpersonated?: boolean
+    impersonatorId?: string | null
+    impersonatedAt?: string | null
+    impersonationScope?: 'tenant' | 'global'
   }
 }
 
-// Kullanıcıya ait en az bir tenant olmasını garanti eder
+/* =========== Helpers =========== */
+// Kullanıcıya ait en az bir tenant olmasını garanti eder (normal login’lerde)
 async function ensureTenantForUser(userId: string, role?: UserRole) {
-  // Kullanıcının bir üyeliği varsa onu kullan
   const existing = await prisma.membership.findFirst({
     where: { userId },
     orderBy: { createdAt: 'asc' },
     select: { tenantId: true, role: true },
   })
   if (existing) {
-    // Mevcut tenant’ta default kategorileri idempotent şekilde garanti et
+    // idempotent default kategori seed
     await ensureDefaultCategoriesForTenant(existing.tenantId)
     return { tenantId: existing.tenantId, tenantRole: existing.role as TenantRole }
   }
 
-  // Sadece SUPERADMIN için otomatik tenant açma kuralın korunuyor
   if (role === UserRole.SUPERADMIN) {
-    // Varsa ilk tenant'a bağla
     const anyTenant = await prisma.tenant.findFirst({
       orderBy: { createdAt: 'asc' },
       select: { id: true },
@@ -82,57 +92,46 @@ async function ensureTenantForUser(userId: string, role?: UserRole) {
         update: { role: 'OWNER' },
         create: { userId, tenantId: anyTenant.id, role: 'OWNER' },
       })
-      // Mevcut tenant’ta default kategorileri garanti et
       await ensureDefaultCategoriesForTenant(anyTenant.id)
       return { tenantId: anyTenant.id, tenantRole: TenantRole.OWNER }
     }
 
-    // Hiç tenant yoksa yenisini oluştur
-    const u = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { name: true },
-    })
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
 
-    // Not: seed fonksiyonunu transaction DIŞINDA çağıracağız
     const { tenantId } = await prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: { name: `${u?.name || 'Admin'}`, createdById: userId },
         select: { id: true },
       })
-
-      await tx.membership.create({
-        data: { userId, tenantId: tenant.id, role: 'OWNER' },
-      })
-
-      await tx.branch.create({
-        data: { tenantId: tenant.id, name: 'Merkez', isActive: true },
-      })
-
+      await tx.membership.create({ data: { userId, tenantId: tenant.id, role: 'OWNER' } })
+      await tx.branch.create({ data: { tenantId: tenant.id, name: 'Merkez', isActive: true } })
       return { tenantId: tenant.id }
     })
 
-    // ✅ Transaction bitti, şimdi default kategorileri yükle (idempotent)
     await ensureDefaultCategoriesForTenant(tenantId)
-
     return { tenantId, tenantRole: TenantRole.OWNER }
   }
 
-  // Normal kullanıcılar için burada tenant oluşturma kuralın yoksa null döner
   return { tenantId: null, tenantRole: null }
 }
 
+const SECRET = process.env.NEXTAUTH_SECRET!
+if (!SECRET) {
+  throw new Error('NEXTAUTH_SECRET is required')
+}
+
+/* =========== NextAuth Options =========== */
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
   session: { strategy: 'jwt' },
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: SECRET,
 
   providers: [
+    // 1) Normal Email+Şifre girişi
     Credentials({
       name: 'Email ve Şifre',
-      credentials: {
-        email: { label: 'Email', type: 'email' },
-        password: { label: 'Şifre', type: 'password' },
-      },
+      id: 'credentials',
+      credentials: { email: { label: 'Email', type: 'email' }, password: { label: 'Şifre', type: 'password' } },
       async authorize(credentials) {
         const email = String(credentials?.email || '').trim().toLowerCase()
         const password = String(credentials?.password || '')
@@ -150,7 +149,7 @@ export const authOptions: NextAuthOptions = {
             billingPlan: true,
           },
         })
-        if (!user) return null
+        if (!user || !user.isActive) return null
 
         const ok = await bcrypt.compare(password, user.passwordHash)
         if (!ok) return null
@@ -165,43 +164,93 @@ export const authOptions: NextAuthOptions = {
         } as any
       },
     }),
+
+    // 2) Admin’in imzaladığı token ile impersonate
+    Credentials({
+      id: 'impersonate',
+      name: 'Impersonate',
+      credentials: { token: { label: 'Token', type: 'text' } },
+      async authorize(credentials) {
+        const token = String(credentials?.token || '')
+        if (!token) return null
+
+        const { payload } = await jwtVerify(token, new TextEncoder().encode(SECRET)).catch(() => ({ payload: null as any }))
+        if (!payload?.sub) return null
+
+        const target = await prisma.user.findUnique({
+          where: { id: String(payload.sub) },
+          select: {
+            id: true, email: true, name: true, role: true, isActive: true, billingPlan: true,
+          },
+        })
+        if (!target || !target.isActive) return null
+
+        return {
+          id: target.id,
+          email: target.email,
+          name: target.name ?? '',
+          role: target.role,
+          isActive: true,
+          plan: (target.billingPlan as BillingPlan) ?? 'FREE',
+          __isImpersonated: true,
+          __impersonatorId: (payload as any)?.impersonatorId ?? null,
+          __impersonatedAt: new Date().toISOString(),
+          __scope: ((payload as any)?.scope as 'tenant' | 'global') ?? 'tenant',
+        } as any
+      },
+    }),
   ],
 
   callbacks: {
-    // JWT: login anında ve her istekten önce çalışır
     async jwt({ token, user }) {
-      // İlk login anı
+      // İlk giriş anı
       if (user) {
         token.id = (user as any).id
         token.role = (user as any).role as UserRole
         token.isActive = Boolean((user as any).isActive)
         token.plan = ((user as any).plan as BillingPlan) ?? BillingPlan.FREE
 
-        // 🔑 Tenant garantile + default kategorileri seed et (idempotent)
+        // ⬇️ Impersonate login geldiyse
+        if ((user as any).__isImpersonated) {
+          token.isImpersonated = true
+          token.impersonatorId = (user as any).__impersonatorId ?? null
+          token.impersonatedAt = (user as any).__impersonatedAt ?? new Date().toISOString()
+          token.impersonationScope = (user as any).__scope ?? 'tenant'
+
+          // Hedef kullanıcının mevcut ilk membership’ını bağla (tenant oluşturma yok)
+          const mem = await prisma.membership.findFirst({
+            where: { userId: String(token.id) },
+            orderBy: { createdAt: 'asc' },
+            select: { tenantId: true, role: true },
+          })
+          token.tenantId = mem?.tenantId ?? null
+          token.tenantRole = (mem?.role as TenantRole | null) ?? null
+
+          return token
+        }
+
+        // Normal login: tenant garantile + seed
         const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
         token.tenantId = ensured.tenantId
         token.tenantRole = ensured.tenantRole
         return token
       }
 
-      // Her çağrıda tazele (rol/aktiflik/plan)
+      // Her istek öncesi tazeleme
       if (token.id) {
         const u = await prisma.user.findUnique({
           where: { id: String(token.id) },
-          select: {
-            isActive: true,
-            role: true,
-            billingPlan: true,
-          },
+          select: { isActive: true, role: true, billingPlan: true },
         })
+
         if (u) {
           token.isActive = !!u.isActive
           token.role = (u.role as UserRole) ?? token.role
           token.plan = (u.billingPlan as BillingPlan) ?? token.plan ?? BillingPlan.FREE
         }
 
-        // Sonradan tenant düşmüşse tekrar garantiye al
-        if (!token.tenantId) {
+        // Impersonate değilse ve tenantId boşsa garantiye al
+        if (!token.isImpersonated && !token.tenantId) {
           const ensured = await ensureTenantForUser(String(token.id), token.role as UserRole)
           token.tenantId = ensured.tenantId
           token.tenantRole = ensured.tenantRole
@@ -210,7 +259,6 @@ export const authOptions: NextAuthOptions = {
       return token
     },
 
-    // Session objesi
     async session({ session, token }) {
       if (session.user) {
         session.user.id = String(token.id)
@@ -221,15 +269,23 @@ export const authOptions: NextAuthOptions = {
       session.isPro = session.user?.plan === BillingPlan.PRO
       session.tenantId = (token.tenantId as string | null) ?? null
       session.tenantRole = (token.tenantRole as TenantRole | null) ?? null
+
+      // Impersonation alanları
+      session.isImpersonated = !!token.isImpersonated
+      session.impersonatorId = (token.impersonatorId as string | null) ?? null
+      session.impersonatedAt = (token.impersonatedAt as string | null) ?? null
+
       return session
     },
   },
 
-  // 🔔 İlk oturumda tek seferlik Hoş Geldiniz maili
+  // 🔔 İlk oturumda (sadece normal giriş) tek seferlik Hoş Geldiniz maili
   events: {
-    async signIn({ user }) {
+    async signIn({ user, account }) {
       try {
-        // Bu kullanıcı için daha önce hiç session açılmış mı?
+        // Impersonate provider ise e-posta gönderme
+        if (account?.provider === 'impersonate') return
+
         const previousSessions = await prisma.session.count({ where: { userId: user.id } })
         if (previousSessions === 0 && user.email) {
           await sendMail({

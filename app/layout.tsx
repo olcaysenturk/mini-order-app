@@ -8,7 +8,8 @@ import { AuthedNav } from "./components/AuthedNav"; // ✅ components
 import { Toaster } from 'sonner'
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/options";
-import PaymentReminderOverlay from "./components/PaymentReminderOverlay";
+import ImpersonationBanner from "./components/ImpersonationBanner";
+
 
 
 export const metadata: Metadata = {
@@ -44,6 +45,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-dvh bg-white text-neutral-900 antialiased">
         <Providers>
           {/* ======= Sticky App Header (Light) ======= */}
+          <ImpersonationBanner />
           <header className="sticky top-0 z-40 border-b border-neutral-200/80 bg-white/70 backdrop-blur-md print:hidden">
             <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
               <div className="flex h-16 items-center gap-3 justify-between ">

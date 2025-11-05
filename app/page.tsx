@@ -131,6 +131,7 @@ export default async function Home() {
               {
                 title: "Esnek Katalog",
                 desc: "Kategori & ürün ekle, birim fiyatı belirle, m² hesabı otomatik çalışsın.",
+                img:"/assets/images/product/1.png",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z" />
@@ -140,6 +141,7 @@ export default async function Home() {
               {
                 title: "A4 Yazdırma",
                 desc: "Terzi & müşteri için temiz, grid tabanlı çıktılar. Mobilde bile yazdır.",
+                img:"/assets/images/product/2.png",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M6 2h12v6H6zM4 8h16v10H4zM8 14h8v6H8z" />
@@ -149,6 +151,7 @@ export default async function Home() {
               {
                 title: "Raporlama",
                 desc: "Günlük/haftalık/aylık/yıllık toplam kazancı tek bakışta gör.",
+                img:"/assets/images/product/3.png",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M4 20h16v-2H4zM6 16h3V8H6zm5 0h3V4h-3zm5 0h3v-6h-3z" />
@@ -158,6 +161,7 @@ export default async function Home() {
               {
                 title: "Rol & Yetki",
                 desc: "Admin, personel vb. için yetki seviyeleri; çoklu kullanıcı desteği.",
+                img:"/assets/images/product/4.png",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.33 0-6 1.34-6 3v3h12v-3c0-1.66-2.67-3-6-3Z" />
@@ -167,6 +171,7 @@ export default async function Home() {
               {
                 title: "İskonto & Net Toplam",
                 desc: "İndirim ve peşin/transfer/kart ödemeleriyle net toplamı hesapla.",
+                img:"/assets/images/product/5.png",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M3 6h18v2H3zm0 5h18v7H3zm2 2v3h6v-3z" />
@@ -176,6 +181,7 @@ export default async function Home() {
               {
                 title: "PDF / Paylaş",
                 desc: "PDF olarak indir, WhatsApp veya e-posta ile paylaş.",
+                img:"/assets/images/product/6.png",
                 icon: (
                   <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
                     <path fill="currentColor" d="M14 9V3.5L20.5 10H15a1 1 0 0 1-1-1Zm-9 2h8a2 2 0 0 1 2 2v6H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z" />
@@ -187,6 +193,7 @@ export default async function Home() {
                 key={f.title}
                 className="group rounded-2xl border border-neutral-200 bg-white/70 backdrop-blur p-5 shadow-sm transition hover:shadow-md"
               >
+                
                 <div className="flex items-center justify-center size-10 rounded-lg bg-indigo-50 text-indigo-700">
                   {f.icon}
                 </div>

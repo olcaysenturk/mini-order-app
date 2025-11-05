@@ -3,13 +3,38 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../auth/[...nextauth]/options'
 import { prisma } from '@/app/lib/db'
-import { Prisma } from '@prisma/client'
+import { Prisma, OrderStatus as OrderStatusEnum } from '@prisma/client'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
 
 /* =================== Helpers =================== */
-const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled'])
+// Satır (OrderItem) durumları
+const LineStatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled'])
+
+// Sipariş (Order) durumları — DB enum’unla uyumlu olmalı
+const OrderStatusSchema = z.enum([
+  'pending',
+  'processing',
+  'completed',
+  'cancelled',
+  'workshop',
+  'deleted',
+])
+
+const ORDER_STATUS_VALUES = [
+  OrderStatusEnum.pending,
+  OrderStatusEnum.processing,
+  OrderStatusEnum.completed,
+  OrderStatusEnum.cancelled,
+  OrderStatusEnum.workshop,
+  OrderStatusEnum.deleted,
+] as const
+type OrderStatusLiteral = (typeof ORDER_STATUS_VALUES)[number]
+
+function toOrderStatusEnum(v: string): OrderStatusLiteral | null {
+  return ORDER_STATUS_VALUES.includes(v as OrderStatusLiteral) ? (v as OrderStatusLiteral) : null
+}
 
 /** "YYYY-MM-DD" → Europe/Istanbul local Date (00:00) */
 function parseYMDToLocalDate(ymd?: string | null): Date | null {
@@ -26,17 +51,15 @@ const ItemSchema = z.object({
   variantId: z.string(),
   qty: z.number().int().positive(),
   width: z.number().int().nonnegative(),
-  height: z.number().int().nonnegative(), // UI için tutuluyor
+  height: z.number().int().nonnegative(),
   unitPrice: z.union([z.number(), z.string()]).transform((v) => {
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'))
     return Number.isFinite(n) && n >= 0 ? n : 0
   }),
   fileDensity: z.number().positive().default(1),
   note: z.string().nullable().optional(),
-  // ✅ kutucuk/sıra bilgisi (STOR/AKSESUAR gibi kutusuz alanlarda null olabilir)
   slotIndex: z.number().int().min(0).nullable().optional(),
-  // ✅ satır durumu (UI ve DB ile uyum: processing)
-  lineStatus: StatusSchema.default('processing').optional(),
+  lineStatus: LineStatusSchema.default('processing').optional(),
 })
 
 /**
@@ -44,31 +67,36 @@ const ItemSchema = z.object({
  * - Yeni istemci branchId gönderir.
  * - Eski istemci dealerId gönderiyorsa da kabul edip branchId olarak kullanırız.
  */
-const BodySchema = z.object({
-  branchId: z.string().min(1).optional(),
-  dealerId: z.string().min(1).optional(), // legacy
-  customerId: z.string().optional(),
-  customerName: z.string().optional(),
-  customerPhone: z.string().optional(),
-  note: z.string().nullable().optional(),
-  status: StatusSchema.default('processing'), // UI defaultu ile uyumlu
-  discount: z.union([z.number(), z.string()]).optional(), // TL
-  items: z.array(ItemSchema).min(1),
-  deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // ✅ yeni alan
-  orderType: z.union([z.literal(0), z.literal(1)]).default(0),      // ✅ 0: Yeni, 1: Teklif
-}).refine((d) => !!(d.branchId || d.dealerId), {
-  message: 'branchId (veya legacy dealerId) zorunlu',
-  path: ['branchId'],
-})
+const BodySchema = z
+  .object({
+    branchId: z.string().min(1).optional(),
+    dealerId: z.string().min(1).optional(), // legacy
+    customerId: z.string().optional(),
+    customerName: z.string().optional(),
+    customerPhone: z.string().optional(),
+    note: z.string().nullable().optional(),
+    // Order status — UI defaultu 'processing'
+    status: OrderStatusSchema.default('processing'),
+    discount: z.union([z.number(), z.string()]).optional(), // TL
+    items: z.array(ItemSchema).min(1),
+    deliveryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    orderType: z.union([z.literal(0), z.literal(1)]).default(0),
+  })
+  .refine((d) => !!(d.branchId || d.dealerId), {
+    message: 'branchId (veya legacy dealerId) zorunlu',
+    path: ['branchId'],
+  })
 
 /* =================== GET /api/orders ===================
 Query:
   - branchId: string (yeni)
   - dealerId: string (legacy) — branchId yerine de çalışır
   - customerId: string
-  - status: pending|processing|completed|cancelled (tek veya virgülle birden çok)
+  - status: pending,processing,completed,cancelled,workshop,deleted (virgüllü)
   - q: string (id, not, müşteri adı/telefonu + kalem kategori/varyant/not’ta arar)
   - take: number (default 100, max 200)
+  - includeDeleted=1 → silinenler dahil
+  - only=deleted      → sadece silinenler
 */
 export async function GET(req: NextRequest) {
   try {
@@ -85,41 +113,64 @@ export async function GET(req: NextRequest) {
     const customerIdParam = sp.get('customerId') || undefined
     const q = (sp.get('q') || '').trim()
     const statusParam = (sp.get('status') || '').trim()
-    const valid = new Set(['pending', 'processing', 'completed', 'cancelled'] as const)
-    const inList = statusParam
-      ? statusParam
-          .split(',')
-          .map((s) => s.trim())
-          .filter((s) => valid.has(s as any))
+
+    // status listesi
+    const inListRaw = statusParam
+      ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
       : []
+
+    const inList = inListRaw
+      .map(toOrderStatusEnum)
+      .filter((x): x is OrderStatusLiteral => !!x)
+
+    const includeDeleted =
+      sp.get('includeDeleted') === '1' ||
+      sp.get('includeDeleted')?.toLowerCase() === 'true'
+    const onlyDeleted = sp.get('only') === 'deleted'
 
     const takeRaw = Number(sp.get('take') || '100')
     const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 100
 
-    const where: Prisma.OrderWhereInput = { tenantId }
-    if (branchIdParam) (where as any).branchId = branchIdParam
-    if (customerIdParam) where.customerId = customerIdParam
-    if (inList.length) where.status = { in: inList as any }
+    // AND biriktirerek koşulları kur
+    const and: Prisma.OrderWhereInput[] = [{ tenantId }]
+
+    if (branchIdParam) and.push({ branchId: branchIdParam })
+    if (customerIdParam) and.push({ customerId: customerIdParam })
+
+    if (onlyDeleted) {
+      and.push({ status: OrderStatusEnum.deleted })
+    } else {
+      if (!includeDeleted) and.push({ NOT: { status: OrderStatusEnum.deleted } })
+      if (inList.length === 1) {
+        and.push({ status: inList[0] })
+      } else if (inList.length > 1) {
+        and.push({ status: { in: inList } })
+      }
+    }
 
     if (q) {
-      where.OR = [
-        { id: { contains: q, mode: 'insensitive' } },
-        { note: { contains: q, mode: 'insensitive' } },
-        { customerName: { contains: q, mode: 'insensitive' } },
-        { customerPhone: { contains: q, mode: 'insensitive' } },
-        {
-          items: {
-            some: {
-              OR: [
-                { note: { contains: q, mode: 'insensitive' } },
-                { category: { name: { contains: q, mode: 'insensitive' } } },
-                { variant: { name: { contains: q, mode: 'insensitive' } } },
-              ],
+      and.push({
+        OR: [
+          { id: { contains: q, mode: 'insensitive' } },
+          { note: { contains: q, mode: 'insensitive' } },
+          { customerName: { contains: q, mode: 'insensitive' } },
+          { customerPhone: { contains: q, mode: 'insensitive' } },
+          {
+            items: {
+              some: {
+                OR: [
+                  { note: { contains: q, mode: 'insensitive' } },
+                  { category: { name: { contains: q, mode: 'insensitive' } } },
+                  { variant: { name: { contains: q, mode: 'insensitive' } } },
+                ],
+              },
             },
           },
-        },
-      ]
+        ],
+      })
     }
+
+    const where: Prisma.OrderWhereInput = and.length ? { AND: and } : {}
 
     // 1) Siparişleri çek
     const orders = await prisma.order.findMany({
@@ -132,33 +183,27 @@ export async function GET(req: NextRequest) {
             category: { select: { name: true } },
             variant: { select: { name: true } },
           },
-          // ✅ kutulu alanlarda sıralama: kategori → slotIndex (null last) → id
           orderBy: [{ categoryId: 'asc' }, { slotIndex: 'asc' as const }, { id: 'asc' }],
         },
-        customer: { select: { id: true, name: true, phone: true} },
-        branch: { select: { id: true, name: true } }, // ✅ doğru relation
+        customer: { select: { id: true, name: true, phone: true } },
+        branch: { select: { id: true, name: true } },
       },
     })
 
     if (orders.length === 0) return NextResponse.json([])
 
-    // 2) Bu listede yer alan siparişler için toplu ödeme toplamları (performanslı)
-    const orderIds = orders.map(o => o.id)
-
+    // 2) Ödemeleri grupla
+    const orderIds = orders.map((o) => o.id)
     const paymentSums = await prisma.orderPayment.groupBy({
       by: ['orderId'],
-      where: {
-        tenantId,
-        orderId: { in: orderIds },
-      },
+      where: { tenantId, orderId: { in: orderIds } },
       _sum: { amount: true },
     })
-
     const paidMap = new Map<string, number>(
-      paymentSums.map(row => [row.orderId, Number(row._sum.amount ?? 0)])
+      paymentSums.map((r) => [r.orderId, Number(r._sum.amount ?? 0)])
     )
 
-    // 3) UI payload (paidTotal & balance ekli; totalPaid alias’ı dahil)
+    // 3) Payload
     const payload = orders.map((o) => {
       const total = Number(o.total)
       const discount = Number((o as any).discount ?? 0)
@@ -170,21 +215,21 @@ export async function GET(req: NextRequest) {
         id: o.id,
         createdAt: o.createdAt,
         deliveryAt: o.deliveryAt ?? null,
-        deliveryDate: o.deliveryAt ? o.deliveryAt.toISOString().slice(0, 10) : null, // "YYYY-MM-DD"
+        deliveryDate: o.deliveryAt ? o.deliveryAt.toISOString().slice(0, 10) : null,
         note: o.note,
         status: o.status,
-        branch: o.branch,     // ✅ yeni alan
-        dealer: o.branch,     // 🔁 legacy alias (eski UI için)
+        branch: o.branch,
+        dealer: o.branch, // legacy alias
         customerName: o.customerName,
         customerPhone: o.customerPhone,
         customer: o.customer,
         total,
         discount,
         netTotal,
-        paidTotal,            // ✅ FE tarafından kullanılan asıl alan
-        totalPaid: paidTotal, // ✅ legacy alias
-        balance,              // ✅ borç
-        orderType: o.orderType, // ✅ FE’de filtre/etiket için
+        paidTotal,
+        totalPaid: paidTotal, // legacy
+        balance,
+        orderType: o.orderType,
         items: o.items.map((it) => ({
           id: it.id,
           qty: it.qty,
@@ -194,8 +239,8 @@ export async function GET(req: NextRequest) {
           fileDensity: Number(it.fileDensity),
           subtotal: Number(it.subtotal),
           note: it.note,
-          slotIndex: it.slotIndex ?? null,                 // ✅
-          lineStatus: (it as any).lineStatus ?? 'processing', // ✅ uyum
+          slotIndex: it.slotIndex ?? null,
+          lineStatus: (it as any).lineStatus ?? 'processing',
           category: { name: it.category.name },
           variant: { name: it.variant.name },
         })),
@@ -216,7 +261,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     const tenantId = (session as any)?.tenantId as string | undefined
-    const userId   = (session?.user as any)?.id as string | undefined
+    const userId = (session?.user as any)?.id as string | undefined
     if (!session?.user || !tenantId) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
     }
@@ -237,17 +282,16 @@ export async function POST(req: NextRequest) {
       customerName,
       customerPhone,
       note,
-      status,
+      status, // OrderStatusSchema
       discount,
       items,
       deliveryDate,
-      orderType, // ✅ buradan al
+      orderType,
     } = parsed.data
 
-    // ✅ Tek giriş değişkeni: branchIdInput
     const branchIdInput = branchIdRaw ?? dealerIdRaw!
 
-    // --- ŞUBE doğrulama (Branch tablosu) ---
+    // ŞUBE doğrulama
     const branch = await prisma.branch.findFirst({
       where: { id: branchIdInput, tenantId, isActive: true },
       select: { id: true, name: true },
@@ -256,9 +300,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'invalid_branch' }, { status: 400 })
     }
 
-    // --- Müşteri belirleme (tenant seviyesinde) - transaction DIŞINDA ---
+    // Müşteri belirleme
     let linkedCustomerId: string | null = null
-    let snapName  = (customerName  || '').trim()
+    let snapName = (customerName || '').trim()
     let snapPhone = (customerPhone || '').trim()
 
     if (customerId) {
@@ -268,7 +312,7 @@ export async function POST(req: NextRequest) {
       })
       if (c) {
         linkedCustomerId = c.id
-        if (!snapName)  snapName  = c.name
+        if (!snapName) snapName = c.name
         if (!snapPhone) snapPhone = c.phone
       }
     } else if (snapPhone) {
@@ -288,49 +332,53 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Kalemleri hazırla (STOR için m²; diğerleri için max(1, (en/100)*file)) ---
-    // Güvenlik: ilgili tenant'a ait kategori & varyantlar mı?
-    const catIds = Array.from(new Set(items.map(p => p.categoryId)))
-    const varIds = Array.from(new Set(items.map(p => p.variantId)))
+    // Kategori & varyant doğrulama
+    const catIds = Array.from(new Set(items.map((p) => p.categoryId)))
+    const varIds = Array.from(new Set(items.map((p) => p.variantId)))
 
     const [catRows, varOk] = await Promise.all([
-      prisma.category.findMany({ where: { tenantId, id: { in: catIds } }, select: { id: true, name: true } }),
+      prisma.category.findMany({
+        where: { tenantId, id: { in: catIds } },
+        select: { id: true, name: true },
+      }),
       prisma.variant.findMany({ where: { tenantId, id: { in: varIds } }, select: { id: true } }),
     ])
     if (varOk.length !== varIds.length || catRows.length !== catIds.length) {
       return NextResponse.json({ error: 'forbidden_category_or_variant' }, { status: 403 })
     }
 
-    const nameByCat = new Map(catRows.map(c => [c.id, c.name]))
+    const nameByCat = new Map(catRows.map((c) => [c.id, c.name]))
     const isStorCat = (catId: string) =>
       (nameByCat.get(catId) || '').trim().toLocaleUpperCase('tr-TR') === 'STOR PERDE'
 
-    const prepared = items.map(it => {
-      const qty       = Math.max(1, Math.trunc(Number(it.qty)))
-      const width     = Math.max(0, Math.trunc(Number(it.width)))
-      const height    = Math.max(0, Math.trunc(Number(it.height)))
+    const prepared = items.map((it) => {
+      const qty = Math.max(1, Math.trunc(Number(it.qty)))
+      const width = Math.max(0, Math.trunc(Number(it.width)))
+      const height = Math.max(0, Math.trunc(Number(it.height)))
       const unitPrice = new Prisma.Decimal(it.unitPrice)
-      const density   = new Prisma.Decimal(Number(it.fileDensity) || 1)
+      const density = new Prisma.Decimal(Number(it.fileDensity) || 1)
 
       const wmt = new Prisma.Decimal(width).div(100)
       const hmt = new Prisma.Decimal(height).div(100)
 
-      // ✅ STOR = m², Diğer = max(1, (en/100)*file)
+      // STOR = m², Diğer = max(1, (en/100)*file)
       const base = isStorCat(it.categoryId)
         ? wmt.mul(hmt) // m²
         : Prisma.Decimal.max(new Prisma.Decimal(1), wmt.mul(density))
 
-      const subtotal  = unitPrice.mul(base).mul(qty)
+      const subtotal = unitPrice.mul(base).mul(qty)
 
       return {
         categoryId: it.categoryId,
-        variantId:  it.variantId,
-        qty, width, height,
+        variantId: it.variantId,
+        qty,
+        width,
+        height,
         unitPrice,
         fileDensity: density,
         subtotal,
         note: it.note ?? null,
-        slotIndex: typeof it.slotIndex === 'number' ? it.slotIndex : null, // UI gönderirse sakla
+        slotIndex: typeof it.slotIndex === 'number' ? it.slotIndex : null,
         lineStatus: (it as any).lineStatus ?? 'processing',
       }
     })
@@ -344,22 +392,22 @@ export async function POST(req: NextRequest) {
     )
     const net = total.sub(discountClamped)
 
-    // --- Create (order + nested items) ---
+    // Create
     const created = await prisma.order.create({
       data: {
         tenantId,
-        branchId: branch.id,                 // ✅ artık branchId
+        branchId: branch.id,
         createdById: userId ?? null,
         note: note ?? null,
-        status,
+      status, // OrderStatus enum — DB’de mevcut olmalı
         customerId: linkedCustomerId,
-        customerName:  snapName  || '',
+        customerName: snapName || '',
         customerPhone: snapPhone || '',
         total,
         discount: discountClamped,
         netTotal: net,
-        deliveryAt: parseYMDToLocalDate(deliveryDate) ?? undefined, // ✅ teslim tarihi
-        orderType, // ✅ Int olarak DB’ye yaz
+        deliveryAt: parseYMDToLocalDate(deliveryDate) ?? undefined,
+        orderType,
         items: { create: prepared },
       },
       include: {
@@ -368,37 +416,36 @@ export async function POST(req: NextRequest) {
           orderBy: [{ categoryId: 'asc' }, { slotIndex: 'asc' as const }, { id: 'asc' }],
         },
         customer: { select: { id: true, name: true, phone: true } },
-        branch:  { select: { id: true, name: true } }, // ✅ doğru relation
+        branch: { select: { id: true, name: true } },
       },
     })
 
-    // Sayılara cast (UI için) + legacy alias + ilk ödeme özetleri
     const netNumber = Number(created.netTotal)
     const payload = {
       ...created,
       branch: created.branch,
       dealer: created.branch, // legacy alias
-      total:    Number(created.total),
+      total: Number(created.total),
       discount: Number(created.discount),
       netTotal: netNumber,
-      paidTotal: 0,     // ✅ yeni sipariş için başlangıç
-      totalPaid: 0,     // ✅ legacy alias
-      balance:   netNumber,
-      deliveryDate: created.deliveryAt ? created.deliveryAt.toISOString().slice(0,10) : null,
-      orderType: created.orderType, // ✅ FE’ye geri dön
-      items: created.items.map(it => ({
+      paidTotal: 0,
+      totalPaid: 0,
+      balance: netNumber,
+      deliveryDate: created.deliveryAt ? created.deliveryAt.toISOString().slice(0, 10) : null,
+      orderType: created.orderType,
+      items: created.items.map((it) => ({
         id: it.id,
         categoryId: it.categoryId,
         variantId: it.variantId,
         qty: it.qty,
         width: it.width,
         height: it.height,
-        unitPrice:   Number(it.unitPrice),
+        unitPrice: Number(it.unitPrice),
         fileDensity: Number(it.fileDensity),
-        subtotal:    Number(it.subtotal),
+        subtotal: Number(it.subtotal),
         note: it.note,
         slotIndex: it.slotIndex ?? null,
-        lineStatus: (it as any).lineStatus ?? 'processing', // ✅ uyum
+        lineStatus: (it as any).lineStatus ?? 'processing',
         category: { name: it.category.name },
         variant: { name: it.variant.name },
       })),

@@ -9,7 +9,7 @@ import { PageOverlay } from '../components/PageOverlay'
 import { parseYMDToLocalDate } from '../lib/date'
 
 /* ========= Types ========= */
-type Status = 'processing' | 'pending' | 'completed' | 'cancelled' | 'workshop'
+type Status = 'processing' | 'pending' | 'completed' | 'cancelled' | 'workshop' | 'deleted'
 type PaymentMethod = 'CASH' | 'TRANSFER' | 'CARD'
 
 type Profile = {
@@ -72,6 +72,7 @@ const statusLabel: Record<Status, string> = {
   completed: 'Tamamlandı',
   cancelled: 'İptal',
   workshop: 'Atölyede',
+  deleted: 'Silindi'
 }
 const statusDot: Record<Status, string> = {
   pending: 'bg-amber-500',
@@ -79,6 +80,7 @@ const statusDot: Record<Status, string> = {
   completed: 'bg-emerald-600',
   cancelled: 'bg-rose-600',
   workshop: 'bg-blue-100',
+  deleted: 'bg-red-100'
 }
 
 const isStorPerdeByName = (name: string) => normalize(name) === 'STOR PERDE'

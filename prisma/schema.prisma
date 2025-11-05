@@ -459,6 +459,21 @@ model PasswordResetToken {
   @@index([userId, expiresAt])
 }
 
+model ImpersonationLog {
+  id             String   @id @default(cuid())
+  impersonatorId String
+  targetUserId   String
+  tenantId       String?
+  scope          String   // 'tenant' | 'global'
+  startedAt      DateTime @default(now())
+  endedAt        DateTime?
+  ip             String?
+  ua             String?
+
+  @@index([impersonatorId, startedAt])
+  @@index([targetUserId, startedAt])
+}
+
 /**
  * ============ Enums ============
  */
@@ -500,6 +515,7 @@ enum OrderStatus {
   completed
   cancelled
   workshop
+  deleted
 }
 
 enum ExtraType {
@@ -512,5 +528,4 @@ enum OrderLineStatus {
   processing
   completed
   cancelled
-  workshop
 }

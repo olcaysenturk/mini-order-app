@@ -5,7 +5,11 @@ import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 
 /* ================= Zod Schemas ================ */
-const StatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled', 'workshop'])
+// Order için: deleted & workshop dahil
+const OrderStatusSchema = z.enum(['pending', 'processing', 'completed', 'cancelled', 'workshop', 'deleted'])
+// OrderItem (line) için: deleted/workshop yok
+const LineStatusSchema  = z.enum(['pending', 'processing', 'completed', 'cancelled'])
+
 const LinesSchema  = z.array(z.string().transform(s => s.trim())).max(6).optional()
 
 // ✅ "YYYY-MM-DD" veya null kabul eden tarih şeması
@@ -29,8 +33,8 @@ const PatchItemSchema = z.object({
   fileDensity: z.number().positive().default(1), // default 1
   note: z.string().nullable().optional(),
 
-  // ✅ eklendi
-  lineStatus: StatusSchema.default('pending'),
+  // ⬇️ line statüsü OrderItem enum’u ile uyumlu
+  lineStatus: LineStatusSchema.default('processing'),
   slotIndex: z.number().int().nullable().optional(),
 
   _action: z.enum(['upsert', 'delete']).optional(), // default: upsert
@@ -40,7 +44,8 @@ const PatchBodySchema = z.object({
   note: z.string().nullable().optional(),
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
-  status: StatusSchema.optional(),
+  // ⬇️ Order statüsü (deleted/workshop dahil)
+  status: OrderStatusSchema.optional(),
   items: z.array(PatchItemSchema).optional(),
   storLines: LinesSchema,
   accessoryLines: LinesSchema,
@@ -48,6 +53,9 @@ const PatchBodySchema = z.object({
 
   // ✅ sadece orderType eklendi (0: Yeni Sipariş, 1: Fiyat Teklifi)
   orderType: z.union([z.literal(0), z.literal(1)]).optional(),
+
+  // ✅ soft-deleted siparişi geri alma desteği
+  restore: z.boolean().optional(),
 })
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -88,15 +96,14 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       total:    Number(order.total),
       discount: Number(order.discount),
       netTotal: Number(order.netTotal),
-      orderType: Number(order.orderType ?? 0), // ✅ eklendi
+      orderType: Number(order.orderType ?? 0),
       items: order.items.map(it => ({
         ...it,
         unitPrice:   Number(it.unitPrice),
         fileDensity: Number(it.fileDensity),
         subtotal:    Number(it.subtotal),
-        // lineStatus ve slotIndex açıkça aktarılıyor
-        lineStatus: it.lineStatus,
-        slotIndex: it.slotIndex,
+        lineStatus:  it.lineStatus,
+        slotIndex:   it.slotIndex,
       })),
       payments: order.payments.map(p => ({
         ...p,
@@ -132,9 +139,20 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       items = [],
       storLines,
       accessoryLines,
-      deliveryAt, // ✅ frontend’den gelen "YYYY-MM-DD" | null
-      orderType,  // ✅ eklendi
+      deliveryAt, // "YYYY-MM-DD" | null
+      orderType,
+      restore,
     } = parsed.data
+
+    // ⬇️ Geri alma isteği (soft-deleted → aktif)
+    if (restore) {
+      const newStatus = status && status !== 'deleted' ? status : 'pending'
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { status: newStatus, deletedAt: null },
+      })
+      return NextResponse.json({ ok: true, status: newStatus })
+    }
 
     // Bu siparişe ait mevcut kalem id’leri (sahiplik kontrolü)
     const owned = await prisma.orderItem.findMany({ where: { orderId }, select: { id: true } })
@@ -167,7 +185,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       const price     = new Prisma.Decimal(it.unitPrice ?? 0)
       const density   = new Prisma.Decimal(Number(it.fileDensity ?? 1))
 
-      // Yeni formül: subtotal = unitPrice * qty * (width/100) * fileDensity
+      // (Basit formül) subtotal = unitPrice * qty * (width/100) * fileDensity
+      // Not: Eğer STOR/diğer ayrımı istiyorsan burada kategori adına göre
+      // m² veya file yoğunluğu mantığını uygulayabilirsin (POST'takiyle aynı).
       const subtotal  = price
         .mul(new Prisma.Decimal(widthInt).div(100))
         .mul(density)
@@ -178,7 +198,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           ? it.slotIndex
           : null
 
-      // Ortak alanlar — update için
       const lineDataForUpdate: Prisma.OrderItemUpdateInput = {
         qty: qtyInt,
         width: widthInt,
@@ -190,8 +209,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         category: { connect: { id: String(it.categoryId) } },
         variant:  { connect: { id: String(it.variantId) } },
 
-        // ✅ kritik alanlar:
-        lineStatus: { set: it.lineStatus ?? 'pending' },
+        lineStatus: { set: it.lineStatus ?? 'processing' },
         slotIndex:  { set: slotForDb },
       }
 
@@ -201,7 +219,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         }
         ops.push(prisma.orderItem.update({ where: { id: String(it.id) }, data: lineDataForUpdate }))
       } else {
-        // create için ayrıca order bağlantısını veriyoruz
         const lineDataForCreate: Prisma.OrderItemCreateInput = {
           qty: qtyInt,
           width: widthInt,
@@ -214,8 +231,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           variant:  { connect: { id: String(it.variantId) } },
           order: { connect: { id: orderId } },
 
-          // ✅ kritik alanlar:
-          lineStatus: it.lineStatus ?? 'pending',
+          lineStatus: it.lineStatus ?? 'processing',
           slotIndex:  slotForDb,
         }
         ops.push(prisma.orderItem.create({ data: lineDataForCreate }))
@@ -234,16 +250,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (typeof storLines !== 'undefined')     headerPatch.storLines = storClean as unknown as Prisma.InputJsonValue
     if (typeof accessoryLines !== 'undefined')headerPatch.accessoryLines = accClean as unknown as Prisma.InputJsonValue
 
-    // ✅ "YYYY-MM-DD" → Date (UTC 00:00) veya null
+    // "YYYY-MM-DD" → Date (UTC 00:00) veya null
     if (typeof deliveryAt !== 'undefined') {
       headerPatch.deliveryAt = deliveryAt
         ? new Date(`${deliveryAt}T00:00:00Z`)
         : null
     }
 
-    // ✅ orderType güncelle
     if (typeof orderType !== 'undefined') {
-      headerPatch.orderType = orderType;
+      headerPatch.orderType = orderType
     }
 
     if (Object.keys(headerPatch).length) {
@@ -282,7 +297,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       },
     })
 
-    // Güncel sipariş + ödemeler (ödenen/kalan hesaplı)
+    // Güncel sipariş + ödemeler
     const updated = await prisma.order.findUnique({
       where: { id: orderId },
       include: {
@@ -304,7 +319,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       total:    Number(updated.total),
       discount: Number(updated.discount),
       netTotal: Number(updated.netTotal),
-      orderType: Number(updated.orderType ?? 0), // ✅ eklendi
+      orderType: Number(updated.orderType ?? 0),
       items: updated.items.map(it => ({
         ...it,
         unitPrice:   Number(it.unitPrice),
@@ -324,10 +339,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 }
 
 /* ============== DELETE /api/orders/:id ============== */
+// 🔁 SOFT DELETE: status='deleted', deletedAt=now()
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
     const { id } = await ctx.params
-    await prisma.order.delete({ where: { id } })
+    await prisma.order.update({
+      where: { id },
+      data: { status: 'deleted', deletedAt: new Date() },
+    })
     return NextResponse.json({ ok: true })
   } catch (e) {
     console.error('DELETE /orders/:id error:', e)

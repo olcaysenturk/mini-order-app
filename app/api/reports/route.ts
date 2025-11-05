@@ -10,7 +10,7 @@ export const runtime = 'nodejs'
 /* ---------- Consts ---------- */
 const IST_TZ = 'Europe/Istanbul' as const
 
-/* ---------- Date helpers (yalnızca aralık param/parsing için) ---------- */
+/* ---------- Date helpers ---------- */
 const parseISODate = (s: string | null) => {
   if (!s) return null
   const d = new Date(s)
@@ -35,6 +35,11 @@ function branchFilterSql(branchId: string | null) {
     : Prisma.sql``
 }
 
+// Silinmemiş sipariş filtresi (alias'a göre)
+function notDeleted(alias: 'o' | 'o1' | 'o2' = 'o') {
+  return Prisma.sql` AND ${Prisma.raw(alias)}."deletedAt" IS NULL `
+}
+
 /* ---------- Handler ---------- */
 export async function GET(req: NextRequest) {
   try {
@@ -50,7 +55,7 @@ export async function GET(req: NextRequest) {
     // Global kural: orderType = 1 dahil edilmez
     const orderTypeFilter = Prisma.sql` AND COALESCE(o."orderType", 0) <> 1 `
 
-    /* ======= SECTION: OVERVIEW (İstanbul gün/hafta/ay/yıl) ======= */
+    /* ======= SECTION: OVERVIEW ======= */
     if (section === 'overview') {
       const totalsRow = await prisma.$queryRaw<
         { day: number | null; week: number | null; month: number | null; year: number | null }[]
@@ -74,10 +79,11 @@ export async function GET(req: NextRequest) {
         WHERE o."tenantId" = ${tenantId}
           AND o."status" = ANY(${statusArray})
           ${orderTypeFilter}
+          ${notDeleted('o')}
       `)
       const totals = totalsRow[0] ?? { day: 0, week: 0, month: 0, year: 0 }
 
-      // Son 30 gün (İstanbul gününe göre)
+      // Son 30 gün
       const rows = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
         Prisma.sql`
           WITH days AS (
@@ -95,6 +101,7 @@ export async function GET(req: NextRequest) {
             WHERE o."tenantId" = ${tenantId}
               AND o."status" = ANY(${statusArray})
               ${orderTypeFilter}
+              ${notDeleted('o')}
             GROUP BY 1
           )
           SELECT d.d, COALESCE(a.total, 0)::float AS total
@@ -139,6 +146,7 @@ export async function GET(req: NextRequest) {
                            AND o2."tenantId" = ${tenantId}
                            AND o2."status" = ANY(${statusArray})
                            AND COALESCE(o2."orderType",0) <> 1
+                           ${notDeleted('o2')}
             WHERE op."tenantId" = ${tenantId}
             GROUP BY op."orderId"
           )
@@ -152,6 +160,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
         `
       )
       const s = summary[0] ?? { paid_amount: 0, paid_count: 0, unpaid_amount: 0, unpaid_count: 0 }
@@ -167,12 +176,13 @@ export async function GET(req: NextRequest) {
             AND o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY 1
           ORDER BY amount DESC
         `
       )
 
-      // Son 30 gün kümülatif (İstanbul gününe göre)
+      // Son 30 gün kümülatif
       const rowsOrders = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
         Prisma.sql`
           SELECT (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
@@ -181,6 +191,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY 1
         `
       )
@@ -195,11 +206,11 @@ export async function GET(req: NextRequest) {
             AND o."status" = ANY(${statusArray})
             AND op."paidAt" IS NOT NULL
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY 1
         `
       )
 
-      // 30 günlük gün dizisi
       const daysRows = await prisma.$queryRaw<{ d: Date }[]>(
         Prisma.sql`
           SELECT generate_series(
@@ -250,6 +261,7 @@ export async function GET(req: NextRequest) {
         WHERE o."tenantId" = ${tenantId}
           AND o."status" = ANY(${statusArray})
           ${orderTypeFilter}
+          ${notDeleted('o')}
         GROUP BY 1
         ORDER BY amount DESC
       `)
@@ -265,7 +277,7 @@ export async function GET(req: NextRequest) {
       }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
-    /* ======= SECTION: DAILY (son 30 gün, İstanbul günü) ======= */
+    /* ======= SECTION: DAILY ======= */
     if (section === 'daily') {
       const rowsRev = await prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(
         Prisma.sql`
@@ -275,6 +287,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY 1
         `
       )
@@ -289,6 +302,7 @@ export async function GET(req: NextRequest) {
             AND o."status" = ANY(${statusArray})
             AND op."paidAt" IS NOT NULL
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY 1
         `
       )
@@ -328,6 +342,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY c."name"
           ORDER BY amount DESC
         `
@@ -350,6 +365,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY v."name", c."name"
           ORDER BY amount DESC
           LIMIT 20
@@ -370,6 +386,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY 1
           ORDER BY amount DESC
           LIMIT 20
@@ -378,7 +395,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ topCustomers: rows }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
-    /* ======= SECTION: PRODUCTS (tüm ürünler, sayfalama + arama + sıralama) ======= */
+    /* ======= SECTION: PRODUCTS ======= */
     if (section === 'products') {
       const q = (req.nextUrl.searchParams.get('q') || '').trim();
       const page = Math.max(1, parseInt(req.nextUrl.searchParams.get('page') || '1', 10));
@@ -386,19 +403,16 @@ export async function GET(req: NextRequest) {
       const sort = (req.nextUrl.searchParams.get('sort') || 'amount').toLowerCase();
       const dir = (req.nextUrl.searchParams.get('dir') || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
-      // Sıralama sütunu
       const sortSql =
         sort === 'qty'  ? Prisma.sql`qty ${Prisma.raw(dir)}`
       : sort === 'area' ? Prisma.sql`area_m2 ${Prisma.raw(dir)}`
       : sort === 'product' ? Prisma.sql`product ${Prisma.raw(dir)}`
       : Prisma.sql`amount ${Prisma.raw(dir)}`; // default amount
 
-      // Arama koşulu (ürün adına)
       const whereSearch = q
         ? Prisma.sql` AND COALESCE(v."name",'Ürün') ILIKE ${'%' + q + '%'} `
         : Prisma.sql``;
 
-      // TOPLAM adet için ayrı sayım (distinct ürün adına göre)
       const totalRows = await prisma.$queryRaw<{ total: number }[]>(Prisma.sql`
         SELECT COUNT(*)::int AS total FROM (
           SELECT COALESCE(v."name",'Ürün') AS product
@@ -408,6 +422,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             AND COALESCE(o."orderType",0) <> 1
+            ${notDeleted('o')}
             ${whereSearch}
           GROUP BY 1
         ) t
@@ -419,7 +434,7 @@ export async function GET(req: NextRequest) {
         SELECT
           COALESCE(v."name",'Ürün') AS product,
           COALESCE(SUM(oi."qty"), 0)::int AS qty,
-          COALESCE(SUM( ((oi."width" * oi."height") / 10000.0) * oi."qty" ), 0)::float AS area_m2, -- cm*cm -> m2
+          COALESCE(SUM( ((oi."width" * oi."height") / 10000.0) * oi."qty" ), 0)::float AS area_m2,
           COALESCE(SUM(oi."subtotal"), 0)::float AS amount
         FROM "OrderItem" oi
         JOIN "Order" o ON o."id" = oi."orderId"
@@ -427,6 +442,7 @@ export async function GET(req: NextRequest) {
         WHERE o."tenantId" = ${tenantId}
           AND o."status" = ANY(${statusArray})
           AND COALESCE(o."orderType",0) <> 1
+          ${notDeleted('o')}
           ${whereSearch}
         GROUP BY 1
         ORDER BY ${sortSql}
@@ -446,8 +462,7 @@ export async function GET(req: NextRequest) {
       }, { headers: { 'Cache-Control': 'private, max-age=30' } });
     }
 
-
-    /* ======= SECTION: BRANCHES (Şube bazlı ciro & tahsilat) ======= */
+    /* ======= SECTION: BRANCHES ======= */
     if (section === 'branches') {
       const rows = await prisma.$queryRaw<{
         branchId: string | null; branch: string | null; code: string | null;
@@ -461,6 +476,7 @@ export async function GET(req: NextRequest) {
                            AND o1."tenantId" = ${tenantId}
                            AND o1."status" = ANY(${statusArray})
                            AND COALESCE(o1."orderType",0) <> 1
+                           ${notDeleted('o1')}
             WHERE op."tenantId" = ${tenantId}
             GROUP BY op."orderId"
           )
@@ -477,6 +493,7 @@ export async function GET(req: NextRequest) {
           WHERE o."tenantId" = ${tenantId}
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
+            ${notDeleted('o')}
           GROUP BY b."id", b."name", b."code"
           ORDER BY revenue DESC
         `
@@ -494,7 +511,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ byBranch }, { headers: { 'Cache-Control': 'private, max-age=120' } })
     }
 
-    /* ======= NEW: DAILY_BY_BRANCH (tarih aralığı + branchId, İstanbul günü) ======= */
+    /* ======= SECTION: DAILY_BY_BRANCH ======= */
     if (section === 'daily_by_branch') {
       const branchId = req.nextUrl.searchParams.get('branchId')
       const from = parseISODate(req.nextUrl.searchParams.get('from'))
@@ -502,7 +519,6 @@ export async function GET(req: NextRequest) {
       if (!branchId || !from || !to) {
         return NextResponse.json({ lastByBranch: [] }, { headers: { 'Cache-Control': 'private, max-age=30' } })
       }
-      // Sadece DATE (İstanbul günlerine göre karşılaştıracağız)
       const fromDate = from.toISOString().slice(0,10)
       const toDate   = to.toISOString().slice(0,10)
 
@@ -516,6 +532,7 @@ export async function GET(req: NextRequest) {
             AND o."status" = ANY(${statusArray})
             ${orderTypeFilter}
             ${branchFilterSql(branchId)}
+            ${notDeleted('o')}
           GROUP BY 1
           ORDER BY 1 ASC
         `
@@ -534,12 +551,12 @@ export async function GET(req: NextRequest) {
             AND (op."paidAt" AT TIME ZONE ${IST_TZ})::date BETWEEN ${fromDate}::date AND ${toDate}::date
             ${orderTypeFilter}
             ${branchFilterSql(branchId)}
+            ${notDeleted('o')}
           GROUP BY 1
           ORDER BY 1 ASC
         `
       )
 
-      // İstenen aralıkta gün üret (İstanbul günü)
       const daysRows = await prisma.$queryRaw<{ d: Date }[]>(
         Prisma.sql`
           SELECT generate_series(${fromDate}::date, ${toDate}::date, INTERVAL '1 day')::date AS d
@@ -561,7 +578,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ lastByBranch }, { headers: { 'Cache-Control': 'private, max-age=30' } })
     }
 
-    /* ======= NEW: METHODS_BY_DATE (tarih aralığı + branchId, İstanbul günü) ======= */
+    /* ======= SECTION: METHODS_BY_DATE ======= */
     if (section === 'methods_by_date') {
       const branchId = req.nextUrl.searchParams.get('branchId')
       const from = parseISODate(req.nextUrl.searchParams.get('from'))
@@ -587,6 +604,7 @@ export async function GET(req: NextRequest) {
             AND (op."paidAt" AT TIME ZONE ${IST_TZ})::date BETWEEN ${fromDate}::date AND ${toDate}::date
             ${orderTypeFilter}
             ${branchFilterSql(branchId)}
+            ${notDeleted('o')}
           GROUP BY 1, 2
           ORDER BY 1 DESC, 3 DESC
         `

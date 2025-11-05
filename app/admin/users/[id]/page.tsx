@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { signIn, useSession } from "next-auth/react";
 
 /* ================= Types ================ */
 type Plan = "FREE" | "PRO";
@@ -71,18 +72,8 @@ function startOfMonth(d: Date) {
 }
 function labelTR(year: number, m0: number) {
   const names = [
-    "Ocak",
-    "Şubat",
-    "Mart",
-    "Nisan",
-    "Mayıs",
-    "Haziran",
-    "Temmuz",
-    "Ağustos",
-    "Eylül",
-    "Ekim",
-    "Kasım",
-    "Aralık",
+    "Ocak","Şubat","Mart","Nisan","Mayıs","Haziran",
+    "Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık",
   ];
   return `${names[m0]} ${year}`;
 }
@@ -94,35 +85,21 @@ function daysLeft(sub: Subscription) {
       ? new Date(sub.trialEndsAt)
       : null) || (sub.currentPeriodEnd ? new Date(sub.currentPeriodEnd) : null);
   if (!ends || isNaN(ends.getTime())) return null;
-  const diff = Math.ceil(
-    (ends.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  );
+  const diff = Math.ceil((ends.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   return diff;
 }
-function buildMonthsForYear(
-  memberSince: Date,
-  invoices: Invoice[],
-  year: number
-) {
+function buildMonthsForYear(memberSince: Date, invoices: Invoice[], year: number) {
   const now = new Date();
   const months: Array<{
-    y: number;
-    m0: number;
-    label: string;
-    paid: boolean;
-    invoiceId?: string;
-    paidAt?: string;
-    payable: boolean; // geleceği kilitle
+    y: number; m0: number; label: string; paid: boolean;
+    invoiceId?: string; paidAt?: string; payable: boolean;
   }> = [];
 
   const ms = startOfMonth(memberSince);
   const jan = new Date(year, 0, 1);
   const dec = new Date(year, 11, 31, 23, 59, 59, 999);
   const begin = startOfMonth(ms > jan ? ms : jan);
-  const end = new Date(
-    Math.min(startOfMonth(now).getTime(), startOfMonth(dec).getTime())
-  );
-
+  const end = new Date(Math.min(startOfMonth(now).getTime(), startOfMonth(dec).getTime()));
   if (begin.getTime() > end.getTime()) return months;
 
   const paidMap = new Map<string, Invoice>();
@@ -130,12 +107,7 @@ function buildMonthsForYear(
     if (inv.status !== "paid") continue;
     const paidD = inv.paidAt ? new Date(inv.paidAt) : null;
     const dueD = inv.dueAt ? new Date(inv.dueAt) : null;
-    const anchor =
-      paidD && !isNaN(paidD.getTime())
-        ? paidD
-        : dueD && !isNaN(dueD.getTime())
-        ? dueD
-        : null;
+    const anchor = paidD && !isNaN(paidD.getTime()) ? paidD : dueD && !isNaN(dueD.getTime()) ? dueD : null;
     if (!anchor) continue;
     paidMap.set(`${anchor.getFullYear()}-${anchor.getMonth()}`, inv);
   }
@@ -151,7 +123,7 @@ function buildMonthsForYear(
       paid: !!inv,
       invoiceId: inv?.id,
       paidAt: inv?.paidAt ?? undefined,
-      payable: true, // sadece bugüne kadar
+      payable: true,
     });
     cursor.setMonth(cursor.getMonth() + 1);
     cursor = startOfMonth(cursor);
@@ -161,6 +133,10 @@ function buildMonthsForYear(
 
 /* ================= Page ================= */
 export default function AdminUserDetailPage() {
+  const { data: session } = useSession();
+  const isAdmin =
+    session?.user?.role === "ADMIN" || session?.user?.role === "SUPERADMIN";
+
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const sp = useSearchParams();
@@ -179,10 +155,7 @@ export default function AdminUserDetailPage() {
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch(
-        `/api/admin/users/${id}/billing?year=${selectedYear}`,
-        { cache: "no-store" }
-      );
+      const res = await fetch(`/api/admin/users/${id}/billing?year=${selectedYear}`, { cache: "no-store" });
       if (!res.ok) {
         const txt = await res.text().catch(() => "");
         throw new Error(txt || "Yüklenemedi");
@@ -198,7 +171,7 @@ export default function AdminUserDetailPage() {
   };
 
   useEffect(() => {
-    load(); /* eslint-disable-next-line */
+    load(); // eslint-disable-next-line
   }, [id, selectedYear]);
 
   const user = data?.user ?? null;
@@ -241,13 +214,44 @@ export default function AdminUserDetailPage() {
     router.replace(`?${usp.toString()}`, { scroll: false });
   };
 
+  // ⬇️ Impersonation: Kullanıcı olarak giriş yap
+  const [impLoading, setImpLoading] = useState(false);
+  const loginAsUser = async () => {
+    if (!user) return;
+    setImpLoading(true);
+    try {
+      const r = await fetch(`/api/admin/impersonate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: user.id, scope: "tenant" }),
+      });
+
+      const raw = await r.text();              // <-- önce ham metni al
+      let out: any = null;
+      try { out = raw ? JSON.parse(raw) : null } catch { /* yut */ }
+
+      if (!r.ok) {
+        const msg = out?.error || raw || "İşlem başarısız";
+        throw new Error(msg);
+      }
+
+      const { token, next } = (out || {}) as { token: string; next?: string };
+      if (!token) throw new Error("Token üretilemedi.");
+
+      await signIn("impersonate", { token, redirect: true, callbackUrl: next || "/" });
+    } catch (e: any) {
+      console.error(e);
+      alert(e?.message || "İşlem başarısız");
+    } finally {
+      setImpLoading(false);
+    }
+  };
+
   return (
     <main className="mx-auto max-w-6xl p-4 sm:p-6">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Kullanıcı Detayı
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight">Kullanıcı Detayı</h1>
           {user ? (
             <div className="mt-1 text-sm text-neutral-600">
               {user.name ?? "—"} • {user.email} • Rol: <b>{user.role}</b>
@@ -256,6 +260,7 @@ export default function AdminUserDetailPage() {
             <div className="mt-2 h-4 w-48 animate-pulse rounded bg-neutral-200" />
           ) : null}
         </div>
+
         <div className="flex items-center gap-2">
           <select
             className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
@@ -274,18 +279,31 @@ export default function AdminUserDetailPage() {
           </select>
 
           {user ? (
-            <button
-              onClick={toggleActive}
-              disabled={toggling}
-              className={`inline-flex h-9 items-center gap-2 rounded-xl px-3 text-sm shadow-sm ${
-                user.isActive
-                  ? "bg-rose-600 text-white hover:bg-rose-700"
-                  : "bg-emerald-600 text-white hover:bg-emerald-700"
-              } disabled:opacity-60`}
-              title={user.isActive ? "Pasife al" : "Aktif et"}
-            >
-              {user.isActive ? "Pasife Al" : "Aktif Et"}
-            </button>
+            <>
+              {isAdmin && (
+                <button
+                  onClick={loginAsUser}
+                  disabled={impLoading || !user.isActive}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+                  title="Bu kullanıcı olarak oturum aç"
+                >
+                  {impLoading ? "Açılıyor…" : "Kullanıcı olarak giriş yap"}
+                </button>
+              )}
+
+              <button
+                onClick={toggleActive}
+                disabled={toggling}
+                className={`inline-flex h-9 items-center gap-2 rounded-xl px-3 text-sm shadow-sm ${
+                  user.isActive
+                    ? "bg-rose-600 text-white hover:bg-rose-700"
+                    : "bg-emerald-600 text-white hover:bg-emerald-700"
+                } disabled:opacity-60`}
+                title={user.isActive ? "Pasife al" : "Aktif et"}
+              >
+                {user.isActive ? "Pasife Al" : "Aktif Et"}
+              </button>
+            </>
           ) : loading ? (
             <div className="h-9 w-28 animate-pulse rounded-xl bg-neutral-200" />
           ) : null}
@@ -350,15 +368,10 @@ function TenantBillingCard({
   const left = daysLeft(sub);
   const planHuman = sub?.plan === "PRO" ? "PRO" : "FREE";
   const statusHuman =
-    sub?.status === "trialing"
-      ? "Deneme"
-      : sub?.status === "active"
-      ? "Aktif"
-      : sub?.status === "past_due"
-      ? "Gecikmiş"
-      : sub?.status === "canceled"
-      ? "İptal"
-      : "—";
+    sub?.status === "trialing" ? "Deneme"
+    : sub?.status === "active" ? "Aktif"
+    : sub?.status === "past_due" ? "Gecikmiş"
+    : sub?.status === "canceled" ? "İptal" : "—";
 
   return (
     <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
@@ -378,11 +391,7 @@ function TenantBillingCard({
           </div>
         </div>
 
-        <PlanChanger
-          tenantId={tenant.id}
-          current={sub?.plan ?? "FREE"}
-          onChanged={onChanged}
-        />
+        <PlanChanger tenantId={tenant.id} current={sub?.plan ?? "FREE"} onChanged={onChanged} />
       </div>
 
       <MonthList tenantId={tenant.id} months={months} onChanged={onChanged} />
@@ -480,8 +489,8 @@ function MonthList({
     const key = `${y}-${m0}`;
     setPayingKey(key);
     try {
-      // 🔧 tenant tabanlı endpoint
-      const res = await fetch(`/api/admin/users/${tenantId}/billing/pay`, {
+      // ✅ tenant tabanlı endpoint
+      const res = await fetch(`/api/admin/tenants/${tenantId}/billing/pay`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ year: y, month: m0 + 1 }),
@@ -501,19 +510,14 @@ function MonthList({
     <div className="mt-4 rounded-xl border border-neutral-200">
       <div className="px-3 py-2 text-sm font-medium">Ay Bazında Durum</div>
       {months.length === 0 ? (
-        <div className="px-3 pb-3 text-sm text-neutral-600">
-          Listelenecek ay yok.
-        </div>
+        <div className="px-3 pb-3 text-sm text-neutral-600">Listelenecek ay yok.</div>
       ) : (
         <ul className="divide-y">
           {months.map((m) => {
             const key = `${m.y}-${m.m0}`;
             const canPay = !m.paid && m.payable;
             return (
-              <li
-                key={key}
-                className="px-3 py-2 text-sm flex items-center justify-between"
-              >
+              <li key={key} className="px-3 py-2 text-sm flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span
                     className="inline-flex size-2.5 rounded-full"
@@ -539,9 +543,7 @@ function MonthList({
                         className="ms-2 inline-flex h-7 items-center gap-2 rounded-lg border border-neutral-200 bg-white px-2 text-[12px] text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
                         title="Ödeme Yap"
                       >
-                        {payingKey === key
-                          ? "Kaydediliyor…"
-                          : "Ödeme Yap (2000 ₺)"}
+                        {payingKey === key ? "Kaydediliyor…" : "Ödeme Yap (2000 ₺)"}
                       </button>
                     </>
                   )}
@@ -596,10 +598,7 @@ function InvoiceTable({ invoices }: { invoices: Invoice[] }) {
                       : inv.status}
                   </td>
                   <td className="tabular-nums">
-                    {new Intl.NumberFormat("tr-TR", {
-                      minimumFractionDigits: 2,
-                    }).format(inv.amount)}{" "}
-                    {inv.currency}
+                    {new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2 }).format(inv.amount)} {inv.currency}
                   </td>
                   <td>{fmtDateTR(inv.createdAt)}</td>
                   <td>{fmtDateTR(inv.dueAt)}</td>
@@ -637,10 +636,7 @@ function SkeletonTenantCard() {
         <div className="px-3 py-2 text-sm font-medium">Ay Bazında Durum</div>
         <ul className="divide-y">
           {Array.from({ length: 4 }).map((_, i) => (
-            <li
-              key={i}
-              className="px-3 py-2 text-sm flex items-center justify-between"
-            >
+            <li key={i} className="px-3 py-2 text-sm flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="inline-flex size-2.5 rounded-full bg-neutral-200" />
                 <div className="h-3 w-32 animate-pulse rounded bg-neutral-200" />
