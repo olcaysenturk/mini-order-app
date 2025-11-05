@@ -35,6 +35,10 @@ const fmt = (n: number) =>
 const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR');
 const cx = (...arr: Array<string | false | null | undefined>) => arr.filter(Boolean).join(' ');
 
+// İsim yazısı için kısa yardımcı (taşmayı engelle)
+const nameText = (s?: string | null, max = 28) =>
+  (s ?? '').toString().trim().toLocaleUpperCase('tr-TR').slice(0, max);
+
 export default function OrderLabelsThermal() {
   const { id } = useParams<{ id: string }>();
   const [order, setOrder] = useState<Order | null>(null);
@@ -76,7 +80,7 @@ export default function OrderLabelsThermal() {
       const itemTail = (it.id || '').slice(-6);
       const barcodeValue = `${orderTail}-${itemTail}-01`;
       const key = it.id; // tek kopya olduğu için direkt id
-      return { base: it, key, barcodeValue };
+      return { base: it, key, barcodeValue, customerName: order.customerName ?? '' };
     });
 
     return { labels: out, filteredCount: filtered.length, totalCount: order.items.length };
@@ -87,12 +91,15 @@ export default function OrderLabelsThermal() {
     (async () => {
       if (!order || labels.length === 0) return;
       const JsBarcode = (await import('jsbarcode')).default; // npm i jsbarcode
-      labels.forEach(({ key, barcodeValue }) => {
+      labels.forEach(({ key, barcodeValue, customerName }) => {
         const svg = barcodeRefs.current[key];
         if (svg) {
           JsBarcode(svg, barcodeValue, {
             format: 'CODE128',
-            displayValue: false,
+            displayValue: true,               // barkod altında yazı göster
+            text: nameText(customerName),     // yazıya müşteri adı koy
+            textMargin: 2,                    // yazı üst boşluk
+            fontSize: 12,                     // termal 60x40 için uygun
             margin: 0,
             lineColor: '#000',
             width: 1.2,
@@ -194,12 +201,13 @@ export default function OrderLabelsThermal() {
 
         {/* Etiketler */}
         <div className="labels-grid">
-          {labels.map(({ base, key, barcodeValue }) => (
+          {labels.map(({ base, key, barcodeValue, customerName }) => (
             <div className="sheet rounded-xl border border-zinc-200 bg-white shadow-sm" key={key}>
               <Label60x40
                 it={base}
                 showNote={showNotes}
                 barcodeValue={barcodeValue}
+                customerName={customerName}
                 svgRef={(el) => (barcodeRefs.current[key] = el)}
               />
             </div>
@@ -308,11 +316,13 @@ function Label60x40({
   it,
   showNote,
   barcodeValue,
+  customerName,
   svgRef,
 }: {
   it: OrderItem;
   showNote: boolean;
   barcodeValue: string;
+  customerName: string;
   svgRef: (el: SVGSVGElement | null) => void;
 }) {
   const cat = it.category?.name ?? '';
@@ -328,7 +338,7 @@ function Label60x40({
       {/* Üst bilgi */}
       <div className="leading-tight">
         <div className="mb-2 flex items-center gap-1 text-[18px] font-bold uppercase tracking-tight">
-          <span>{cat}</span>
+          
           {isStor && (
             <span className="rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-[1px] text-[10px] font-medium text-emerald-700">
               m² hesap
@@ -337,9 +347,10 @@ function Label60x40({
         </div>
 
         <div className="space-y-1 text-[14px]">
-          <div><b>Tür :</b> {typeName}</div>
-
           <div>
+            <b className='mb-1 block'>{nameText(customerName)}</b>
+            <b>Ürün :</b>{cat} - {typeName}
+            <br />
             <b>Adet :</b> {it.qty}
             <br />
             <b>En :</b> {w} cm
@@ -362,9 +373,14 @@ function Label60x40({
         </div>
       </div>
 
-      {/* Barkod */}
+      {/* Barkod + altında müşteri adı */}
       {/* <div className="flex justify-center">
-        <svg ref={svgRef} width="100%" height="44" />
+        <svg
+          ref={svgRef}
+          width="100%"
+          height="44"
+          aria-label={`Barkod: ${barcodeValue} - ${nameText(customerName)}`}
+        />
       </div> */}
     </div>
   );
