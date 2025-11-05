@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/app/lib/db";
 import { requireSuperAdmin } from "@/app/lib/requireSuperAdmin";
 import { Prisma } from "@prisma/client";
+import { UserDeleteButton } from "./UserDeleteButton";
 
 export const dynamic = "force-dynamic";
 
@@ -351,6 +352,9 @@ export default async function AdminUsersPage({
                       >
                         Detay
                       </Link>
+                      {u.role !== "SUPERADMIN" && (
+                        <UserDeleteButton userId={u.id} userName={u.name ?? u.email ?? undefined} />
+                      )}
                     </div>
                   </td>
                 </tr>

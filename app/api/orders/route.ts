@@ -5,6 +5,7 @@ import { authOptions } from '../auth/[...nextauth]/options'
 import { prisma } from '@/app/lib/db'
 import { Prisma, OrderStatus as OrderStatusEnum } from '@prisma/client'
 import { z } from 'zod'
+import { logOrderAudit } from './orderAudit'
 
 export const runtime = 'nodejs'
 
@@ -418,6 +419,14 @@ export async function POST(req: NextRequest) {
         customer: { select: { id: true, name: true, phone: true } },
         branch: { select: { id: true, name: true } },
       },
+    })
+
+    await logOrderAudit({
+      orderId: created.id,
+      tenantId,
+      userId: userId ?? null,
+      action: 'order.create',
+      payload: parsed.data,
     })
 
     const netNumber = Number(created.netTotal)

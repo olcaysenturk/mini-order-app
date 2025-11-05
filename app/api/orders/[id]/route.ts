@@ -1,8 +1,11 @@
 // app/api/orders/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import { getServerSession } from 'next-auth'
 import { prisma } from '@/app/lib/db'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
+import { authOptions } from '../../auth/[...nextauth]/options'
+import { logOrderAudit } from '../orderAudit'
 
 /* ================= Zod Schemas ================ */
 // Order için: deleted & workshop dahil
@@ -60,9 +63,51 @@ const PatchBodySchema = z.object({
 
 type Ctx = { params: Promise<{ id: string }> }
 
+class ApiError extends Error {
+  status: number
+  constructor(message: string, status = 400) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
+type SessionCtx = {
+  userId: string
+  userRole: string
+  tenantId: string | null
+  tenantRole: string | null
+  isSuperAdmin: boolean
+}
+
+async function requireSessionContext(): Promise<SessionCtx> {
+  const session = await getServerSession(authOptions)
+  const userId = (session?.user as any)?.id as string | undefined
+  if (!userId) {
+    throw new ApiError('unauthorized', 401)
+  }
+
+  const userRole = (session?.user as any)?.role as string | undefined
+  const tenantId = ((session as any)?.tenantId ?? null) as string | null
+  const tenantRole = ((session as any)?.tenantRole ?? null) as string | null
+  const isSuperAdmin = userRole === 'SUPERADMIN'
+
+  if (!isSuperAdmin && !tenantId) {
+    throw new ApiError('tenant_not_selected', 400)
+  }
+
+  return { userId, userRole: userRole ?? 'STAFF', tenantId, tenantRole, isSuperAdmin }
+}
+
+function canManageOrders(ctx: SessionCtx): boolean {
+  if (ctx.isSuperAdmin) return true
+  return ctx.tenantRole === 'OWNER' || ctx.tenantRole === 'ADMIN'
+}
+
 /* =============== GET /api/orders/:id ================= */
 export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
+    const sessionCtx = await requireSessionContext()
     const { id } = await ctx.params
 
     // Sıra numarası (createdAt artan)
@@ -83,9 +128,20 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         extras: true,
         branch: { select: { id: true, name: true, code: true, phone: true, address: true } },
         payments: { orderBy: { paidAt: 'asc' } },
+        audits: {
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        },
       },
     })
     if (!order) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+
+    if (!sessionCtx.isSuperAdmin && sessionCtx.tenantId !== order.tenantId) {
+      throw new ApiError('forbidden', 403)
+    }
 
     const paidTotal = (order.payments ?? []).reduce((a, p) => a + Number(p.amount), 0)
     const balance   = Number(order.netTotal) - paidTotal
@@ -109,10 +165,26 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
         ...p,
         amount: Number(p.amount),
       })),
+      audits: (order.audits ?? []).map(audit => ({
+        id: audit.id,
+        action: audit.action,
+        createdAt: audit.createdAt.toISOString(),
+        payload: audit.payload,
+        user: audit.user
+          ? {
+              id: audit.user.id,
+              name: audit.user.name ?? null,
+              email: audit.user.email ?? null,
+            }
+          : null,
+      })),
       paidTotal,
       balance,
     })
-  } catch (e) {
+  } catch (e: any) {
+    if (e instanceof ApiError) {
+      return NextResponse.json({ error: e.message }, { status: e.status })
+    }
     console.error('GET /orders/:id error:', e)
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
@@ -121,7 +193,20 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 /* ============== PATCH /api/orders/:id ================= */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
+    const sessionCtx = await requireSessionContext()
     const { id: orderId } = await ctx.params
+    const existingMeta = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { tenantId: true, status: true },
+    })
+    if (!existingMeta) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    }
+    if (!sessionCtx.isSuperAdmin && sessionCtx.tenantId !== existingMeta.tenantId) {
+      throw new ApiError('forbidden', 403)
+    }
+    const tenantId = existingMeta.tenantId
+
     const json = await req.json()
     const parsed = PatchBodySchema.safeParse(json)
     if (!parsed.success) {
@@ -146,10 +231,20 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 
     // ⬇️ Geri alma isteği (soft-deleted → aktif)
     if (restore) {
+      if (!canManageOrders(sessionCtx)) {
+        throw new ApiError('forbidden', 403)
+      }
       const newStatus = status && status !== 'deleted' ? status : 'pending'
       await prisma.order.update({
         where: { id: orderId },
         data: { status: newStatus, deletedAt: null },
+      })
+      await logOrderAudit({
+        orderId,
+        tenantId,
+        userId: sessionCtx.userId,
+        action: 'order.restore',
+        payload: { previousStatus: existingMeta.status, newStatus },
       })
       return NextResponse.json({ ok: true, status: newStatus })
     }
@@ -314,6 +409,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const paidTotal = (updated.payments ?? []).reduce((a, p) => a + Number(p.amount), 0)
     const balance   = Number(updated.netTotal) - paidTotal
 
+    await logOrderAudit({
+      orderId,
+      tenantId,
+      userId: sessionCtx.userId,
+      action: 'order.update',
+      payload: parsed.data,
+    })
+
     return NextResponse.json({
       ...updated,
       total:    Number(updated.total),
@@ -333,6 +436,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       balance,
     })
   } catch (e) {
+    if (e instanceof ApiError) {
+      return NextResponse.json({ error: e.message }, { status: e.status })
+    }
     console.error('PATCH /orders/:id error:', e)
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
@@ -342,13 +448,41 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
 // 🔁 SOFT DELETE: status='deleted', deletedAt=now()
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
+    const sessionCtx = await requireSessionContext()
     const { id } = await ctx.params
+
+    const orderMeta = await prisma.order.findUnique({
+      where: { id },
+      select: { tenantId: true, status: true },
+    })
+    if (!orderMeta) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    }
+    if (!sessionCtx.isSuperAdmin && sessionCtx.tenantId !== orderMeta.tenantId) {
+      throw new ApiError('forbidden', 403)
+    }
+    if (!canManageOrders(sessionCtx)) {
+      throw new ApiError('forbidden', 403)
+    }
+
     await prisma.order.update({
       where: { id },
       data: { status: 'deleted', deletedAt: new Date() },
     })
+
+    await logOrderAudit({
+      orderId: id,
+      tenantId: orderMeta.tenantId,
+      userId: sessionCtx.userId,
+      action: 'order.delete',
+      payload: { previousStatus: orderMeta.status },
+    })
+
     return NextResponse.json({ ok: true })
   } catch (e) {
+    if (e instanceof ApiError) {
+      return NextResponse.json({ error: e.message }, { status: e.status })
+    }
     console.error('DELETE /orders/:id error:', e)
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }

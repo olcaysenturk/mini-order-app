@@ -80,6 +80,7 @@ model User {
 
   // ⬇️ BACK-RELATION: Ödemeleri oluşturan kullanıcı
   paymentsCreated OrderPayment[]       @relation("OrderPaymentCreatedBy")
+  orderAudits     OrderAudit[]
   resetTokens     PasswordResetToken[]
 
 
@@ -144,6 +145,7 @@ model Tenant {
   variants       Variant[]
   subscriptions  Subscription?
   payments       OrderPayment[] // tenant üzerinden ödemeler
+  orderAudits    OrderAudit[]
 
   @@index([createdById])
 }
@@ -365,6 +367,7 @@ model Order {
   extras   OrderExtra[]
   items    OrderItem[]
   payments OrderPayment[] // parçalı ödemeler
+  audits   OrderAudit[]
 
   @@index([tenantId, branchId, createdAt])
   @@index([tenantId, status, createdAt])
@@ -445,6 +448,24 @@ model OrderPayment {
 
   @@index([tenantId, orderId, paidAt])
   @@index([tenantId, paidAt])
+}
+
+model OrderAudit {
+  id        String   @id @default(cuid())
+  orderId   String
+  tenantId  String
+  userId    String?
+  action    String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model PasswordResetToken {

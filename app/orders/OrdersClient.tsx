@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
@@ -57,6 +58,20 @@ type Payment = {
   note?: string | null;
 };
 
+type OrderAuditUser = {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+} | null;
+
+type OrderAuditEntry = {
+  id: string;
+  action: string;
+  createdAt: string;
+  payload?: any;
+  user: OrderAuditUser;
+};
+
 type OrderDetail = {
   id: string;
   total: number;
@@ -65,6 +80,7 @@ type OrderDetail = {
   payments: Payment[];
   paidTotal: number;
   balance: number;
+  audits: OrderAuditEntry[];
 };
 
 /* ========= Utils ========= */
@@ -84,6 +100,13 @@ const statusLabel: Record<Status, string> = {
   cancelled: "İptal",
   workshop: "Atölyede",
   deleted: "Silindi",
+};
+
+const auditActionLabel: Record<string, string> = {
+  "order.create": "Sipariş oluşturuldu",
+  "order.update": "Sipariş güncellendi",
+  "order.delete": "Sipariş silindi",
+  "order.restore": "Sipariş geri alındı",
 };
 
 const methodLabel: Record<PaymentMethod, string> = {
@@ -225,12 +248,14 @@ function InlineLoader() {
 /* ========= Page ========= */
 export default function OrdersPage() {
   const router = useRouter();
+  const { data: session } = useSession();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const [headerFilter, setHeaderFilter] = useState<HeaderFilter>("all");
   const [q, setQ] = useState("");
@@ -269,6 +294,13 @@ export default function OrdersPage() {
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   const isDeletedTab = headerFilter === "deleted";
+
+  const canDeleteOrders = useMemo(() => {
+    const role = session?.user?.role;
+    if (role === "SUPERADMIN") return true;
+    const tenantRole = session?.tenantRole ?? null;
+    return tenantRole === "OWNER" || tenantRole === "ADMIN";
+  }, [session]);
 
   const toggleOpen = async (id: string) => {
     setOpenIds((prev) => {
@@ -314,6 +346,10 @@ export default function OrdersPage() {
   };
 
   const removeOrderInternal = async (id: string) => {
+    if (!canDeleteOrders) {
+      toast.error("Bu işlem için yetkin yok");
+      return;
+    }
     setDeletingId(id);
     try {
       const res = await fetch(`/api/orders/${id}`, { method: "DELETE" });
@@ -329,6 +365,64 @@ export default function OrdersPage() {
       toast.error(e?.message || "Silmede hata");
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const restoreOrder = async (id: string) => {
+    if (!canDeleteOrders) {
+      toast.error("Bu işlem için yetkin yok");
+      return;
+    }
+    setRestoringId(id);
+    try {
+      const res = await fetch(`/api/orders/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restore: true }),
+      });
+      const raw = await res.text();
+      if (!res.ok) {
+        let message = raw;
+        try {
+          const parsed = raw ? JSON.parse(raw) : null;
+          message = parsed?.message || parsed?.error || message;
+        } catch {
+          // ignore JSON parse errors
+        }
+        throw new Error(message || "Geri alma başarısız");
+      }
+
+      let newStatus: Status = "pending";
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.status === "string") {
+            const candidate = parsed.status as Status;
+            if ((statusLabel as Record<string, string>)[candidate]) {
+              newStatus = candidate;
+            }
+          }
+        } catch {
+          // no-op
+        }
+      }
+
+      setOrders((prev) => {
+        if (isDeletedTab) {
+          return prev.filter((o) => o.id !== id);
+        }
+        return prev.map((o) => (o.id === id ? { ...o, status: newStatus } : o));
+      });
+      setOpenIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      toast.success("Sipariş geri alındı");
+    } catch (e: any) {
+      toast.error(e?.message || "Geri alma başarısız");
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -370,6 +464,21 @@ export default function OrdersPage() {
                 Number(data.paidTotal ?? data.totalPaid ?? 0)
             )
         ),
+        audits: Array.isArray(data.audits)
+          ? data.audits.map((audit: any) => ({
+              id: audit.id,
+              action: audit.action,
+              createdAt: audit.createdAt,
+              payload: audit.payload ?? null,
+              user: audit.user
+                ? {
+                    id: audit.user.id,
+                    name: audit.user.name ?? null,
+                    email: audit.user.email ?? null,
+                  }
+                : null,
+            }))
+          : [],
       };
       setDetailById((m) => ({ ...m, [id]: d }));
       setPayMethod((m) => ({ ...m, [id]: m[id] ?? "CASH" }));
@@ -453,6 +562,10 @@ export default function OrdersPage() {
 
   // Sil
   const removeOrder = (id: string) => {
+    if (!canDeleteOrders) {
+      toast.error("Bu işlem için yetkin yok");
+      return;
+    }
     askDelete(id);
   };
 
@@ -926,6 +1039,8 @@ export default function OrdersPage() {
                 const ratio = net > 0 ? paid / net : 0;
 
                 const disabledActions = order.status === "deleted";
+                const deleteDisabled = order.status === "deleted" || !canDeleteOrders || deletingId === order.id;
+                const showRestore = order.status === "deleted" && canDeleteOrders;
 
                 return (
                   <section key={order.id} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
@@ -1032,7 +1147,7 @@ export default function OrdersPage() {
                           <button
                             className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                             onClick={() => removeOrder(order.id)}
-                            disabled={disabledActions || deletingId === order.id}
+                            disabled={deleteDisabled}
                             title="Sil"
                           >
                             <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
@@ -1040,6 +1155,23 @@ export default function OrdersPage() {
                             </svg>
                             {deletingId === order.id ? "Siliniyor…" : "Sil"}
                           </button>
+
+                          {showRestore && (
+                            <button
+                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-emerald-200 bg-white px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                              onClick={() => restoreOrder(order.id)}
+                              disabled={restoringId === order.id}
+                              title="Geri Al"
+                            >
+                              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                                <path
+                                  fill="currentColor"
+                                  d="M12 5v4H8l4 4 4-4h-4V5h-2zm-6 9h2a6 6 0 1 0 6-6v-2a8 8 0 1 1-8 8z"
+                                />
+                              </svg>
+                              {restoringId === order.id ? "Geri alınıyor…" : "Geri Al"}
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1155,18 +1287,59 @@ export default function OrdersPage() {
                                       </tbody>
                                     </table>
                                   </div>
-                                ) : (
-                                  <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                        </div>
+                        ) : (
+                          <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* İşlem geçmişi */}
+                <div className="rounded-2xl border border-neutral-200">
+                  <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">İşlem Geçmişi</div>
+                  <div className="p-3 space-y-3">
+                    {detailLoading[order.id] && <Skeleton />}
+                    {detailError[order.id] && (
+                      <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        {detailError[order.id]}
                       </div>
                     )}
-                  </section>
-                );
-              })
+                    {!detailLoading[order.id] && !detailError[order.id] && (
+                      <>
+                        {d && d.audits.length > 0 ? (
+                          <ul className="space-y-3">
+                            {d.audits.map((entry) => {
+                              const label = auditActionLabel[entry.action] ?? entry.action;
+                              const actor = entry.user?.name || entry.user?.email || "Sistem";
+                              const dateText = new Intl.DateTimeFormat("tr-TR", {
+                                dateStyle: "medium",
+                                timeStyle: "short",
+                              }).format(new Date(entry.createdAt));
+                              return (
+                                <li key={entry.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="font-medium text-neutral-800">{label}</span>
+                                    <span className="text-xs text-neutral-500">{dateText}</span>
+                                  </div>
+                                  <div className="mt-1 text-xs text-neutral-600">İşlemi yapan: {actor}</div>
+                                  
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        ) : (
+                          <div className="text-sm text-neutral-500">Henüz işlem kaydı yok.</div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        );
+      })
             : ""}
         </div>
 
