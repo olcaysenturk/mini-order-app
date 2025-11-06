@@ -1,7 +1,7 @@
 // app/(dashboard)/settings/company/page.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Camera, Image as ImageIcon, Link as LinkIcon,
   Pencil, Check, X, Plus, TriangleAlert
@@ -105,6 +105,12 @@ export default function CompanyAdminPage() {
   const [creatingMember, setCreatingMember] = useState(false)
   const [invitePassword, setInvitePassword] = useState<string | null>(null)
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+  const branchSectionRef = useRef<HTMLElement | null>(null)
+  const membersSectionRef = useRef<HTMLElement | null>(null)
+
+  const branchCount = branches.length
+  const activeBranchCount = branches.filter(b => b.isActive).length
+  const memberCount = members.length
 
   const logoPreview = useMemo(() => (profile.logoUrl ? profile.logoUrl : ''), [profile.logoUrl])
   const primaryBranch = useMemo(
@@ -372,6 +378,32 @@ export default function CompanyAdminPage() {
       setRemovingMemberId(null)
     }
   }
+
+  const scrollToSection = (id: string) => {
+    const node = document.getElementById(id)
+    if (node) {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
+
+  const triggerAddBranch = () => {
+    setOpenAdd(true)
+    requestAnimationFrame(() => {
+      branchSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+    scrollToSection('branches-section')
+  }
+
+  const triggerInvite = () => {
+    membersSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    scrollToSection('members-section')
+    requestAnimationFrame(() => {
+      const input = document.getElementById('invite-email')
+      if (input instanceof HTMLInputElement) {
+        input.focus()
+      }
+    })
+  }
   async function saveEdit() {
     if (!editingId) return
     if (!eName.trim()) { toast.warning('Şube adı zorunlu'); return }
@@ -426,24 +458,142 @@ export default function CompanyAdminPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      {/* HEADER */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Şirket Ayarları</h1>
-          <p className="text-xs text-neutral-500">Profil ve şube yönetimi</p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 rounded-lg bg-neutral-50 px-2.5 py-1 ring-1 ring-neutral-200 text-neutral-700">
-            Şube: <b className="ms-1">{branches.length}</b>
-          </span>
-          <span className="text-neutral-400">{loading ? 'Yükleniyor…' : 'Hazır'}</span>
-        </div>
-      </div>
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="grid gap-8 lg:grid-cols-12">
+        <aside className="space-y-6 self-start lg:col-span-4 lg:sticky lg:top-24">
+          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-neutral-900">Menü</h2>
+              <p className="text-xs text-neutral-500">
+                Hızlı erişim için ilgili bölümü seçin.
+              </p>
+            </div>
+            <nav aria-label="Sayfa menüsü" className="mt-4 grid gap-2 text-sm">
+              <button
+                type="button"
+                onClick={() => scrollToSection('profile-section')}
+                className="flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-white px-3 py-2 font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+              >
+                <span>Şirket Profili</span>
+                <span className="text-xs text-neutral-400">Logo & iletişim</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection('members-section')}
+                className="flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-white px-3 py-2 font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+              >
+                <span>Ekip Üyeleri</span>
+                <span className="inline-flex items-center gap-1 text-xs text-neutral-400">
+                  <span>{memberCount}</span>
+                  <span>kişi</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection('branches-section')}
+                className="flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-white px-3 py-2 font-medium text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+              >
+                <span>Şubeler</span>
+                <span className="inline-flex items-center gap-1 text-xs text-neutral-400">
+                  <span>{branchCount}</span>
+                  <span>kayıt</span>
+                </span>
+              </button>
+            </nav>
+          </div>
 
-      {err && (
-        <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{err}</div>
-      )}
+          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-neutral-900">Hızlı Özet</h3>
+            <ul className="mt-4 space-y-3 text-sm text-neutral-600">
+              <li className="flex items-center justify-between gap-4">
+                <span className="text-neutral-500">Şirket:</span>
+                <span className="font-medium text-neutral-800">{profile.companyName || '—'}</span>
+              </li>
+              <li className="flex items-center justify-between gap-4">
+                <span className="text-neutral-500">E-posta:</span>
+                <span className="font-medium text-neutral-800">{profile.email || '—'}</span>
+              </li>
+              <li className="flex items-center justify-between gap-4">
+                <span className="text-neutral-500">Telefon:</span>
+                <span className="font-medium text-neutral-800">{profile.phone || '—'}</span>
+              </li>
+              <li className="flex items-start justify-between gap-4">
+                <span className="mt-0.5 text-neutral-500">Adres:</span>
+                <span className="max-w-[220px] text-right text-neutral-800">{profile.address || '—'}</span>
+              </li>
+            </ul>
+          </div>
+          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm">
+            <h3 className="text-sm font-semibold text-neutral-900">İpuçları</h3>
+            <ul className="mt-3 space-y-2 text-xs text-neutral-600">
+              <li>• Profilde yaptığınız değişiklikler kaydettiğiniz anda ekip üyeleriyle paylaşılır.</li>
+              <li>• Şube ekledikten sonra sıralama numarası ve görünürlüğü düzenleyerek navigasyonda nasıl görüneceğini kontrol edin.</li>
+              <li>• Kullanıcı davet ettiğinizde geçici şifreyi paylaşmayı unutmayın; kullanıcı ilk girişte yeni şifre belirler.</li>
+            </ul>
+          </div>
+        </aside>
+
+        <div className="space-y-8 lg:col-span-8">
+          <section className="relative overflow-hidden rounded-3xl border border-neutral-200 bg-white/80 shadow-xl">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(79,70,229,0.18),transparent_60%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.18),transparent_60%)]" />
+            <div className="relative z-10 grid gap-6 px-6 py-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-center">
+              <div className="space-y-4">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/80 px-3 py-1 text-xs font-medium text-indigo-700 ring-1 ring-indigo-100">
+                  Şirket yönetimi
+                </span>
+                <div>
+                  <h1 className="text-3xl font-semibold tracking-tight text-neutral-900 sm:text-4xl">
+                    Şirket Ayarları
+                  </h1>
+                  <p className="mt-2 max-w-xl text-sm text-neutral-600">
+                    Marka bilgilerinizi, şubelerinizi ve ekip üyelerinizi güncel tutun. Yapılan değişiklikler tenantınızda anında görünür.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={triggerAddBranch}
+                    className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700"
+                  >
+                    <Plus className="h-4 w-4" /> Yeni Şube
+                  </button>
+                  <button
+                    type="button"
+                    onClick={triggerInvite}
+                    className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
+                      <path fill="currentColor" d="M12 12a5 5 0 1 0-5-5a5 5 0 0 0 5 5m-7 8v-1a6 6 0 0 1 12 0v1zm12-8v-2h-2V8h2V6h2v2h2v2h-2v2z" />
+                    </svg>
+                    Kullanıcı Davet Et
+                  </button>
+                  <span className="inline-flex items-center gap-1 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-500">
+                    {loading ? 'Veriler yükleniyor…' : 'Güncel'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  { label: 'Şube', value: branchCount },
+                 
+                  { label: 'Kullanıcı', value: memberCount },
+                ].map((stat) => (
+                  <div
+                    key={stat.label}
+                    className="rounded-2xl border border-white/60 bg-white/80 px-4 py-3 text-sm shadow-sm backdrop-blur"
+                  >
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-neutral-500">{stat.label}</div>
+                    <div className="mt-2 text-2xl font-semibold text-neutral-900">{stat.value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          {err && (
+            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{err}</div>
+          )}
 
       {/* HATA ÖZETİ */}
       {editMode && errorList.length > 0 && (
@@ -459,76 +609,84 @@ export default function CompanyAdminPage() {
         </div>
       )}
 
-      {/* PROFİL BLOĞU (liste görünümü) */}
-      <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-        {/* Üst satır */}
-        <div className="flex items-start justify-between border-b border-neutral-200 p-4">
-          <div className="flex items-center gap-3">
-            <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-neutral-200">
-              {logoPreview
-                ? <img src={logoPreview} alt="Logo" className="h-full w-full object-contain" />
-                : <ImageIcon className="h-5 w-5 text-neutral-400" />
-              }
+      <form
+          id="profile-section"
+          onSubmit={saveProfile}
+          noValidate
+          className="relative overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm"
+        >
+          <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-br from-white via-indigo-50/70 to-transparent" />
+          <div className="relative z-10 flex flex-col gap-4 border-b border-neutral-200 px-6 py-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="grid h-14 w-14 place-items-center overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+                {logoPreview
+                  ? <img src={logoPreview} alt="Logo" className="h-full w-full object-contain" />
+                  : <ImageIcon className="h-5 w-5 text-neutral-400" />
+                }
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-neutral-900">{profile.companyName || 'Henüz belirlenmedi'}</div>
+                <div className="text-xs text-neutral-500">{profile.website || profile.email || 'İletişim bilgisi yok'}</div>
+              </div>
             </div>
-            <div>
-              <div className="text-sm font-semibold">{profile.companyName || '—'}</div>
-              <div className="text-xs text-neutral-500">{profile.website || 'Website yok'}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              {!editMode ? (
+                <button
+                  type="button"
+                  onClick={() => { setEditMode(true); setErrors({}); setErrorList([]) }}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
+                >
+                  <Pencil className="h-4 w-4" /> Düzenle
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onCancelEdit}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 shadow-sm hover:bg-neutral-50"
+                  >
+                    <X className="h-4 w-4" /> Vazgeç
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    <Check className="h-4 w-4" /> {saving ? 'Kaydediliyor…' : 'Kaydet'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          {!editMode ? (
-            <button
-              onClick={() => { setEditMode(true); setErrors({}); setErrorList([]) }}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
-            >
-              <Pencil className="h-4 w-4" /> Düzenle
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onCancelEdit}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
-              >
-                <X className="h-4 w-4" /> Vazgeç
-              </button>
-              <button
-                onClick={(e)=>saveProfile(e as any)}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-black/90 disabled:opacity-50"
-              >
-                <Check className="h-4 w-4" /> {saving ? 'Kaydediliyor…' : 'Kaydet'}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Form satırları */}
-        <form onSubmit={saveProfile} noValidate>
-          <div className="grid grid-cols-1 gap-px border-b border-neutral-200 bg-neutral-100/40 sm:grid-cols-[240px_1fr]">
-            {/* Logo */}
+          <div className="relative z-10 grid grid-cols-1 gap-px bg-neutral-100/40 sm:grid-cols-[220px_1fr]">
             <CellLabel>Logo</CellLabel>
-            <div className="bg-white p-3">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="bg-white p-4">
+              <div className="flex flex-wrap items-center gap-3">
                 <label
                   className={`inline-flex items-center gap-2 rounded-xl border border-neutral-200 px-3 py-1.5 text-sm ${
-                    makeReadOnly ? 'opacity-60 cursor-not-allowed' : 'hover:bg-neutral-50 cursor-pointer'
+                    makeReadOnly ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-neutral-50'
                   }`}
                 >
                   <Camera className="h-4 w-4" />
                   <span>Dosya Seç</span>
                   <input
-                    type="file" accept="image/*" className="hidden" disabled={makeReadOnly}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    disabled={makeReadOnly}
                     onChange={(e) => {
-                      const file = e.target.files?.[0]; if (!file) return
+                      const file = e.target.files?.[0]
+                      if (!file) return
                       const reader = new FileReader()
-                      reader.onload = () => setProfile(p => ({ ...p, logoUrl: String(reader.result || '') }))
+                      reader.onload = () => setProfile((p) => ({ ...p, logoUrl: String(reader.result || '') }))
                       reader.readAsDataURL(file)
                       toast.success('Logo seçildi (önizleme). Kaydet ile profilde saklanır.')
                     }}
                   />
                 </label>
 
-                <div className="relative flex-1 min-w-[240px]">
+                <div className="relative flex-1 min-w-[220px]">
                   <div className="pointer-events-none absolute inset-y-0 left-0 grid w-10 place-items-center text-neutral-400">
                     <LinkIcon className="h-4 w-4" />
                   </div>
@@ -536,10 +694,10 @@ export default function CompanyAdminPage() {
                     disabled={makeReadOnly}
                     className={`w-full rounded-xl border px-3 py-2 pl-10 text-sm focus:ring-2 ${
                       errors.logoUrl ? 'border-rose-300 focus:ring-rose-200' : 'border-neutral-300 focus:ring-black/10'
-                    } ${makeReadOnly ? 'bg-neutral-50 cursor-not-allowed' : ''}`}
+                    } ${makeReadOnly ? 'cursor-not-allowed bg-neutral-50' : ''}`}
                     placeholder="https://…"
                     value={profile.logoUrl ?? ''}
-                    onChange={(e) => setProfile(p => ({ ...p, logoUrl: e.target.value }))}
+                    onChange={(e) => setProfile((p) => ({ ...p, logoUrl: e.target.value }))}
                     aria-invalid={!!errors.logoUrl || undefined}
                     aria-describedby={errors.logoUrl ? 'logoUrl-err' : undefined}
                   />
@@ -548,11 +706,10 @@ export default function CompanyAdminPage() {
               </div>
             </div>
 
-            {/* Zorunlu + opsiyonel alanlar */}
             <CellLabel>Şirket Adı *</CellLabel>
             <CellInput
               value={profile.companyName}
-              onChange={(v)=>setProfile(p=>({...p, companyName:v}))}
+              onChange={(v) => setProfile((p) => ({ ...p, companyName: v }))}
               placeholder="Perdexa Perde"
               error={errors.companyName}
               readOnly={makeReadOnly}
@@ -560,89 +717,115 @@ export default function CompanyAdminPage() {
 
             <CellLabel>Telefon *</CellLabel>
             <CellInput
-              value={profile.phone ?? ''} onChange={(v)=>setProfile(p=>({...p, phone:v}))}
-              placeholder="+90…" error={errors.phone}
-              inputMode="tel" autoComplete="tel" readOnly={makeReadOnly}
+              value={profile.phone ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, phone: v }))}
+              placeholder="+90…"
+              error={errors.phone}
+              inputMode="tel"
+              autoComplete="tel"
+              readOnly={makeReadOnly}
             />
 
             <CellLabel>E-posta *</CellLabel>
             <CellInput
-              value={profile.email ?? ''} onChange={(v)=>setProfile(p=>({...p, email:v}))}
-              placeholder="mail@ornek.com" error={errors.email}
-              inputMode="email" autoComplete="email" readOnly={makeReadOnly}
+              value={profile.email ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, email: v }))}
+              placeholder="mail@ornek.com"
+              error={errors.email}
+              inputMode="email"
+              autoComplete="email"
+              readOnly={makeReadOnly}
             />
 
             <CellLabel>Adres *</CellLabel>
             <CellTextarea
-              value={profile.address ?? ''} onChange={(v)=>setProfile(p=>({...p, address:v}))}
-              rows={2} error={errors.address} readOnly={makeReadOnly}
+              value={profile.address ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, address: v }))}
+              rows={2}
+              error={errors.address}
+              readOnly={makeReadOnly}
             />
 
             <CellLabel>Vergi No</CellLabel>
             <CellInput
-              value={profile.taxNumber ?? ''} onChange={(v)=>setProfile(p=>({...p, taxNumber:v}))}
-              error={errors.taxNumber} readOnly={makeReadOnly}
+              value={profile.taxNumber ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, taxNumber: v }))}
+              error={errors.taxNumber}
+              readOnly={makeReadOnly}
             />
 
             <CellLabel>Vergi Dairesi</CellLabel>
             <CellInput
-              value={profile.taxOffice ?? ''} onChange={(v)=>setProfile(p=>({...p, taxOffice:v}))}
-              error={errors.taxOffice} readOnly={makeReadOnly}
+              value={profile.taxOffice ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, taxOffice: v }))}
+              error={errors.taxOffice}
+              readOnly={makeReadOnly}
             />
 
             <CellLabel>Instagram</CellLabel>
             <CellInput
-              value={profile.instagram ?? ''} onChange={(v)=>setProfile(p=>({...p, instagram:v}))}
-              placeholder="@marka" error={errors.instagram} readOnly={makeReadOnly}
+              value={profile.instagram ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, instagram: v }))}
+              placeholder="@marka"
+              error={errors.instagram}
+              readOnly={makeReadOnly}
             />
 
             <CellLabel>Website</CellLabel>
             <CellInput
-              value={profile.website ?? ''} onChange={(v)=>setProfile(p=>({...p, website:v}))}
-              placeholder="https://…" error={errors.website} readOnly={makeReadOnly}
+              value={profile.website ?? ''}
+              onChange={(v) => setProfile((p) => ({ ...p, website: v }))}
+              placeholder="https://…"
+              error={errors.website}
+              readOnly={makeReadOnly}
             />
           </div>
 
-          {/* Sticky actions — sadece edit modda */}
           {editMode && (
-            <div className="sticky bottom-3 mt-3 flex items-center justify-end gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 shadow-sm">
+            <div className="sticky bottom-3 z-10 mx-4 mt-4 flex items-center justify-end gap-2 rounded-xl border border-neutral-200 bg-white/95 px-3 py-2 shadow-sm backdrop-blur">
               <button
                 type="button"
                 onClick={onCancelEdit}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50"
               >
                 <X className="h-4 w-4" /> Vazgeç
               </button>
               <button
-                type="submit" disabled={saving}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-black/90 disabled:opacity-50"
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
               >
                 <Check className="h-4 w-4" /> {saving ? 'Kaydediliyor…' : 'Kaydet'}
               </button>
             </div>
           )}
         </form>
-      </div>
 
-      {/* KULLANICI YÖNETİMİ */}
-      <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+      <section
+        ref={membersSectionRef}
+        id="members-section"
+        className="overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold text-neutral-800">Kullanıcılar</h2>
-            <p className="text-xs text-neutral-500">Bu tenant altında yetkili kullanıcılar</p>
+            <h2 className="text-sm font-semibold text-neutral-900">Kullanıcılar</h2>
+            <p className="text-xs text-neutral-500">Tenant altında yetkili olan ekip üyeleri</p>
           </div>
           <button
             type="button"
             onClick={loadMembers}
             disabled={membersLoading}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 shadow-sm hover:bg-neutral-50 disabled:opacity-60"
           >
             {membersLoading ? 'Yükleniyor…' : 'Yenile'}
           </button>
         </div>
 
         <div className="grid gap-4 p-4">
-          <form onSubmit={handleInvite} className="grid gap-3 rounded-xl border border-dashed border-neutral-200 bg-neutral-50/60 p-4 text-sm">
+          <form
+            onSubmit={handleInvite}
+            className="grid gap-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/80 p-4 text-sm"
+          >
             <div className="grid gap-2 sm:grid-cols-2">
               <label className="grid gap-1">
                 <span className="text-xs font-medium text-neutral-600">Ad Soyad (opsiyonel)</span>
@@ -656,6 +839,7 @@ export default function CompanyAdminPage() {
               <label className="grid gap-1">
                 <span className="text-xs font-medium text-neutral-600">E-posta *</span>
                 <input
+                  id="invite-email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   required
@@ -666,7 +850,9 @@ export default function CompanyAdminPage() {
               </label>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-neutral-500">Yeni kullanıcılar <strong>STAFF</strong> rolüyle eklenir ve raporlar/şirket sayfasını görüntüleyemez.</p>
+              <p className="text-xs text-neutral-500">
+                Yeni kullanıcılar otomatik olarak <strong>STAFF</strong> rolüyle eklenir ve raporlar / şirket ayarları menülerini göremez.
+              </p>
               <button
                 type="submit"
                 disabled={creatingMember}
@@ -678,14 +864,16 @@ export default function CompanyAdminPage() {
           </form>
 
           {invitePassword && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
               <strong>Geçici şifre:</strong> <code className="font-mono text-sm">{invitePassword}</code>
-              <span className="ms-2">(Kullanıcı ilk girişte şifreyi değiştirmek zorunda.)</span>
+              <span className="ms-2">Kullanıcı ilk girişte şifreyi güncellemek zorundadır.</span>
             </div>
           )}
 
           {membersError && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{membersError}</div>
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {membersError}
+            </div>
           )}
 
           <div className="overflow-x-auto">
@@ -703,9 +891,17 @@ export default function CompanyAdminPage() {
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {membersLoading ? (
-                  <tr><td colSpan={6} className="px-3 py-4 text-center text-neutral-500">Yükleniyor…</td></tr>
+                  <tr>
+                    <td colSpan={7} className="px-3 py-4 text-center text-neutral-500">
+                      Yükleniyor…
+                    </td>
+                  </tr>
                 ) : members.length === 0 ? (
-                  <tr><td colSpan={6} className="px-3 py-4 text-center text-neutral-500">Bu tenant için henüz kullanıcı eklenmemiş.</td></tr>
+                  <tr>
+                    <td colSpan={7} className="px-3 py-4 text-center text-neutral-500">
+                      Bu tenant için henüz kullanıcı eklenmemiş.
+                    </td>
+                  </tr>
                 ) : (
                   members.map((member) => {
                     const user = member.user
@@ -742,6 +938,7 @@ export default function CompanyAdminPage() {
 
       {/* ŞUBELER */}
       <BranchesSection
+        containerRef={branchSectionRef}
         branches={branches}
         openAdd={openAdd}
         setOpenAdd={setOpenAdd}
@@ -772,6 +969,9 @@ export default function CompanyAdminPage() {
         savingBranch={savingBranch}
       />
 
+        </div>
+      </div>
+
     </div>
   )
 }
@@ -779,7 +979,7 @@ export default function CompanyAdminPage() {
 /* -------------------- küçük bileşenler -------------------- */
 
 function CellLabel({ children }: { children: React.ReactNode }) {
-  return <div className="bg-neutral-50 p-3 text-xs font-medium text-neutral-600">{children}</div>
+  return <div className="bg-neutral-50/80 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">{children}</div>
 }
 
 function CellInput({
@@ -790,7 +990,7 @@ function CellInput({
   readOnly?: boolean;
 }) {
   return (
-    <div className="bg-white p-3">
+    <div className="bg-white px-4 py-3">
       <input
         value={value} onChange={(e)=>onChange(e.target.value)} placeholder={placeholder}
         inputMode={inputMode} autoComplete={autoComplete}
@@ -799,8 +999,8 @@ function CellInput({
         aria-invalid={!!error || undefined}
         aria-describedby={error ? 'err' : undefined}
         className={`w-full rounded-xl border px-3 py-2 text-sm focus:ring-2 ${
-          error ? 'border-rose-300 focus:ring-rose-200' : 'border-neutral-300 focus:ring-black/10'
-        } ${readOnly ? 'bg-neutral-50 cursor-not-allowed' : ''}`}
+          error ? 'border-rose-300 focus:ring-rose-200' : 'border-neutral-300 focus:ring-indigo-200'
+        } ${readOnly ? 'cursor-not-allowed bg-neutral-50' : ''}`}
       />
       {error && <p className="mt-1 text-xs text-rose-600" id="err">{error}</p>}
     </div>
@@ -811,14 +1011,14 @@ function CellTextarea({
   value, onChange, rows=3, error, readOnly=false,
 }: { value:string; onChange:(v:string)=>void; rows?:number; error?:string; readOnly?:boolean }) {
   return (
-    <div className="bg-white p-3">
+    <div className="bg-white px-4 py-3">
       <textarea
         rows={rows} value={value} onChange={(e)=>onChange(e.target.value)}
         readOnly={readOnly} aria-readonly={readOnly || undefined}
         aria-invalid={!!error || undefined} aria-describedby={error ? 'err' : undefined}
         className={`w-full rounded-xl border px-3 py-2 text-sm focus:ring-2 ${
-          error ? 'border-rose-300 focus:ring-rose-200' : 'border-neutral-300 focus:ring-black/10'
-        } ${readOnly ? 'bg-neutral-50 cursor-not-allowed' : ''}`}
+          error ? 'border-rose-300 focus:ring-rose-200' : 'border-neutral-300 focus:ring-indigo-200'
+        } ${readOnly ? 'cursor-not-allowed bg-neutral-50' : ''}`}
       />
       {error && <p className="mt-1 text-xs text-rose-600" id="err">{error}</p>}
     </div>
