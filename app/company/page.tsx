@@ -528,7 +528,7 @@ export default function CompanyAdminPage() {
             <ul className="mt-3 space-y-2 text-xs text-neutral-600">
               <li>• Profilde yaptığınız değişiklikler kaydettiğiniz anda ekip üyeleriyle paylaşılır.</li>
               <li>• Şube ekledikten sonra sıralama numarası ve görünürlüğü düzenleyerek navigasyonda nasıl görüneceğini kontrol edin.</li>
-              <li>• Kullanıcı davet ettiğinizde geçici şifreyi paylaşmayı unutmayın; kullanıcı ilk girişte yeni şifre belirler.</li>
+              <li>• Kullanıcı davet ettiğinizde geçici şifreyi paylaşmayı unutmayın; hesap bu şifreyle kullanılmaya devam eder.</li>
             </ul>
           </div>
         </aside>
@@ -809,7 +809,7 @@ export default function CompanyAdminPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-neutral-900">Kullanıcılar</h2>
-            <p className="text-xs text-neutral-500">Tenant altında yetkili olan ekip üyeleri</p>
+            <p className="text-xs text-neutral-500">Yetkili olan ekip üyeleri</p>
           </div>
           <button
             type="button"
