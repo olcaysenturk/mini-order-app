@@ -46,6 +46,9 @@ export function UserMenu() {
   // ---- Türetilen değerler ----
   const role = (data?.user as any)?.role as string | undefined;
   const isSuper = role === "SUPERADMIN";
+  const tenantRole = (data as any)?.tenantRole ?? null;
+  const canViewCompany = isSuper || tenantRole === "OWNER" || tenantRole === "ADMIN";
+  const canViewBilling = isSuper || tenantRole === "OWNER";
   const isPro = (data as any)?.isPro === true;
   const name = data?.user?.name || data?.user?.email || "Kullanıcı";
   const initials = (() => {
@@ -212,7 +215,7 @@ export function UserMenu() {
             <div className="mt-0.5 text-xs text-neutral-500 truncate">
               {data!.user!.email}
             </div>
-            <div className="mt-2 flex items-center gap-1">
+            {/* <div className="mt-2 flex items-center gap-1">
               {isPro ? (
                 <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
                   PRO
@@ -222,41 +225,73 @@ export function UserMenu() {
                   Ücretsiz Deneme
                 </span>
               )}
-            </div>
+            </div> */}
           </div>
 
           <div className="h-px bg-neutral-100" />
 
           <div className="py-1" onClick={() => setOpen(false)}>
-            <Link
-              prefetch={false}
-              role="menuitem"
-              href="/company"
-              className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-            >
-              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/>
-              </svg>
-              Hesap Bilgileri
-            </Link>
+            {canViewCompany ? (
+              <Link
+                prefetch={false}
+                role="menuitem"
+                href="/company"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/>
+                </svg>
+                Hesap Bilgileri
+              </Link>
+            ) : (
+              <span
+                role="menuitem"
+                aria-disabled="true"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-400"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/>
+                </svg>
+                Hesap Bilgileri
+              </span>
+            )}
 
-            <Link
-              prefetch={false}
-              role="menuitem"
-              href="/billing"
-              className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-            >
-              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                <path
-                  fill="currentColor"
-                  fillRule="evenodd"
-                  d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v.75H2.25v-.75Zm0 3.75h19.5v6a2.25 2.25 0 0 1-2.25 2.25h-15A2.25 2.25 0 0 1 2.25 16.5v-6Z"
-                  clipRule="evenodd"
-                />
-                <path fill="currentColor" d="M5 14.25h7.5v1.5H5z" />
-              </svg>
-              Ödeme Bilgileri
-            </Link>
+            {canViewBilling ? (
+              <Link
+                prefetch={false}
+                role="menuitem"
+                href="/billing"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    fillRule="evenodd"
+                    d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v.75H2.25v-.75Zm0 3.75h19.5v6a2.25 2.25 0 0 1-2.25 2.25h-15A2.25 2.25 0 0 1 2.25 16.5v-6Z"
+                    clipRule="evenodd"
+                  />
+                  <path fill="currentColor" d="M5 14.25h7.5v1.5H5z" />
+                </svg>
+                Ödeme Bilgileri
+              </Link>
+            ) : (
+              <span
+                role="menuitem"
+                aria-disabled="true"
+                className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-400"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    fillRule="evenodd"
+                    d="M2.25 6.75A2.25 2.25 0 0 1 4.5 4.5h15a2.25 2.25 0 0 1 2.25 2.25v.75H2.25v-.75Zm0 3.75h19.5v6a2.25 2.25 0 0 1-2.25 2.25h-15A2.25 2.25 0 0 1 2.25 16.5v-6Z"
+                    clipRule="evenodd"
+                  />
+                  <path fill="currentColor" d="M5 14.25h7.5v1.5H5z" />
+                </svg>
+                Ödeme Bilgileri
+              </span>
+            )}
 
             {isSuper && (
               <Link

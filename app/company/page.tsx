@@ -7,6 +7,7 @@ import {
   Pencil, Check, X, Plus, TriangleAlert
 } from 'lucide-react'
 import { toast  } from 'sonner'
+import { useSession } from 'next-auth/react'
 
 type Profile = {
   companyName: string
@@ -32,6 +33,20 @@ type Branch = {
   sortOrder: number
 }
 
+type TenantMember = {
+  membershipId: string
+  tenantRole: string
+  createdAt: string
+  user: {
+    id: string
+    name: string | null
+    email: string
+    role: string
+    isActive: boolean
+    createdAt: string
+  }
+}
+
 type ApiError = {
   error: string
   message?: string
@@ -40,6 +55,12 @@ type ApiError = {
 }
 
 export default function CompanyAdminPage() {
+  const { data: session, status: sessionStatus } = useSession()
+  const userRole = (session?.user as any)?.role as string | undefined
+  const tenantRole = (session as any)?.tenantRole ?? null
+  const isSuperAdmin = userRole === 'SUPERADMIN'
+  const isTenantAdmin = isSuperAdmin || tenantRole === 'OWNER' || tenantRole === 'ADMIN'
+
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -75,13 +96,24 @@ export default function CompanyAdminPage() {
   const [eOrder, setEOrder] = useState<number>(0); const [eActive, setEActive] = useState<boolean>(true)
   const [savingBranch, setSavingBranch] = useState(false)
 
+  // Kullanıcı yönetimi
+  const [members, setMembers] = useState<TenantMember[]>([])
+  const [membersLoading, setMembersLoading] = useState(false)
+  const [membersError, setMembersError] = useState<string | null>(null)
+  const [inviteName, setInviteName] = useState('')
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [creatingMember, setCreatingMember] = useState(false)
+  const [invitePassword, setInvitePassword] = useState<string | null>(null)
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+
   const logoPreview = useMemo(() => (profile.logoUrl ? profile.logoUrl : ''), [profile.logoUrl])
   const primaryBranch = useMemo(
     () => branches.find(b => b.showOnHeader && b.sortOrder === 0) || null, [branches]
   )
 
   useEffect(() => {
-    (async () => {
+    if (!isTenantAdmin || sessionStatus === 'loading') return
+    ;(async () => {
       setLoading(true); setErr(null)
       try {
         const [profRes, brRes] = await Promise.all([
@@ -108,15 +140,23 @@ export default function CompanyAdminPage() {
         if (!brRes.ok) throw new Error('branches_fetch_failed')
         const bj = await brRes.json()
         if (bj?.ok) setBranches(bj.items as Branch[])
-      } catch { setErr('Veriler alınamadı') }
-      finally { setLoading(false) }
+      } catch {
+        setErr('Veriler alınamadı')
+      } finally {
+        setLoading(false)
+      }
     })()
-  }, [])
+  }, [isTenantAdmin, sessionStatus])
 
   // ilk şube için varsayılan kısa ad
   useEffect(() => {
     if (openAdd && branches.length === 0 && !bCode) setBCode('Merkez')
   }, [openAdd, branches.length, bCode])
+
+  useEffect(() => {
+    if (!isTenantAdmin || sessionStatus === 'loading') return
+    loadMembers()
+  }, [isTenantAdmin, sessionStatus])
 
   // ---- kaydet
   async function saveProfile(e: React.FormEvent) {
@@ -224,6 +264,114 @@ export default function CompanyAdminPage() {
     setEOrder(Number.isFinite(b.sortOrder) ? b.sortOrder : 0)
     setEActive(!!b.isActive)
   }
+
+  async function loadMembers() {
+    if (!isTenantAdmin) return
+    setMembersLoading(true); setMembersError(null)
+    try {
+      const res = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'include' })
+      const raw = await res.text()
+      let parsed: any = null
+      try { parsed = raw ? JSON.parse(raw) : null } catch { /* ignore */ }
+      if (!res.ok || !parsed?.ok) {
+        throw new Error(parsed?.error || raw || 'Kullanıcılar alınamadı')
+      }
+      const items = Array.isArray(parsed.items) ? parsed.items : []
+      setMembers(items)
+    } catch (e: any) {
+      setMembersError(e?.message || 'Kullanıcılar alınamadı')
+      setMembers([])
+    } finally {
+      setMembersLoading(false)
+    }
+  }
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault()
+    if (!inviteEmail.trim()) {
+      toast.warning('E-posta zorunlu')
+      return
+    }
+    if (!isTenantAdmin) {
+      toast.error('Yetki bulunmuyor')
+      return
+    }
+
+    setCreatingMember(true)
+    setMembersError(null)
+    setInvitePassword(null)
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          name: inviteName.trim() || undefined,
+        }),
+      })
+      const raw = await res.text()
+      let data: any = null
+      try { data = raw ? JSON.parse(raw) : null } catch { /* ignore */ }
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || raw || 'Kullanıcı eklenemedi')
+      }
+      if (data.member) {
+        setMembers(prev => {
+          const filtered = prev.filter(m => m.user.id !== data.member.user.id)
+          return [data.member, ...filtered]
+        })
+      } else {
+        await loadMembers()
+      }
+      if (data.initialPassword) {
+        setInvitePassword(data.initialPassword)
+      }
+      toast.success('Kullanıcı eklendi')
+      setInviteEmail('')
+      setInviteName('')
+    } catch (e: any) {
+      const message = e?.message || 'Kullanıcı eklenemedi'
+      setMembersError(message)
+      toast.error(message)
+    } finally {
+      setCreatingMember(false)
+    }
+  }
+
+  async function handleRemoveMember(member: TenantMember) {
+    if (!isTenantAdmin) {
+      toast.error('Yetki bulunmuyor')
+      return
+    }
+    if (member.tenantRole === 'OWNER' && !isSuperAdmin) {
+      toast.warning('Owner rolündeki kullanıcı kaldırılamaz.')
+      return
+    }
+    if (!confirm(`${member.user.email} kullanıcısını kaldırmak istediğinize emin misiniz?`)) {
+      return
+    }
+
+    setRemovingMemberId(member.membershipId)
+    try {
+      const res = await fetch(`/api/admin/users/memberships/${member.membershipId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const raw = await res.text()
+      let parsed: any = null
+      try { parsed = raw ? JSON.parse(raw) : null } catch { /* ignore */ }
+      if (!res.ok || !parsed?.ok) {
+        throw new Error(parsed?.error || raw || 'Kullanıcı kaldırılamadı')
+      }
+      setMembers(prev => prev.filter(m => m.membershipId !== member.membershipId))
+      toast.success('Kullanıcı kaldırıldı')
+    } catch (e: any) {
+      toast.error(e?.message || 'Kullanıcı kaldırılamadı')
+    } finally {
+      setRemovingMemberId(null)
+    }
+  }
   async function saveEdit() {
     if (!editingId) return
     if (!eName.trim()) { toast.warning('Şube adı zorunlu'); return }
@@ -255,6 +403,26 @@ export default function CompanyAdminPage() {
     setErrors({})
     setErrorList([])
     // view moda geçince alanları temizce gösteriyoruz (sunucudan gelen state zaten duruyor)
+  }
+
+  if (sessionStatus === 'loading') {
+    return (
+      <div className="mx-auto max-w-6xl p-6">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm text-neutral-600">
+          Yükleniyor…
+        </div>
+      </div>
+    )
+  }
+
+  if (!isTenantAdmin) {
+    return (
+      <div className="mx-auto max-w-4xl p-6">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-600">
+          Bu sayfayı görüntüleme yetkiniz yok.
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -455,6 +623,122 @@ export default function CompanyAdminPage() {
           )}
         </form>
       </div>
+
+      {/* KULLANICI YÖNETİMİ */}
+      <section className="mt-6 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold text-neutral-800">Kullanıcılar</h2>
+            <p className="text-xs text-neutral-500">Bu tenant altında yetkili kullanıcılar</p>
+          </div>
+          <button
+            type="button"
+            onClick={loadMembers}
+            disabled={membersLoading}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+          >
+            {membersLoading ? 'Yükleniyor…' : 'Yenile'}
+          </button>
+        </div>
+
+        <div className="grid gap-4 p-4">
+          <form onSubmit={handleInvite} className="grid gap-3 rounded-xl border border-dashed border-neutral-200 bg-neutral-50/60 p-4 text-sm">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-neutral-600">Ad Soyad (opsiyonel)</span>
+                <input
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  placeholder="Örneğin: Ayşe Yılmaz"
+                  className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-neutral-600">E-posta *</span>
+                <input
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  required
+                  type="email"
+                  placeholder="kullanici@ornek.com"
+                  className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-neutral-500">Yeni kullanıcılar <strong>STAFF</strong> rolüyle eklenir ve raporlar/şirket sayfasını görüntüleyemez.</p>
+              <button
+                type="submit"
+                disabled={creatingMember}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {creatingMember ? 'Ekleniyor…' : 'Kullanıcı Ekle'}
+              </button>
+            </div>
+          </form>
+
+          {invitePassword && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
+              <strong>Geçici şifre:</strong> <code className="font-mono text-sm">{invitePassword}</code>
+              <span className="ms-2">(Kullanıcı ilk girişte şifreyi değiştirmek zorunda.)</span>
+            </div>
+          )}
+
+          {membersError && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{membersError}</div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-neutral-50 text-xs text-neutral-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">Kullanıcı</th>
+                  <th className="px-3 py-2 text-left">E-posta</th>
+                  <th className="px-3 py-2 text-left">Rol</th>
+                  <th className="px-3 py-2 text-left">Üyelik</th>
+                  <th className="px-3 py-2 text-left">Durum</th>
+                  <th className="px-3 py-2 text-left">Eklenme</th>
+                  <th className="px-3 py-2 text-left">İşlem</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {membersLoading ? (
+                  <tr><td colSpan={6} className="px-3 py-4 text-center text-neutral-500">Yükleniyor…</td></tr>
+                ) : members.length === 0 ? (
+                  <tr><td colSpan={6} className="px-3 py-4 text-center text-neutral-500">Bu tenant için henüz kullanıcı eklenmemiş.</td></tr>
+                ) : (
+                  members.map((member) => {
+                    const user = member.user
+                    const date = new Date(member.createdAt)
+                    const createdText = new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+                    const removable = member.tenantRole !== 'OWNER' || isSuperAdmin
+                    return (
+                      <tr key={member.membershipId} className="bg-white">
+                        <td className="px-3 py-2 font-medium text-neutral-800">{user.name || '—'}</td>
+                        <td className="px-3 py-2 text-neutral-600">{user.email}</td>
+                        <td className="px-3 py-2 text-neutral-600">{user.role}</td>
+                        <td className="px-3 py-2 text-neutral-600">{member.tenantRole}</td>
+                        <td className="px-3 py-2 text-neutral-600">{user.isActive ? 'Aktif' : 'Pasif'}</td>
+                        <td className="px-3 py-2 text-neutral-500">{createdText}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMember(member)}
+                            disabled={!removable || removingMemberId === member.membershipId}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2 py-1 text-xs text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {removingMemberId === member.membershipId ? 'Kaldırılıyor…' : 'Kaldır'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
       {/* ŞUBELER */}
       <BranchesSection

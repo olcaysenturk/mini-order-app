@@ -10,6 +10,7 @@ type NavItem = {
   href: string
   label: string
   icon: React.ReactNode
+  disabled?: boolean
 }
 
 function NavButton({
@@ -19,6 +20,17 @@ function NavButton({
   item: NavItem
   active: boolean
 }) {
+  if (item.disabled) {
+    return (
+      <span
+        aria-disabled="true"
+        className="inline-flex h-9 items-center gap-2 rounded-xl border border-neutral-200 bg-neutral-100 px-3 text-sm text-neutral-400 cursor-not-allowed"
+      >
+        <span className="size-4" aria-hidden>{item.icon}</span>
+        <span className="hidden sm:inline">{item.label}</span>
+      </span>
+    )
+  }
   return (
     <Link
       prefetch={false}
@@ -73,6 +85,8 @@ export function AuthedNav() {
 
   const role = (data?.user as any)?.role as string | undefined
   const isSuperAdmin = role === 'SUPERADMIN'
+  const tenantRole = (data as any)?.tenantRole ?? null
+  const isStaff = !isSuperAdmin && tenantRole === 'STAFF'
   const isActive = (href: string) => pathname.startsWith(href)
 
   const items: NavItem[] = [
@@ -112,6 +126,13 @@ export function AuthedNav() {
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 21V3h2v18zm4 0V10h2v11zm4 0V6h2v15zm4 0V13h2v8zm4 0V8h2v13z"/></svg>,
     },
   ]
+
+  const navItems: NavItem[] = items.map(it => {
+    if (isStaff && it.href === '/reports') {
+      return { ...it, disabled: true }
+    }
+    return it
+  })
 
   const adminItem: NavItem = {
     href: '/admin/users',
@@ -158,8 +179,25 @@ export function AuthedNav() {
             className="absolute left-0 right-auto top-full z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-lg"
           >
             <nav className="max-h-[70vh] overflow-y-auto py-2">
-              {[...items, ...(isSuperAdmin ? [adminItem] as NavItem[] : [])].map((it) => {
+              {[...navItems, ...(isSuperAdmin ? [adminItem] as NavItem[] : [])].map((it) => {
                 const active = isActive(it.href) || (it.href.startsWith('/admin') && pathname.startsWith('/admin'))
+                const itemClasses = [
+                  'flex items-center gap-3 px-3 py-2 text-sm transition',
+                  active ? 'bg-neutral-900 text-white' : 'text-neutral-700 hover:bg-neutral-50',
+                ].join(' ')
+                if (it.disabled) {
+                  return (
+                    <span
+                      key={it.href}
+                      role="menuitem"
+                      aria-disabled="true"
+                      className="flex items-center gap-3 px-3 py-2 text-sm text-neutral-400"
+                    >
+                      <span className="size-4" aria-hidden>{it.icon}</span>
+                      <span>{it.label}</span>
+                    </span>
+                  )
+                }
                 return (
                   <Link
                     key={it.href}
@@ -167,10 +205,7 @@ export function AuthedNav() {
                     role="menuitem"
                     href={it.href}
                     onClick={() => setOpen(false)}
-                    className={[
-                      'flex items-center gap-3 px-3 py-2 text-sm transition',
-                      active ? 'bg-neutral-900 text-white' : 'text-neutral-700 hover:bg-neutral-50',
-                    ].join(' ')}
+                    className={itemClasses}
                   >
                     <span className="size-4" aria-hidden>{it.icon}</span>
                     <span>{it.label}</span>
@@ -190,7 +225,7 @@ export function AuthedNav() {
         "
         aria-label="Uygulama gezinti"
       >
-        {items.map((it) => (
+        {navItems.map((it) => (
           <NavButton key={it.href} item={it} active={isActive(it.href)} />
         ))}
         {/* İsterseniz desktop’ta da admin sekmesini gösterebilirsiniz:

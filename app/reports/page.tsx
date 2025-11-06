@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -136,6 +137,12 @@ type MethodsByDateRow = { date: string; method: string; amount: number };
 
 /* -------------------- page -------------------- */
 export default function ReportsPage() {
+  const { data: session, status: sessionStatus } = useSession();
+  const role = (session?.user as any)?.role as string | undefined;
+  const tenantRole = (session as any)?.tenantRole ?? null;
+  const isSuperAdmin = role === "SUPERADMIN";
+  const isStaff = !isSuperAdmin && tenantRole === "STAFF";
+
   const [filter, setFilter] = useState<FilterKey>("active");
   const [loading, setLoading] = useState(false);
 
@@ -178,6 +185,7 @@ export default function ReportsPage() {
   const showOverlay = loading;
 
   async function loadAll() {
+    if (isStaff) return;
     setLoading(true);
     setError(null);
     try {
@@ -208,6 +216,7 @@ export default function ReportsPage() {
 
   // Ürünleri çek (sayfalı)
   async function loadProducts(page = prodPage, pageSize = prodPageSize) {
+    if (isStaff) return;
     setProdLoading(true);
     try {
       const qs = new URLSearchParams({
@@ -228,6 +237,7 @@ export default function ReportsPage() {
 
   // Şube listesi
   async function loadBranchOptions() {
+    if (isStaff) return;
     try {
       const r = await fetch(`/api/branches?all=1`, { cache: "no-store" });
       if (!r.ok) return setBranchOptions([]);
@@ -245,17 +255,25 @@ export default function ReportsPage() {
   }
 
   // İlk yüklemeler
-  useEffect(() => { loadBranchOptions(); }, []);
-  useEffect(() => { loadAll(); }, [filter]);
+  useEffect(() => {
+    if (isStaff) return;
+    loadBranchOptions();
+  }, [isStaff]);
+  useEffect(() => {
+    if (isStaff) return;
+    loadAll();
+  }, [filter, isStaff]);
 
   // Ürün sorguları (filter/sort/search/page değişince)
   useEffect(() => {
+    if (isStaff) return;
     setProdPage(1);
-  }, [filter, prodQuery, prodSort, prodDesc, prodPageSize]);
+  }, [filter, prodQuery, prodSort, prodDesc, prodPageSize, isStaff]);
   useEffect(() => {
+    if (isStaff) return;
     loadProducts(prodPage, prodPageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter, prodPage, prodPageSize, prodQuery, prodSort, prodDesc]);
+  }, [filter, prodPage, prodPageSize, prodQuery, prodSort, prodDesc, isStaff]);
 
   // Grafik datası
   const chartData = useMemo(() => over?.series30d ?? [], [over]);
@@ -263,6 +281,7 @@ export default function ReportsPage() {
   // Şube bazlı tarih aralığı verisini çek (yalnızca branch !== all)
   useEffect(() => {
     const run = async () => {
+      if (isStaff) { setBranchDaily([]); setMethodsByDate(new Map()); return; }
       if (branch === "all") { setBranchDaily([]); setMethodsByDate(new Map()); return; }
       if (!dateFrom || !dateTo) return;
       setLoadingDaily(true);
@@ -291,7 +310,7 @@ export default function ReportsPage() {
       }
     };
     run();
-  }, [branch, dateFrom, dateTo]);
+  }, [branch, dateFrom, dateTo, isStaff]);
 
   // Üst metrikler için placeholder loading
   const metricsLoading = !over;
@@ -323,6 +342,26 @@ export default function ReportsPage() {
     const sorted = filtered.sort((a, b) => (branchDesc ? -cmp(a, b) : cmp(a, b)));
     return sorted;
   }, [branchesWithBasic, branchQuery, branchSort, branchDesc]);
+
+  if (sessionStatus === "loading") {
+    return (
+      <main className="mx-auto max-w-6xl p-6">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-sm text-neutral-600">
+          Yükleniyor…
+        </div>
+      </main>
+    );
+  }
+
+  if (isStaff) {
+    return (
+      <main className="mx-auto max-w-4xl p-6">
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-600">
+          Bu sayfa yalnızca yönetici kullanıcılar tarafından görüntülenebilir.
+        </div>
+      </main>
+    );
+  }
 
   /* -------------------- UI -------------------- */
   return (
