@@ -81,6 +81,7 @@ export default function CompanyAdminPage() {
   // ---- şubeler
   const [branches, setBranches] = useState<Branch[]>([])
   const [openAdd, setOpenAdd] = useState(false)
+  const [inviteModalOpen, setInviteModalOpen] = useState(false)
 
   // add form
   const [bName, setBName] = useState(''); const [bCode, setBCode] = useState('')
@@ -336,6 +337,7 @@ export default function CompanyAdminPage() {
       toast.success('Kullanıcı eklendi')
       setInviteEmail('')
       setInviteName('')
+      setInviteModalOpen(false)
     } catch (e: any) {
       const message = e?.message || 'Kullanıcı eklenemedi'
       setMembersError(message)
@@ -388,15 +390,10 @@ export default function CompanyAdminPage() {
 
   const triggerAddBranch = () => {
     setOpenAdd(true)
-    requestAnimationFrame(() => {
-      branchSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
-    scrollToSection('branches-section')
   }
 
   const triggerInvite = () => {
-    membersSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    scrollToSection('members-section')
+    setInviteModalOpen(true)
     requestAnimationFrame(() => {
       const input = document.getElementById('invite-email')
       if (input instanceof HTMLInputElement) {
@@ -565,7 +562,7 @@ export default function CompanyAdminPage() {
                     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
                       <path fill="currentColor" d="M12 12a5 5 0 1 0-5-5a5 5 0 0 0 5 5m-7 8v-1a6 6 0 0 1 12 0v1zm12-8v-2h-2V8h2V6h2v2h2v2h-2v2z" />
                     </svg>
-                    Kullanıcı Davet Et
+                    Yeni Kullanıcı Ekle
                   </button>
                   <span className="inline-flex items-center gap-1 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-500">
                     {loading ? 'Veriler yükleniyor…' : 'Güncel'}
@@ -811,62 +808,34 @@ export default function CompanyAdminPage() {
             <h2 className="text-sm font-semibold text-neutral-900">Kullanıcılar</h2>
             <p className="text-xs text-neutral-500">Yetkili olan ekip üyeleri</p>
           </div>
-          <button
-            type="button"
-            onClick={loadMembers}
-            disabled={membersLoading}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 shadow-sm hover:bg-neutral-50 disabled:opacity-60"
-          >
-            {membersLoading ? 'Yükleniyor…' : 'Yenile'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={triggerInvite}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            >
+              <Plus className="h-4 w-4" /> Kullanıcı Davet Et
+            </button>
+            <button
+              type="button"
+              onClick={loadMembers}
+              disabled={membersLoading}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 shadow-sm hover:bg-neutral-50 disabled:opacity-60"
+            >
+              {membersLoading ? 'Yükleniyor…' : 'Yenile'}
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-4 p-4">
-          <form
-            onSubmit={handleInvite}
-            className="grid gap-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/80 p-4 text-sm"
-          >
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-neutral-600">Ad Soyad (opsiyonel)</span>
-                <input
-                  value={inviteName}
-                  onChange={(e) => setInviteName(e.target.value)}
-                  placeholder="Örneğin: Ayşe Yılmaz"
-                  className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                />
-              </label>
-              <label className="grid gap-1">
-                <span className="text-xs font-medium text-neutral-600">E-posta *</span>
-                <input
-                  id="invite-email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  required
-                  type="email"
-                  placeholder="kullanici@ornek.com"
-                  className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                />
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-xs text-neutral-500">
-                Yeni kullanıcılar otomatik olarak <strong>STAFF</strong> rolüyle eklenir ve raporlar / şirket ayarları menülerini göremez.
-              </p>
-              <button
-                type="submit"
-                disabled={creatingMember}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
-              >
-                {creatingMember ? 'Ekleniyor…' : 'Kullanıcı Ekle'}
-              </button>
-            </div>
-          </form>
+          <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-3 text-xs text-neutral-600">
+            Yeni kullanıcılar otomatik olarak <strong>STAFF</strong> rolüyle eklenir ve raporlar / şirket ayarları menülerini göremez.
+          </div>
 
           {invitePassword && (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
               <strong>Geçici şifre:</strong> <code className="font-mono text-sm">{invitePassword}</code>
-              <span className="ms-2">Kullanıcı ilk girişte şifreyi güncellemek zorundadır.</span>
+              <span className="ms-2">Bu şifreyle giriş yapılabilir; kullanıcı dilerse profilinden güncelleyebilir.</span>
             </div>
           )}
 
@@ -935,6 +904,84 @@ export default function CompanyAdminPage() {
           </div>
         </div>
       </section>
+
+      {inviteModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 py-6 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Kullanıcı davet et"
+        >
+          <button
+            type="button"
+            aria-label="Kapat"
+            className="absolute inset-0 cursor-pointer"
+            onClick={() => setInviteModalOpen(false)}
+          />
+          <div
+            className="relative z-10 w-full max-w-xl rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">Yeni Kullanıcı Davet Et</h3>
+                <p className="text-xs text-neutral-500">Kullanıcı bilgilerini girin; davet e-postası yerine geçici şifre paylaşılacak.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInviteModalOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <form onSubmit={handleInvite} className="space-y-6 px-5 py-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm">
+                  <span className="text-xs font-medium text-neutral-600">Ad Soyad (opsiyonel)</span>
+                  <input
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="Örneğin: Ayşe Yılmaz"
+                    className="rounded-lg border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-xs font-medium text-neutral-600">E-posta *</span>
+                  <input
+                    id="invite-email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    required
+                    type="email"
+                    placeholder="kullanici@ornek.com"
+                    className="rounded-lg border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  />
+                </label>
+              </div>
+              <p className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 px-4 py-3 text-xs text-neutral-500">
+                Yeni kullanıcılar otomatik olarak <strong>STAFF</strong> rolüyle eklenir ve raporlar / şirket ayarları menülerine erişemez.
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInviteModalOpen(false)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                >
+                  <X className="h-4 w-4" /> Vazgeç
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingMember}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                >
+                  {creatingMember ? 'Ekleniyor…' : 'Davet Gönder'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ŞUBELER */}
       <BranchesSection
@@ -1047,48 +1094,13 @@ function BranchesSection(props: any) {
           </span>
         </div>
         <button
-          type="button" onClick={() => setOpenAdd((s:boolean)=>!s)}
+          type="button"
+          onClick={() => setOpenAdd(true)}
           className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
         >
-          <Plus className="h-4 w-4" /> {openAdd ? 'Formu Gizle' : 'Şube Ekle'}
+          <Plus className="h-4 w-4" /> Şube Ekle
         </button>
       </div>
-
-      {openAdd && (
-        <form onSubmit={addBranch} className="border-b p-4">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <MiniField label="Ad *" value={bName} onChange={setBName} />
-            <MiniField label="Şube Adı" value={bCode} onChange={setBCode} />
-            <MiniField label="Telefon" value={bPhone} onChange={setBPhone} inputMode="tel" autoComplete="tel" />
-            <MiniField label="E-posta" value={bEmail} onChange={setBEmail} inputMode="email" autoComplete="email" placeholder="mail@ornek.com" />
-            <MiniField label="Adres" value={bAddress} onChange={setBAddress} className="sm:col-span-2" />
-            <div className="flex items-center gap-4">
-              <label className="inline-flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={bShow} onChange={(e)=>setBShow(e.target.checked)}
-                       className="h-4 w-4 rounded border-neutral-300 text-black focus:ring-black"/>
-                Başlıkta Göster
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-neutral-600">Sıra</span>
-                <input
-                  type="number" value={bOrder} onChange={(e)=>setBOrder(parseInt(e.target.value || '0'))}
-                  className="w-20 rounded-xl border border-neutral-300 px-3 py-2 text-right focus:ring-2 focus:ring-black/10"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <button type="button" onClick={()=>setOpenAdd(false)}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50">
-              <X className="h-4 w-4" /> İptal
-            </button>
-            <button className="inline-flex items-center gap-1.5 rounded-xl bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-black/90">
-              Kaydet
-            </button>
-          </div>
-        </form>
-      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
@@ -1153,6 +1165,78 @@ function BranchesSection(props: any) {
           </tbody>
         </table>
       </div>
+
+      {openAdd && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 px-4 py-6 sm:items-center" role="dialog" aria-modal="true" aria-label="Yeni şube ekle">
+          <button
+            type="button"
+            aria-label="Kapat"
+            className="absolute inset-0 cursor-pointer"
+            onClick={() => setOpenAdd(false)}
+          />
+          <div
+            className="relative z-10 w-full max-w-2xl rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">Yeni Şube Ekle</h3>
+                <p className="text-xs text-neutral-500">Şube bilgilerini girin; kaydettiğiniz anda ekibinizin erişimine açılır.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenAdd(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={addBranch} className="space-y-6 px-5 py-5">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <MiniField label="Ad *" value={bName} onChange={setBName} />
+                <MiniField label="Şube Adı" value={bCode} onChange={setBCode} />
+                <MiniField label="Telefon" value={bPhone} onChange={setBPhone} inputMode="tel" autoComplete="tel" />
+                <MiniField label="E-posta" value={bEmail} onChange={setBEmail} inputMode="email" autoComplete="email" placeholder="mail@ornek.com" />
+                <MiniField label="Adres" value={bAddress} onChange={setBAddress} className="sm:col-span-2" />
+                <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-3 sm:col-span-3">
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={bShow}
+                      onChange={(e) => setBShow(e.target.checked)}
+                      className="h-4 w-4 rounded border-neutral-300 text-black focus:ring-black"
+                    />
+                    Başlıkta Göster
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-neutral-600">Sıra</span>
+                    <input
+                      type="number"
+                      value={bOrder}
+                      onChange={(e) => setBOrder(parseInt(e.target.value || '0'))}
+                      className="w-24 rounded-xl border border-neutral-300 px-3 py-2 text-right focus:ring-2 focus:ring-black/10"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpenAdd(false)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                >
+                  <X className="h-4 w-4" /> Vazgeç
+                </button>
+                <button className="inline-flex items-center gap-1.5 rounded-xl bg-black px-3 py-1.5 text-xs font-medium text-white hover:bg-black/90">
+                  Kaydet
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {editingId && (
         <div className="border-t p-4">
