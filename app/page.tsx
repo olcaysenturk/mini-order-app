@@ -28,7 +28,7 @@ export const metadata = {
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
-  if (session?.user) redirect("/orders");
+  if (session?.user) redirect("/dashboard/orders");
 
   return (
     <main id="main" className="relative min-h-screen overflow-hidden bg-white text-neutral-900">

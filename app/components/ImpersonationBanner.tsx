@@ -53,7 +53,7 @@ export default function ImpersonationBanner() {
 
         <div className="flex shrink-0 items-center gap-2">
           <Link
-            href="/admin"
+            href="/dashboard/admin"
             className="inline-flex h-8 items-center rounded-lg border border-amber-300 bg-white/80 px-3 hover:bg-white"
             title="Yönetim panelini aç"
           >

@@ -107,8 +107,8 @@ export async function POST(req: NextRequest) {
 
     // 7) UI modalını tetiklemek için kısa ömürlü cookie
     const c = await cookies(); // DİKKAT: await!
-    c.set("billing_req", "ok", { httpOnly: false, path: "/billing", maxAge: 10 });
-    c.set("billing_month", monthKey, { httpOnly: false, path: "/billing", maxAge: 10 });
+    c.set("billing_req", "ok", { httpOnly: false, path: "/dashboard/billing", maxAge: 10 });
+    c.set("billing_month", monthKey, { httpOnly: false, path: "/dashboard/billing", maxAge: 10 });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

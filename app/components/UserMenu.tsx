@@ -235,7 +235,7 @@ export function UserMenu() {
               <Link
                 prefetch={false}
                 role="menuitem"
-                href="/company"
+                href="/dashboard/company"
                 className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
               >
                 <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
@@ -260,7 +260,7 @@ export function UserMenu() {
               <Link
                 prefetch={false}
                 role="menuitem"
-                href="/billing"
+                href="/dashboard/billing"
                 className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
               >
                 <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
@@ -297,7 +297,7 @@ export function UserMenu() {
               <Link
                 prefetch={false}
                 role="menuitem"
-                href="/admin/users"
+                href="/dashboard/admin/users"
                 className="flex items-center gap-2 px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
               >
                 <svg viewBox="0 0 24 24" className="size-4" aria-hidden>

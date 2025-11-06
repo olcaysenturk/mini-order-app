@@ -91,23 +91,23 @@ export function AuthedNav() {
 
   const items: NavItem[] = [
     {
-      href: '/category',
+      href: '/dashboard/category',
       label: 'Ürünler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z"/></svg>,
     },
     {
-      href: '/orders',
+      href: '/dashboard/orders',
       label: 'Siparişler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>,
     },
      {
-      href: '/offers',
+      href: '/dashboard/offers',
       label: 'Teklifler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 6h18v2H3zm0 5h18v2H3zm0 5h12v2H3z"/></svg>,
     },
     // ✅ Takvim eklendi
     {
-      href: '/calendar',
+      href: '/dashboard/calendar',
       label: 'Takvim',
       icon: (
         <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
@@ -116,26 +116,26 @@ export function AuthedNav() {
       ),
     },
     {
-      href: '/customers',
+      href: '/dashboard/customers',
       label: 'Müşteriler',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M12 12a5 5 0 1 0-5-5a5 5 0 0 0 5 5m0 2c-4 0-8 2-8 5v2h16v-2c0-3-4-5-8-5"/></svg>,
     },
     {
-      href: '/reports',
+      href: '/dashboard/reports',
       label: 'Raporlar',
       icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M3 21V3h2v18zm4 0V10h2v11zm4 0V6h2v15zm4 0V13h2v8zm4 0V8h2v13z"/></svg>,
     },
   ]
 
   const navItems: NavItem[] = items.map(it => {
-    if (isStaff && it.href === '/reports') {
+    if (isStaff && it.href === '/dashboard/reports') {
       return { ...it, disabled: true }
     }
     return it
   })
 
   const adminItem: NavItem = {
-    href: '/admin/users',
+    href: '/dashboard/admin/users',
     label: 'Üyeler',
     icon: <svg viewBox="0 0 24 24" className="size-4"><path fill="currentColor" d="M12 7c1.66 0 3-1.34 3-3S13.66 1 12 1S9 2.34 9 4s1.34 3 3 3m-2 2h4l1 3h3l-4 4l1 5l-5-3l-5 3l1-5l-4-4h3z"/></svg>,
   }
