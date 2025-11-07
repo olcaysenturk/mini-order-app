@@ -6,8 +6,11 @@ import { prisma } from '@/app/lib/db'
 import { Prisma, OrderStatus as OrderStatusEnum } from '@prisma/client'
 import { z } from 'zod'
 import { logOrderAudit } from './orderAudit'
+import { sendMail } from '@/app/lib/mailer'
 
 export const runtime = 'nodejs'
+const TRY_FORMATTER = new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' })
+const APP_URL = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '')
 
 /* =================== Helpers =================== */
 // Satır (OrderItem) durumları
@@ -458,6 +461,45 @@ export async function POST(req: NextRequest) {
         category: { name: it.category.name },
         variant: { name: it.variant.name },
       })),
+    }
+
+    const creatorEmail = (session?.user as any)?.email as string | undefined
+    if (creatorEmail) {
+      const orderUrl = APP_URL ? `${APP_URL}/dashboard/orders/${created.id}` : null
+      const customerLabel = payload.customerName || 'Müşteri'
+      const totalText = TRY_FORMATTER.format(netNumber)
+      const subject = `Yeni sipariş oluşturuldu • ${customerLabel}`
+      const lines = [
+        `<p>Merhaba ${session?.user?.name ?? ''},</p>`,
+        `<p><strong>${customerLabel}</strong> için yeni bir sipariş oluşturdunuz.</p>`,
+        `<p><b>Sipariş No:</b> ${created.id}<br/><b>Toplam (Net):</b> ${totalText}${
+          payload.branch?.name ? `<br/><b>Şube:</b> ${payload.branch.name}` : ''
+        }</p>`,
+        orderUrl
+          ? `<p><a href="${orderUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;border-radius:10px;text-decoration:none">Siparişi görüntüle</a></p>`
+          : '',
+        `<p>İyi çalışmalar.</p>`,
+      ].join('')
+      const text = [
+        `Merhaba ${session?.user?.name ?? ''}`,
+        `Yeni sipariş: ${created.id}`,
+        `Müşteri: ${customerLabel}`,
+        `Toplam: ${totalText}`,
+        orderUrl ? `Sipariş bağlantısı: ${orderUrl}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+
+      try {
+        await sendMail({
+          to: creatorEmail,
+          subject,
+          html: lines,
+          text,
+        })
+      } catch (mailErr) {
+        console.error('POST /orders mail error:', mailErr)
+      }
     }
 
     return NextResponse.json(payload, { status: 201 })

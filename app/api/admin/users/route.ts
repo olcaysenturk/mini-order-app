@@ -6,8 +6,10 @@ import { TenantRole, UserRole } from "@prisma/client";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
+import { sendMail } from "@/app/lib/mailer";
 
 export const runtime = "nodejs";
+const APP_URL = (process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
 const CreateUserSchema = z.object({
   email: z.string().email(),
@@ -43,6 +45,7 @@ function mapMembership(member: {
     id: string;
     name: string | null;
     email: string;
+    username?: string | null;
     role: UserRole;
     isActive: boolean;
     createdAt: Date;
@@ -52,14 +55,15 @@ function mapMembership(member: {
     membershipId: member.id,
     createdAt: member.createdAt.toISOString(),
     tenantRole: member.role,
-    user: {
-      id: member.user.id,
-      name: member.user.name,
-      email: member.user.email,
-      role: member.user.role,
-      isActive: member.user.isActive,
-      createdAt: member.user.createdAt.toISOString(),
-    },
+      user: {
+        id: member.user.id,
+        name: member.user.name,
+        email: member.user.email,
+        username: member.user.username ?? null,
+        role: member.user.role,
+        isActive: member.user.isActive,
+        createdAt: member.user.createdAt.toISOString(),
+      },
   };
 }
 
@@ -85,6 +89,7 @@ export async function GET(req: NextRequest) {
             id: true,
             name: true,
             email: true,
+            username: true,
             role: true,
             isActive: true,
             createdAt: true,
@@ -134,12 +139,16 @@ export async function POST(req: NextRequest) {
         isActive: true,
         name: true,
         createdAt: true,
+        email: true,
         username: true,
       },
     });
 
     let initialPassword: string | null = null;
     let userId: string;
+    let memberUsername: string | null = existingUser?.username ?? null;
+    let memberEmail = existingUser?.email ?? emailLower;
+    let memberDisplayName: string | null = existingUser?.name ?? name?.trim() ?? null;
 
     if (existingUser) {
       if (!existingUser.isActive) {
@@ -161,6 +170,9 @@ export async function POST(req: NextRequest) {
         },
       });
       userId = existingUser.id;
+      memberUsername = existingUser.username ?? null;
+      memberEmail = existingUser.email;
+      memberDisplayName = existingUser.name ?? null;
     } else {
       const rawPassword = randomBytes(9).toString("base64");
       initialPassword = rawPassword.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12) || "Pass1234";
@@ -183,9 +195,12 @@ export async function POST(req: NextRequest) {
             },
           },
         },
-        select: { id: true },
+        select: { id: true, username: true, email: true, name: true },
       });
       userId = created.id;
+      memberUsername = created.username ?? null;
+      memberEmail = created.email;
+      memberDisplayName = created.name ?? null;
     }
 
     const membership = await prisma.membership.findUnique({
@@ -206,6 +221,53 @@ export async function POST(req: NextRequest) {
         },
       },
     });
+
+    if (initialPassword && membership?.user?.email) {
+      try {
+        const company = await prisma.companyProfile.findUnique({
+          where: { tenantId },
+          select: { email: true, companyName: true },
+        });
+        const recipients = [membership.user.email];
+        if (company?.email && company.email.toLowerCase() !== membership.user.email.toLowerCase()) {
+          recipients.push(company.email);
+        }
+        const loginUrl = APP_URL ? `${APP_URL}/auth/login` : null;
+        const usernameToShare = memberUsername || membership.user.email;
+        const subject = `${company?.companyName || "Perdexa"} • Yeni kullanıcı erişimi`;
+        const html = `
+          <p>Merhaba ${memberDisplayName || membership.user.name || "Yeni üye"},</p>
+          <p>Perdexa hesabınıza giriş yapabilmeniz için geçici bilgileriniz aşağıdadır:</p>
+          <p><strong>Kullanıcı Adı:</strong> ${usernameToShare}<br/>
+             <strong>E-posta:</strong> ${membership.user.email}<br/>
+             <strong>Geçici Şifre:</strong> ${initialPassword}</p>
+          ${
+            loginUrl
+              ? `<p><a href="${loginUrl}" style="display:inline-block;padding:10px 16px;background:#111827;color:#fff;border-radius:10px;text-decoration:none">Panele Giriş Yap</a></p>`
+              : ""
+          }
+          <p>Lütfen ilk girişinizden sonra şifrenizi değiştirin.</p>
+        `;
+        const textLines = [
+          `Merhaba ${memberDisplayName || membership.user.name || "kullanıcı"}`,
+          `Kullanıcı adı: ${usernameToShare}`,
+          `E-posta: ${membership.user.email}`,
+          `Geçici şifre: ${initialPassword}`,
+          loginUrl ? `Giriş adresi: ${loginUrl}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        await sendMail({
+          to: Array.from(new Set(recipients)).join(","),
+          subject,
+          html,
+          text: textLines,
+        });
+      } catch (mailErr) {
+        console.error("POST /admin/users credential mail error:", mailErr);
+      }
+    }
 
     return NextResponse.json(
       {

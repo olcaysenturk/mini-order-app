@@ -254,7 +254,7 @@ export default async function ContactPage({
               <div className="rounded-3xl border border-neutral-200 bg-white/70 backdrop-blur p-6 shadow-sm">
                 <h3 className="text-xl font-semibold">Adres</h3>
                 <address className="mt-2 not-italic text-sm text-neutral-700">
-                  Burgas, BG (EU) <br />
+                  {/* Burgas, BG (EU) <br /> */}
                   İstanbul, TR
                 </address>
                 <p className="mt-2 text-xs text-neutral-500">
@@ -265,7 +265,7 @@ export default async function ContactPage({
 
             {/* Harita placeholder */}
             <div className="overflow-hidden rounded-3xl border border-neutral-200 bg-neutral-50 p-10 text-center text-xs text-neutral-500">
-              Harita bileşeni için yer ayrıldı.
+              
             </div>
           </div>
         </div>

@@ -108,10 +108,17 @@ export default function CompanyAdminPage() {
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
   const branchSectionRef = useRef<HTMLElement | null>(null)
   const membersSectionRef = useRef<HTMLElement | null>(null)
+  const [pwdCurrent, setPwdCurrent] = useState("")
+  const [pwdNew, setPwdNew] = useState("")
+  const [pwdConfirm, setPwdConfirm] = useState("")
+  const [pwdSaving, setPwdSaving] = useState(false)
 
   const branchCount = branches.length
   const activeBranchCount = branches.filter(b => b.isActive).length
   const memberCount = members.length
+  const canSubmitPassword = Boolean(
+    pwdCurrent.trim() && pwdNew.trim() && pwdConfirm.trim()
+  )
 
   const logoPreview = useMemo(() => (profile.logoUrl ? profile.logoUrl : ''), [profile.logoUrl])
   const primaryBranch = useMemo(
@@ -199,6 +206,48 @@ export default function CompanyAdminPage() {
       setErr(e?.message || 'Profil kaydedilemedi')
       toast.error('Profil kaydedilemedi')
     } finally { setSaving(false) }
+  }
+
+  async function handlePasswordChange(e: React.FormEvent) {
+    e.preventDefault()
+    if (pwdSaving) return
+    if (pwdNew.trim().length < 6) {
+      toast.error("Yeni şifre en az 6 karakter olmalı.")
+      return
+    }
+    if (pwdNew !== pwdConfirm) {
+      toast.error("Yeni şifre ile doğrulaması eşleşmiyor.")
+      return
+    }
+    setPwdSaving(true)
+    try {
+      const res = await fetch("/api/account/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ currentPassword: pwdCurrent, newPassword: pwdNew }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const msg =
+          payload?.error === "invalid_current_password"
+            ? "Mevcut şifre yanlış."
+            : payload?.error === "validation_error"
+            ? "Alanları kontrol edin."
+            : payload?.error || "Şifre güncellenemedi."
+        toast.error(msg)
+        return
+      }
+      toast.success("Şifreniz güncellendi.")
+      setPwdCurrent("")
+      setPwdNew("")
+      setPwdConfirm("")
+    } catch (err) {
+      console.error(err)
+      toast.error("Şifre güncellenemedi.")
+    } finally {
+      setPwdSaving(false)
+    }
   }
 
   // ---- şube işlemleri
@@ -797,6 +846,64 @@ export default function CompanyAdminPage() {
             </div>
           )}
         </form>
+
+        <section className="rounded-3xl border border-neutral-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-3">
+            <div>
+              <h2 className="text-sm font-semibold text-neutral-900">Şifre Değiştir</h2>
+              <p className="text-xs text-neutral-500">
+                Hesabınızın güvenliği için belirli aralıklarla şifrenizi güncelleyin.
+              </p>
+            </div>
+          </div>
+          <form onSubmit={handlePasswordChange} className="grid gap-4 px-4 py-5 sm:grid-cols-2">
+            <label className="grid gap-1 text-sm">
+              <span className="text-xs font-medium text-neutral-600">Mevcut Şifre</span>
+              <input
+                type="password"
+                value={pwdCurrent}
+                onChange={(e) => setPwdCurrent(e.target.value)}
+                placeholder="Geçerli şifre"
+                className="rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span className="text-xs font-medium text-neutral-600">Yeni Şifre</span>
+              <input
+                type="password"
+                value={pwdNew}
+                onChange={(e) => setPwdNew(e.target.value)}
+                placeholder="En az 6 karakter"
+                className="rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                autoComplete="new-password"
+                required
+              />
+            </label>
+            <label className="grid gap-1 text-sm sm:col-span-2">
+              <span className="text-xs font-medium text-neutral-600">Yeni Şifre (Tekrar)</span>
+              <input
+                type="password"
+                value={pwdConfirm}
+                onChange={(e) => setPwdConfirm(e.target.value)}
+                placeholder="Yeni şifreyi tekrar yazın"
+                className="rounded-xl border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                autoComplete="new-password"
+                required
+              />
+            </label>
+            <div className="sm:col-span-2 flex items-center justify-end">
+              <button
+                type="submit"
+                disabled={!canSubmitPassword || pwdSaving}
+                className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {pwdSaving ? "Güncelleniyor…" : "Şifreyi Güncelle"}
+              </button>
+            </div>
+          </form>
+        </section>
 
       <section
         ref={membersSectionRef}
