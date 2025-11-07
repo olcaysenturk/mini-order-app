@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { PageOverlay } from "@/app/components/PageOverlay";
 
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
@@ -36,6 +37,8 @@ type Order = {
   deliveryAt?: string | null;
   netTotal?: number;
   discount?: number;
+  paidTotal?: number;
+  balance?: number;
   orderType?: number;
 };
 
@@ -212,6 +215,8 @@ export default function EditOrderPage() {
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [targetSlotIndex, setTargetSlotIndex] = useState<number | null>(null);
   const [lineStatus, setLineStatus] = useState<Status>("processing");
+  const [useCustomPrice, setUseCustomPrice] = useState(false);
+  const [unitPriceInput, setUnitPriceInput] = useState<number>(0);
 
   // Yeni varyant modal
   const [showVarModal, setShowVarModal] = useState(false);
@@ -221,6 +226,7 @@ export default function EditOrderPage() {
   const [netTotal, setNetTotal] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
   const [discount, setDiscount] = useState(0);
+  const [paidAmount, setPaidAmount] = useState(0);
 
   /* ==== Load ==== */
   useEffect(() => {
@@ -247,6 +253,7 @@ export default function EditOrderPage() {
         setNetTotal(ord.netTotal || 0);
         setDiscount(ord.discount || 0);
         setTotalPrice(ord.total || 0);
+        setPaidAmount(ord.paidTotal ?? 0);
         setOrderType(ord.orderType || 0);
 
 
@@ -317,14 +324,38 @@ export default function EditOrderPage() {
       setVarId(variants[0].id);
   }, [selectedCategory, variants, varId]);
 
+  useEffect(() => {
+    if (!useCustomPrice) {
+      setUnitPriceInput(Number(selectedVariant?.unitPrice ?? 0));
+    }
+  }, [selectedVariant, useCustomPrice]);
+
+  useEffect(() => {
+    const subtotal = items.reduce((acc, item) => {
+      const existing = Number(item.subtotal ?? 0);
+      if (Number.isFinite(existing) && existing > 0) {
+        return acc + existing;
+      }
+      const qtySafe = Math.max(1, Number(item.qty ?? 1));
+      const widthSafe = Math.max(0, Number(item.width ?? 0));
+      const densitySafe = Number(item.fileDensity ?? 1) || 1;
+      const unitSafe = Number(item.unitPrice ?? 0);
+      const fallback = unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
+      return acc + fallback;
+    }, 0);
+    setTotalPrice(subtotal);
+    setNetTotal(Math.max(0, subtotal - Number(discount || 0)));
+  }, [items, discount]);
+
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0;
-    const p = Number(selectedVariant.unitPrice) || 0;
+    const price =
+      Number(useCustomPrice ? unitPriceInput : selectedVariant.unitPrice) || 0;
     const q = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
     const d = Number(fileDensity) || 1;
-    return p * ((w / 100) * d || 1) * q;
-  }, [selectedVariant, qty, width, fileDensity]);
+    return price * ((w / 100) * d || 1) * q;
+  }, [selectedVariant, useCustomPrice, unitPriceInput, qty, width, fileDensity]);
 
   const catById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
@@ -406,6 +437,9 @@ export default function EditOrderPage() {
     setEditingLineId(null);
     setTargetSlotIndex(index);
     setLineStatus("processing");
+    const defaultPrice = Number(match?.variants?.[0]?.unitPrice ?? 0);
+    setUseCustomPrice(false);
+    setUnitPriceInput(defaultPrice);
   };
 
   const openQuickFor = (categoryName: string, index: number) => {
@@ -423,6 +457,9 @@ export default function EditOrderPage() {
     setEditingLineId(null);
     setTargetSlotIndex(null);
     setLineStatus("pending");
+    const defaultPrice = Number(cat?.variants?.[0]?.unitPrice ?? 0);
+    setUseCustomPrice(false);
+    setUnitPriceInput(defaultPrice);
   };
 
   const closeDrawer = () => {
@@ -434,7 +471,8 @@ export default function EditOrderPage() {
     if (!selectedCategory || !selectedVariant) return;
     const q = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
-    const price = Number(selectedVariant.unitPrice) || 0;
+    const price =
+      Number(useCustomPrice ? unitPriceInput : selectedVariant.unitPrice) || 0;
     const d = Number(fileDensity) || 1;
     const sub = price * ((w / 100) * d || 1) * q;
     const selectedCatName = catById.get(selectedCategory.id)?.name || "";
@@ -502,6 +540,16 @@ export default function EditOrderPage() {
       Number.isFinite(line.slotIndex as any) ? (line.slotIndex as number) : null
     );
     setLineStatus(line.lineStatus || "pending");
+    const variantPrice = Number(
+      catById
+        .get(line.categoryId)
+        ?.variants?.find((v) => v.id === line.variantId)?.unitPrice ??
+        line.unitPrice ??
+        0
+    );
+    const currentUnit = Number(line.unitPrice ?? variantPrice);
+    setUnitPriceInput(currentUnit);
+    setUseCustomPrice(Math.abs(currentUnit - variantPrice) > 0.0001);
   };
   const swapInCategory = (title: string, from: number, to: number) => {
     setItems((prev) => {
@@ -596,12 +644,18 @@ export default function EditOrderPage() {
     () => groupedByCategoryName.get("AKSESUAR") || [],
     [groupedByCategoryName]
   );
+  const remainingAmount = useMemo(
+    () => Math.max(0, Number(netTotal || 0) - Number(paidAmount || 0)),
+    [netTotal, paidAmount]
+  );
 
   if (loading) return <div className="p-6">Yükleniyor…</div>;
   if (error) return <div className="p-6 text-red-600">Hata: {error}</div>;
 
   return (
-    <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
+    <>
+      <PageOverlay show={saving} label="Kaydediliyor…" />
+      <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
       {/* Toolbar (ekranda görünsün) */}
       <div className="print:hidden border-b border-neutral-200 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 mb-10">
         <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -653,16 +707,25 @@ export default function EditOrderPage() {
                 <button
                   disabled={saving}
                   onClick={saveOrder}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
                   title="Değişiklikleri Kaydet"
                 >
-                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                    <path
-                      fill="currentColor"
-                      d="M17 3H5a2 2 0 0 0-2 2v14h18V7l-4-4zM7 5h8v4H7V5zm13 12H4V7h2v4h10V7h.59L20 9.41V17z"
-                    />
-                  </svg>
-                  Değişiklikleri Kaydet
+                  {saving ? (
+                    <>
+                      <span className="size-4 rounded-full border-2 border-neutral-300 border-t-neutral-700 animate-spin" />
+                      Kaydediliyor…
+                    </>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path
+                          fill="currentColor"
+                          d="M17 3H5a2 2 0 0 0-2 2v14h18V7l-4-4zM7 5h8v4H7V5zm13 12H4V7h2v4h10V7h.59L20 9.41V17z"
+                        />
+                      </svg>
+                      Değişiklikleri Kaydet
+                    </>
+                  )}
                 </button>
 
                 {/* Sipariş Listesi */}
@@ -866,32 +929,44 @@ export default function EditOrderPage() {
           }}
         />
 
-        {/* Not & Toplam */}
-        <div className="grid grid-cols-3 gap-4 mt-6">
-          <div className="col-span-2">
-            <input
-              type="text"
-              className="input mt-1 min-h-[116px] w-full rounded-none" 
-              value={orderNote}
-              placeholder="Not:"
-              onChange={(e) => setOrderNote(e.target.value)}
-            />
-          </div>
-          <div className="text-sm">
-            <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-between text-base tracking-wide">
-              <span>Toplam:</span>
-              <span>{fmt(totalPrice)} ₺</span>
-            </div>
-            <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-between text-base tracking-wide">
-              <span>İskonto:</span>
-              <span>{fmt(discount)} ₺</span>
-            </div>
-            <div className="mt-1 border border-black/70 h-9 px-2 flex items-center justify-between text-base tracking-wide">
-              <span>Genel Toplam:</span>
-              <span>{fmt(netTotal)} ₺</span>
-            </div>
-          </div>
+        {/* Not */}
+        <div className="mt-6">
+          <label className="text-sm font-semibold text-neutral-700">
+            Sipariş Notu
+          </label>
+          <textarea
+            className="input mt-2 min-h-[120px] w-full resize-y rounded-2xl"
+            value={orderNote}
+            placeholder="Bu siparişe özel not ekleyin…"
+            onChange={(e) => setOrderNote(e.target.value)}
+          />
         </div>
+
+        {/* Toplam Kartları */}
+        <section className="mt-4 rounded-3xl border border-neutral-200 bg-white/90 p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-semibold text-neutral-900">
+                Özet
+              </h3>
+              <p className="text-xs text-neutral-500">
+                Kalemler değiştikçe rakamlar otomatik güncellenir.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-4">
+            <StatRow label="Toplam" value={`${fmt(totalPrice)} ₺`} />
+            <StatRow label="İskonto" value={`${fmt(discount)} ₺`} />
+            <StatRow label="Ödenen" value={`${fmt(paidAmount)} ₺`} />
+            <StatRow label="Kalan" value={`${fmt(remainingAmount)} ₺`} />
+          </div>
+            <div className="sm:col-span-2 rounded-2xl bg-indigo-500 px-4 py-3 text-white shadow-inner mt-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-white/80">
+                Genel Toplam
+              </div>
+              <div className="mt-1 text-2xl font-semibold">{fmt(netTotal)} ₺</div>
+            </div>
+        </section>
 
         <div className="mt-4 text-[10px] tracking-wide">
           ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>.
@@ -1011,7 +1086,7 @@ export default function EditOrderPage() {
               </div>
             </div>
 
-            {/* Pile Sıklığı + Birim Fiyat (readonly) */}
+            {/* Pile Sıklığı + Birim Fiyat */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="text-sm">Pile Sıklığı</label>
@@ -1033,16 +1108,36 @@ export default function EditOrderPage() {
               </div>
               <div>
                 <label className="text-sm">Birim Fiyat</label>
-                <input
-                  className="input mt-1 text-right"
-                  value={
-                    selectedVariant
-                      ? fmt(Number(selectedVariant.unitPrice))
-                      : ""
-                  }
-                  readOnly
-                  placeholder="—"
-                />
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    className="input flex-1 text-right disabled:bg-neutral-100"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={
+                      Number.isFinite(unitPriceInput) ? unitPriceInput : 0
+                    }
+                    onChange={(e) =>
+                      setUnitPriceInput(parseFloat(e.target.value || "0"))
+                    }
+                    disabled={!useCustomPrice || !selectedVariant}
+                    placeholder={
+                      selectedVariant
+                        ? fmt(Number(selectedVariant.unitPrice))
+                        : "—"
+                    }
+                  />
+                  <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      disabled={!selectedVariant}
+                      checked={useCustomPrice}
+                      onChange={(e) => setUseCustomPrice(e.target.checked)}
+                    />
+                    Elle
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -1197,6 +1292,8 @@ export default function EditOrderPage() {
                       )
                     );
                     setVarId(created.id);
+                    setUseCustomPrice(false);
+                    setUnitPriceInput(Number(created.unitPrice ?? 0));
                     toast.success("Ürün eklendi");
                     setShowVarModal(false);
                   } catch (err: any) {
@@ -1249,7 +1346,8 @@ export default function EditOrderPage() {
           box-shadow: none !important;
         }
       `}</style>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1334,6 +1432,17 @@ function Header({
           </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white px-4 py-3 shadow-sm">
+      <div className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-semibold text-neutral-900">{value}</div>
     </div>
   );
 }
