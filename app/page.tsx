@@ -16,13 +16,13 @@ export const metadata = {
     title: "Perdexa — Perde Siparişlerini Tek Yerden Yönetin",
     description:
       "Perde işinizi hızlandırın: otomatik fiyat, yazdırılabilir A4, raporlama, çoklu kullanıcı, rol & yetki.",
-    url: "https://your-domain.example",
+    url: "https://perdexa.com",
     siteName: "Perdexa",
     images: [{ url: "/og/perdexa.png", width: 1200, height: 630, alt: "Perdexa Önizleme" }],
     locale: "tr_TR",
     type: "website",
   },
-  metadataBase: new URL("https://your-domain.example"),
+  metadataBase: new URL("https://perdexa.com"),
   alternates: { canonical: "/" },
 };
 

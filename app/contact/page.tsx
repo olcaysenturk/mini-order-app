@@ -12,7 +12,7 @@ export const metadata = {
     title: "İletişim — Perdexa",
     description:
       "Perdexa ile ilgili destek, satış ve iş birlikleri için bize yazın.",
-    url: "https://your-domain.example/contact",
+    url: "https://perdexa.com/contact",
     siteName: "Perdexa",
     images: [{ url: "/og/perdexa.png", width: 1200, height: 630, alt: "Perdexa Önizleme" }],
     locale: "tr_TR",
