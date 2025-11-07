@@ -20,7 +20,11 @@ export default function LoginPageInner() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (loading) return
-    setErr(null); setLoading(true)
+    setErr(null); 
+    setTimeout(() => {
+      setLoading(true)
+      
+    }, 300);
 
     try {
       await toast.promise(
@@ -45,7 +49,19 @@ export default function LoginPageInner() {
   const canSubmit = email.trim() !== '' && password.trim() !== '' && !loading
 
   return (
-    <div className="mx-auto max-w-sm p-6">
+    <div className="relative mx-auto max-w-sm p-6">
+      {loading && (
+        <div
+          className="pointer-events-auto absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/70 backdrop-blur-sm"
+          aria-hidden="true"
+        >
+          <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+            <span className="inline-flex size-4 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-700" />
+            Giriş yapılıyor…
+          </div>
+        </div>
+      )}
+
       <h1 className="text-xl font-semibold mb-4">Giriş Yap</h1>
 
       <form onSubmit={submit} className="space-y-3">

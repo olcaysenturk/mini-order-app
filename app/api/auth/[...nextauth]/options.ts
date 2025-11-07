@@ -286,12 +286,24 @@ export const authOptions: NextAuthOptions = {
         // Impersonate provider ise e-posta gönderme
         if (account?.provider === 'impersonate') return
 
-        const previousSessions = await prisma.session.count({ where: { userId: user.id } })
-        if (previousSessions === 0 && user.email) {
+        const welcomeTokenKey = `welcome_email_sent:${user.id}`
+        const alreadySent = await prisma.verificationToken.findUnique({
+          where: { identifier_token: { identifier: user.id, token: welcomeTokenKey } },
+        })
+
+        if (!alreadySent && user.email) {
           await sendMail({
             to: user.email,
             subject: `${process.env.APP_NAME || 'Perdexa'}’ya Hoş Geldiniz`,
             html: welcomeHtml({ userName: user.name || undefined }),
+          })
+
+          await prisma.verificationToken.create({
+            data: {
+              identifier: user.id,
+              token: welcomeTokenKey,
+              expires: new Date('9999-12-31T00:00:00.000Z'),
+            },
           })
         }
       } catch (e) {

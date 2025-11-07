@@ -397,6 +397,12 @@ export async function POST(req: NextRequest) {
     const net = total.sub(discountClamped)
 
     // Create
+    const existingOrderCount = userId
+      ? await prisma.order.count({
+          where: { createdById: userId },
+        })
+      : null
+
     const created = await prisma.order.create({
       data: {
         tenantId,
@@ -464,7 +470,7 @@ export async function POST(req: NextRequest) {
     }
 
     const creatorEmail = (session?.user as any)?.email as string | undefined
-    if (creatorEmail) {
+    if (creatorEmail && userId && existingOrderCount === 0) {
       const orderUrl = APP_URL ? `${APP_URL}/dashboard/orders/${created.id}` : null
       const customerLabel = payload.customerName || 'Müşteri'
       const totalText = TRY_FORMATTER.format(netNumber)
