@@ -225,8 +225,8 @@ export default async function AdminUsersPage({
   const tabContextCount = activeTab === "admins" ? filteredAdminCount : filteredStaffCount;
   const avgTeamSize = filteredAdminCount > 0 ? (totalTeamsStaff / filteredAdminCount).toFixed(1) : "—";
   const tabs = [
-    { id: "admins", label: "Admin Takımları", helper: "Yöneticiler ve ekipleri", count: filteredAdminCount },
-    { id: "staff", label: "Staff Kullanıcıları", helper: "Tüm ekip üyeleri", count: filteredStaffCount },
+    { id: "admins", label: "Yöneticiler ve üyeleri", helper: "Yöneticiler ve ekipleri", count: filteredAdminCount },
+    { id: "staff", label: "Üye Kullanıcılar", helper: "Tüm ekip üyeleri", count: filteredStaffCount },
   ] as const;
   const summaryCards: Array<{
     label: string;
@@ -234,8 +234,8 @@ export default async function AdminUsersPage({
     accent: "indigo" | "emerald" | "amber" | "rose";
     helper: string;
   }> = [
-    { label: "Toplam Admin", value: adminTotal, accent: "indigo", helper: "Sistemdeki yönetici sayısı" },
-    { label: "Toplam Staff", value: staffTotal, accent: "emerald", helper: "Tenantlara bağlı ekip üyeleri" },
+    { label: "Toplam Yönetici", value: adminTotal, accent: "indigo", helper: "Sistemdeki yönetici sayısı" },
+    { label: "Toplam Üye", value: staffTotal, accent: "emerald", helper: "Tenantlara bağlı ekip üyeleri" },
     { label: tabContextLabel, value: tabContextCount, accent: "amber", helper: activeTab === "staff" && q ? `Arama: “${q}”` : "Tab seçiminize göre" },
     { label: "Ortalama Ekip", value: avgTeamSize, accent: "rose", helper: "Listelenen admin başına staff" },
   ];
@@ -392,7 +392,7 @@ export default async function AdminUsersPage({
                 Kriterlere uygun admin bulunamadı.
               </div>
             ) : (
-              <div className="grid gap-4 p-5 lg:grid-cols-2">
+              <div className="flex flex-col gap-4 p-5">
                 {adminTeams.map((team) => (
                   <article
                     key={team.id}
@@ -414,46 +414,52 @@ export default async function AdminUsersPage({
                         </span>
                         <Link
                           href={`/dashboard/admin/users/${team.id}`}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-neutral-800"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
                         >
                           Admin Detayı
                         </Link>
                       </div>
                     </header>
 
-                    <ul className="space-y-3 text-sm">
-                      {team.tenants.length === 0 ? (
-                        <li className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50/70 px-3 py-2 text-neutral-600">
-                          Bu admin herhangi bir tenantta yetkili değil.
-                        </li>
-                      ) : (
-                        team.tenants.map((tenant) => (
-                          <li key={`${team.id}-${tenant.id}`} className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-3">
-                            <div className="flex items-center justify-between text-xs text-neutral-500">
-                              <span className="font-medium text-neutral-800">{tenant.name}</span>
-                              <span className="uppercase tracking-wide text-neutral-400">{tenant.role}</span>
+                    <details className="rounded-2xl border border-neutral-200 bg-white/70 p-3">
+                      <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-neutral-800 [&::-webkit-details-marker]:hidden">
+                        <span>Tenant bilgileri</span>
+                        <span className="text-xs text-neutral-500">{team.tenantCount} kayıt</span>
+                      </summary>
+                      <div className="mt-3 space-y-3 text-sm">
+                        {team.tenants.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-neutral-200 bg-neutral-50/70 px-3 py-2 text-neutral-600">
+                            Bu admin herhangi bir tenantta yetkili değil.
+                          </div>
+                        ) : (
+                          team.tenants.map((tenant) => (
+                            <div key={`${team.id}-${tenant.id}`} className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-3">
+                              <div className="flex items-center justify-between text-xs text-neutral-500">
+                                <span className="font-medium text-neutral-800">{tenant.name}</span>
+                                <span className="uppercase tracking-wide text-neutral-400">{tenant.role}</span>
+                              </div>
+                              {tenant.staff.length === 0 ? (
+                                <p className="mt-2 text-xs text-neutral-500">Bu tenantta staff üyesi bulunmuyor.</p>
+                              ) : (
+                                <ul className="mt-3 space-y-2">
+                                  {tenant.staff.map((staff) => (
+                                    <li key={staff.id} className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2 text-xs shadow-sm">
+                                      <div className="min-w-0">
+                                        <p className="truncate font-medium text-neutral-800">{staff.name ?? "İsimsiz Kullanıcı"}</p>
+                                        <p className="truncate text-neutral-500">{staff.email}</p>
+                                      </div>
+                                      <span className="text-[11px] text-neutral-400">
+                                        {formatter.format(staff.createdAt)}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
                             </div>
-                            {tenant.staff.length === 0 ? (
-                              <p className="mt-2 text-xs text-neutral-500">Bu tenantta staff üyesi bulunmuyor.</p>
-                            ) : (
-                              <ul className="mt-3 space-y-2">
-                                {tenant.staff.map((staff) => (
-                                  <li key={staff.id} className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2 text-xs shadow-sm">
-                                    <div className="min-w-0">
-                                      <p className="truncate font-medium text-neutral-800">{staff.name ?? "İsimsiz Kullanıcı"}</p>
-                                      <p className="truncate text-neutral-500">{staff.email}</p>
-                                    </div>
-                                    <span className="text-[11px] text-neutral-400">
-                                      {formatter.format(staff.createdAt)}
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </li>
-                        ))
-                      )}
-                    </ul>
+                          ))
+                        )}
+                      </div>
+                    </details>
                   </article>
                 ))}
               </div>

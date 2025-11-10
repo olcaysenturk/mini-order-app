@@ -207,11 +207,40 @@ export async function GET(req: NextRequest) {
       paymentSums.map((r) => [r.orderId, Number(r._sum.amount ?? 0)])
     )
 
-    // 3) Payload
+    // 3) Ek gider (OrderExtra) toplamlarını çek
+    const extraSums = await prisma.orderExtra.groupBy({
+      by: ['orderId'],
+      where: { orderId: { in: orderIds } },
+      _sum: { subtotal: true },
+    })
+    const extraMap = new Map<string, number>(
+      extraSums.map((r) => [r.orderId, Number(r._sum.subtotal ?? 0)])
+    )
+
+    // 4) Payload
     const payload = orders.map((o) => {
-      const total = Number(o.total)
-      const discount = Number((o as any).discount ?? 0)
-      const netTotal = Number((o as any).netTotal ?? total)
+      // const itemsSubTotal = o.items.reduce((sum, it) => sum + Number(it.subtotal ?? 0), 0)
+      // const extrasSubTotal = Number(extraMap.get(o.id) ?? 0)
+      // const subTotal = itemsSubTotal + extrasSubTotal
+
+      const subTotal = o.items.reduce((acc, item) => {
+        const existing = Number(item.subtotal ?? 0);
+        if (Number.isFinite(existing) && existing > 0) {
+          return acc + existing;
+        }
+        const qtySafe = Math.max(1, Number(item.qty ?? 1));
+        const widthSafe = Math.max(0, Number(item.width ?? 0));
+        const densitySafe = Number(item.fileDensity ?? 1) || 1;
+        const unitSafe = Number(item.unitPrice ?? 0);
+        const fallback = unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
+        return acc + fallback;
+      }, 0);
+
+
+      const discount = Math.max(0, Number((o as any).discount ?? 0))
+      const grandTotal = Math.max(0, subTotal - discount)
+      const total = Number(o.total ?? subTotal)
+      const netTotal = Number((o as any).netTotal ?? grandTotal)
       const paidTotal = Number(paidMap.get(o.id) ?? 0)
       const balance = Math.max(0, netTotal - paidTotal)
 
@@ -230,6 +259,8 @@ export async function GET(req: NextRequest) {
         total,
         discount,
         netTotal,
+        subTotal,
+        grandTotal,
         paidTotal,
         totalPaid: paidTotal, // legacy
         balance,

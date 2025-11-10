@@ -48,6 +48,7 @@ type Order = {
   netTotal?: number;
   deliveryDate?: string; // "YYYY-MM-DD"
   orderType?: 0 | 1;     // 0: Yeni Sipariş, 1: Fiyat Teklifi
+  subTotal?: 0;
 };
 
 type Payment = {
@@ -1092,8 +1093,9 @@ export default function OrdersPage() {
 
                 const net = Number(order.netTotal ?? order.total ?? 0);
                 const paid = Number(order.paidTotal ?? order.totalPaid ?? 0);
-                const balance = Number(order.balance ?? Math.max(0, net - paid));
+                const balance = Number(order.subTotal) - Number(paid) - Number(order.discount);
                 const ratio = net > 0 ? paid / net : 0;
+                const total = Number(order.subTotal)
 
                 const disabledActions = order.status === "deleted";
                 const deleteDisabled = order.status === "deleted" || !canDeleteOrders || deletingId === order.id;
@@ -1148,7 +1150,7 @@ export default function OrdersPage() {
                         {/* Finans özet */}
                         <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
                           <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>TOPLAM</span> <strong className="ms-1">{fmt(order.total)} ₺</strong>
+                            <span>G.TOPLAM</span> <strong className="ms-1">{fmt(total)} ₺</strong>
                           </span>
                           <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
                             <span>İskonto</span> <strong className="ms-1">{fmt(order.discount)} ₺</strong>

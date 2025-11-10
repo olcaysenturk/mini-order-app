@@ -50,7 +50,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
               <div className="flex h-16 items-center gap-3 justify-between ">
                 {/* Brand */}
-                <Link href="/" className="font-extrabold tracking-tight text-base sm:text-lg">
+                <Link href="/" className="font-extrabold tracking-tight text-base sm:text-3xl">
                   PERDE<span className="text-indigo-600">XA</span>
                 </Link>
 
