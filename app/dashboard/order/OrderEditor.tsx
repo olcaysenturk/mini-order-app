@@ -84,6 +84,7 @@ const statusDot: Record<Status, string> = {
 }
 
 const isStorPerdeByName = (name: string) => normalize(name) === 'STOR PERDE'
+const isFonPerdeByName = (name: string) => normalize(name) === 'FON PERDE'
 
 /** 🔢 Tutar hesabı:
  * - STOR PERDE: m² hesabı (en/100 * boy/100) * adet * price (density YOK)
@@ -96,7 +97,10 @@ function calcSubtotal(catName: string, price: number, qty: number, width: number
   if (isStorPerdeByName(catName)) {
     const area = (w / 100) * (h / 100)
     return price * (area || 0) * q
-  } else {
+  }else if(isFonPerdeByName(catName)){
+    return price * q
+  } 
+    else {
     return price * (((w / 100) * (fileDensity || 1)) || 1) * q
   }
 }
