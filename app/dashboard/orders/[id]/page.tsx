@@ -330,22 +330,22 @@ export default function EditOrderPage() {
     }
   }, [selectedVariant, useCustomPrice]);
 
-  useEffect(() => {
-    const subtotal = items.reduce((acc, item) => {
-      const existing = Number(item.subtotal ?? 0);
-      if (Number.isFinite(existing) && existing > 0) {
-        return acc + existing;
-      }
-      const qtySafe = Math.max(1, Number(item.qty ?? 1));
-      const widthSafe = Math.max(0, Number(item.width ?? 0));
-      const densitySafe = Number(item.fileDensity ?? 1) || 1;
-      const unitSafe = Number(item.unitPrice ?? 0);
-      const fallback = unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
-      return acc + fallback;
-    }, 0);
-    setTotalPrice(subtotal);
-    setNetTotal(Math.max(0, subtotal - Number(discount || 0)));
-  }, [items, discount]);
+  // useEffect(() => {
+  //   const subtotal = items.reduce((acc, item) => {
+  //     const existing = Number(item.subtotal ?? 0);
+  //     if (Number.isFinite(existing) && existing > 0) {
+  //       return acc + existing;
+  //     }
+  //     const qtySafe = Math.max(1, Number(item.qty ?? 1));
+  //     const widthSafe = Math.max(0, Number(item.width ?? 0));
+  //     const densitySafe = Number(item.fileDensity ?? 1) || 1;
+  //     const unitSafe = Number(item.unitPrice ?? 0);
+  //     const fallback = unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
+  //     return acc + fallback;
+  //   }, 0);
+  //   setTotalPrice(subtotal);
+  //   setNetTotal(Math.max(0, subtotal - Number(discount || 0)));
+  // }, [items, discount]);
 
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0;

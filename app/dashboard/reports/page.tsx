@@ -19,9 +19,9 @@ import {
 type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
 type FilterKey = "active" | "completed" | "all";
 const STATUS_PRESETS: Record<FilterKey, string> = {
-  active: "pending,processing,completed",
+  active: "pending,processing,completed,workshop",
   completed: "completed",
-  all: "pending,processing,completed,cancelled",
+  all: "pending,processing,completed,workshop",
 };
 
 const fmtMoney = (n: number | undefined | null) =>

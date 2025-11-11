@@ -17,15 +17,23 @@ const parseISODate = (s: string | null) => {
   return isNaN(d.getTime()) ? null : d
 }
 
-const DEFAULT_STATUSES: OrderStatus[] = ['pending','processing','completed']
+/** Varsayılan statüler: aktif sayılan tüm durumlar (cancelled hariç) */
+const DEFAULT_STATUSES: OrderStatus[] = ['pending','processing','completed','workshop']
 function parseStatuses(s: string | null): OrderStatus[] {
   if (!s) return DEFAULT_STATUSES
-  const allowed: OrderStatus[] = ['pending','processing','completed','cancelled','workshop']
+  const allowed: OrderStatus[] = ['pending','processing','completed','workshop']
   const set = new Set(
     s.split(',').map(x => x.trim()).filter(Boolean) as OrderStatus[]
   )
   const valid = [...set].filter(x => allowed.includes(x))
   return valid.length ? (valid as OrderStatus[]) : DEFAULT_STATUSES
+}
+
+/** ARRAY parametre cast’i: "OrderStatus"[] için güvenli oluşturucu */
+function orderStatusArray(statuses: OrderStatus[]) {
+  // ARRAY['pending'::"OrderStatus",'processing'::"OrderStatus", ...]
+  const casted = statuses.map(s => Prisma.sql`${s}::"OrderStatus"`)
+  return Prisma.sql`ARRAY[${Prisma.join(casted)}]::"OrderStatus"[]`
 }
 
 // Opsiyonel branch filtresi SQL parçası
@@ -50,8 +58,8 @@ export async function GET(req: NextRequest) {
     const section = (req.nextUrl.searchParams.get('section') || 'overview').toLowerCase()
     const statuses = parseStatuses(req.nextUrl.searchParams.get('status'))
 
-    // Status array
-    const statusArray = Prisma.sql`ARRAY[${Prisma.join(statuses)}]::"OrderStatus"[]`
+    // Status array (enum cast fix)
+    const statusArray = orderStatusArray(statuses)
     // Global kural: orderType = 1 dahil edilmez
     const orderTypeFilter = Prisma.sql` AND COALESCE(o."orderType", 0) <> 1 `
 
@@ -83,7 +91,7 @@ export async function GET(req: NextRequest) {
       `)
       const totals = totalsRow[0] ?? { day: 0, week: 0, month: 0, year: 0 }
 
-      // Son 30 gün
+      // Son 30 gün (IST’e normalize)
       const rows = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
         Prisma.sql`
           WITH days AS (
@@ -182,7 +190,7 @@ export async function GET(req: NextRequest) {
         `
       )
 
-      // Son 30 gün kümülatif
+      // Son 30 gün kümülatif (IST)
       const rowsOrders = await prisma.$queryRaw<{ d: Date; total: number | null }[]>(
         Prisma.sql`
           SELECT (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
