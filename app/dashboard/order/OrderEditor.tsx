@@ -63,6 +63,7 @@ const fmt = (n: number) =>
   new Intl.NumberFormat('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 
 const BOX_COUNTS: Record<string, number> = { 'TÜL PERDE': 10, 'FON PERDE': 5, 'GÜNEŞLİK': 5 }
+const EPSILON = 0.01
 const normalize = (s: string) => s.trim().toLocaleUpperCase('tr-TR')
 const hasBoxCount = (name: string) => Object.prototype.hasOwnProperty.call(BOX_COUNTS, normalize(name))
 
@@ -92,8 +93,8 @@ const isFonPerdeByName = (name: string) => normalize(name) === 'FON PERDE'
  */
 function calcSubtotal(catName: string, price: number, qty: number, width: number, height: number, fileDensity: number) {
   const q = Math.max(1, Math.floor(qty))
-  const w = Math.max(0, Math.floor(width))
-  const h = Math.max(0, Math.floor(height))
+  const w = Math.max(0, Number(width) || 0)
+  const h = Math.max(0, Number(height) || 0)
   if (isStorPerdeByName(catName)) {
     const area = (w / 100) * (h / 100)
     return price * (area || 0) * q
@@ -178,6 +179,8 @@ export default function OrderEditor({
   // 💲 Elle fiyat modları
   const [useCustomPrice, setUseCustomPrice] = useState(false)
   const [unitPriceInput, setUnitPriceInput] = useState<number>(0)
+  const [useCustomSubtotal, setUseCustomSubtotal] = useState(false)
+  const [subtotalInput, setSubtotalInput] = useState('')
 
   const [pageBusy, setPageBusy] = useState(false)
 
@@ -242,6 +245,15 @@ export default function OrderEditor({
     return calcSubtotal(selectedCategory?.name || '', price, qty, width, height, fileDensity)
   }, [selectedVariant, useCustomPrice, unitPriceInput, selectedCategory, qty, width, height, fileDensity])
 
+  const manualSubtotal = useMemo(() => {
+    if (!useCustomSubtotal) return null
+    const normalized = subtotalInput.replace(',', '.').trim()
+    if (!normalized) return null
+    const parsed = parseFloat(normalized)
+    if (Number.isNaN(parsed)) return null
+    return Math.max(0, parsed)
+  }, [useCustomSubtotal, subtotalInput])
+
   const catById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories])
 
   // Grup: kategori adına göre; render sırası eklenme sırası
@@ -294,6 +306,8 @@ export default function OrderEditor({
     const defaultPrice = Number(match?.variants?.[0]?.unitPrice ?? 0)
     setUseCustomPrice(false)
     setUnitPriceInput(defaultPrice)
+    setUseCustomSubtotal(false)
+    setSubtotalInput('')
   }
   const openQuickFor = (categoryName: string, index: number) => {
     const cat = categories.find(c => normalize(c.name) === normalize(categoryName))
@@ -306,18 +320,28 @@ export default function OrderEditor({
     const defaultPrice = Number(cat?.variants?.[0]?.unitPrice ?? 0)
     setUseCustomPrice(false)
     setUnitPriceInput(defaultPrice)
+    setUseCustomSubtotal(false)
+    setSubtotalInput('')
   }
-  const closeDrawer = () => { setSlot(null); setEditingLineId(null) }
+  const closeDrawer = () => {
+    setSlot(null)
+    setEditingLineId(null)
+    setUseCustomSubtotal(false)
+    setSubtotalInput('')
+  }
 
   const addOrUpdateLine = () => {
     if (!selectedCategory || !selectedVariant) return
     const q = Math.max(1, Math.floor(qty))
-    const w = Math.max(0, Math.floor(width))
-    const h = Math.max(0, Math.floor(height))
+    const w = Math.max(0, Number(width) || 0)
+    const h = Math.max(0, Number(height) || 0)
     const price = Number(useCustomPrice ? unitPriceInput : selectedVariant.unitPrice) || 0
     const d = Number(fileDensity) || 1
 
-    const sub = calcSubtotal(selectedCategory.name, price, q, w, h, d)
+    const computedSub = calcSubtotal(selectedCategory.name, price, q, w, h, d)
+    const manualSub =
+      useCustomSubtotal && manualSubtotal !== null ? manualSubtotal : null
+    const sub = manualSub ?? computedSub
 
     if (editingLineId) {
       setItems(prev => prev.map(it => it.id === editingLineId
@@ -360,6 +384,24 @@ export default function OrderEditor({
     const currentUnit = Number(line.unitPrice) || variantPrice
     setUnitPriceInput(currentUnit)
     setUseCustomPrice(currentUnit !== variantPrice)
+
+    const catName = catById.get(line.categoryId)?.name || ''
+    const expected = calcSubtotal(
+      catName,
+      currentUnit,
+      line.qty,
+      line.width,
+      line.height,
+      line.fileDensity || 1
+    )
+    const storedSubtotal = Number(line.subtotal ?? expected)
+    if (Math.abs(storedSubtotal - expected) > EPSILON) {
+      setUseCustomSubtotal(true)
+      setSubtotalInput(String(storedSubtotal))
+    } else {
+      setUseCustomSubtotal(false)
+      setSubtotalInput('')
+    }
   }
 
   // satır durumunu inline güncelle (kutucuğun içindeki select’ten)
@@ -530,7 +572,7 @@ export default function OrderEditor({
 
             {/* Ölçüler */}
             <div className="mb-3 grid grid-cols-3 gap-3">
-              <NumberField label="Adet" value={qty} setValue={v=>setQty(v)} min={1} step={1}/>
+              <NumberField label="Adet" value={qty} setValue={v=>setQty(v)} min={1} step={1} integer />
               <NumberField label="En (cm)" value={width} setValue={v=>setWidth(v)} min={0} step={1}/>
               <NumberField label="Boy (cm)" value={height} setValue={v=>setHeight(v)} min={0} step={1}/>
             </div>
@@ -593,8 +635,41 @@ export default function OrderEditor({
             {/* Ara Toplam + Not */}
             <div className="mb-4 grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm">Ara Toplam</label>
-                <input className="input mt-1 text-right" value={selectedVariant ? fmt(previewSubtotal) : ''} readOnly placeholder="—" />
+                <label className="flex items-center justify-between text-sm">
+                  Ara Toplam
+                  {/* <span className="flex items-center gap-1 text-xs">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={useCustomSubtotal}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setUseCustomSubtotal(checked)
+                        if (checked) {
+                          setSubtotalInput(String(previewSubtotal || 0))
+                        } else {
+                          setSubtotalInput('')
+                        }
+                      }}
+                    />
+                    Elle
+                  </span> */}
+                </label>
+                <input
+                  className="input mt-1 text-right disabled:bg-neutral-100"
+                  type="text"
+                  inputMode="decimal"
+                  value={
+                    useCustomSubtotal
+                      ? subtotalInput
+                      : selectedVariant
+                        ? fmt(previewSubtotal)
+                        : ''
+                  }
+                  onChange={(e) => setSubtotalInput(e.target.value)}
+                  disabled={!useCustomSubtotal}
+                  placeholder="—"
+                />
               </div>
               <div>
                 <label className="text-sm">Satır Notu</label>
@@ -1014,13 +1089,70 @@ function SectionQuickPlus({ title, items, catById, onAddAt, onEdit }: {
   )
 }
 
-function NumberField({ label, value, setValue, min=0, step=1 }: {
-  label: string; value: number; setValue: (v:number)=>void; min?: number; step?: number;
+function NumberField({
+  label,
+  value,
+  setValue,
+  min = 0,
+  step = 1,
+  integer = false,
+}: {
+  label: string
+  value: number
+  setValue: (v: number) => void
+  min?: number
+  step?: number
+  integer?: boolean
 }) {
+  const formatValue = (val: number) =>
+    Number.isFinite(val) ? String(val) : ''
+  const [text, setText] = useState(formatValue(value))
+
+  useEffect(() => {
+    setText(formatValue(value))
+  }, [value])
+
+  const applyConstraints = (num: number) => {
+    let next = num
+    if (typeof min === 'number') next = Math.max(min, next)
+    if (integer) next = Math.round(next)
+    return next
+  }
+
+  const commitIfValid = (raw: string) => {
+    const normalized = raw.replace(',', '.').trim()
+    if (!normalized) {
+      const fallback = applyConstraints(typeof min === 'number' ? min : 0)
+      setValue(fallback)
+      setText(String(fallback))
+      return
+    }
+    const parsed = parseFloat(normalized)
+    if (Number.isNaN(parsed)) return
+    const constrained = applyConstraints(parsed)
+    setValue(constrained)
+    setText(String(constrained))
+  }
+
   return (
     <div>
       <label className="text-sm">{label}</label>
-      <input className="input mt-1 text-right" type="text" min={min} step={step} value={Number.isFinite(value) ? value : 0} onChange={(e)=>setValue(parseFloat(e.target.value || '0'))}/>
+      <input
+        className="input mt-1 text-right"
+        type="text"
+        inputMode="decimal"
+        min={min}
+        step={step}
+        value={text}
+        onChange={(e) => {
+          setText(e.target.value)
+          const normalized = e.target.value.replace(',', '.')
+          const parsed = parseFloat(normalized)
+          if (Number.isNaN(parsed)) return
+          setValue(applyConstraints(parsed))
+        }}
+        onBlur={() => commitIfValid(text)}
+      />
     </div>
   )
 }

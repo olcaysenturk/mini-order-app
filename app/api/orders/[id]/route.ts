@@ -53,6 +53,7 @@ const PatchBodySchema = z.object({
   storLines: LinesSchema,
   accessoryLines: LinesSchema,
   deliveryAt: YmdSchema,
+  discount: z.union([z.number(), z.string()]).optional(),
 
   // ✅ sadece orderType eklendi (0: Yeni Sipariş, 1: Fiyat Teklifi)
   orderType: z.union([z.literal(0), z.literal(1)]).optional(),
@@ -227,6 +228,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       deliveryAt, // "YYYY-MM-DD" | null
       orderType,
       restore,
+      discount: discountInput,
     } = parsed.data
 
     // ⬇️ Geri alma isteği (soft-deleted → aktif)
@@ -379,8 +381,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       where: { id: orderId },
       select: { discount: true },
     })
-    const currentDiscount = Number(discountRow?.discount ?? 0)
-    const clampedDiscount = Math.max(0, Math.min(currentDiscount, total))
+    let baseDiscount = Number(discountRow?.discount ?? 0)
+    if (typeof discountInput !== 'undefined') {
+      const parsed =
+        typeof discountInput === 'number'
+          ? discountInput
+          : parseFloat(String(discountInput).replace(',', '.'))
+      baseDiscount = Number.isFinite(parsed) ? parsed : 0
+    }
+    const clampedDiscount = Math.max(0, Math.min(baseDiscount, total))
     const netTotal = Math.max(0, total - clampedDiscount)
 
     await prisma.order.update({

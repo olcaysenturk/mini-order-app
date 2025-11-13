@@ -68,6 +68,19 @@ type Branch = {
   address?: string | null;
 };
 
+const calculateLineSubtotal = (item: LineItem) => {
+  const stored = Number(item.subtotal ?? 0);
+  if (Number.isFinite(stored) && stored > 0) return stored;
+  const qtySafe = Math.max(1, Number(item.qty ?? 1));
+  const widthSafe = Math.max(0, Number(item.width ?? 0));
+  const densitySafe = Number(item.fileDensity ?? 1) || 1;
+  const unitSafe = Number(item.unitPrice ?? 0);
+  return unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
+};
+
+const calculateOrderSubtotal = (lines: LineItem[]) =>
+  lines.reduce((acc, item) => acc + calculateLineSubtotal(item), 0);
+
 /* ========= Helpers ========= */
 const uid = () => Math.random().toString(36).slice(2, 10);
 const fmt = (n: number) =>
@@ -226,6 +239,7 @@ export default function EditOrderPage() {
   const [netTotal, setNetTotal] = useState(0);
   const [totalPrice, setTotalPrice] = useState(0);
   const [discount, setDiscount] = useState(0);
+  const [discountInput, setDiscountInput] = useState("0");
   const [paidAmount, setPaidAmount] = useState(0);
 
   /* ==== Load ==== */
@@ -252,6 +266,7 @@ export default function EditOrderPage() {
         setDeliveryAt(toYMD(ord.deliveryAt)); // GET’ten Date/string → input
         setNetTotal(ord.netTotal || 0);
         setDiscount(ord.discount || 0);
+        setDiscountInput(String(ord.discount || 0));
         setTotalPrice(ord.total || 0);
         setPaidAmount(ord.paidTotal ?? 0);
         setOrderType(ord.orderType || 0);
@@ -330,22 +345,18 @@ export default function EditOrderPage() {
     }
   }, [selectedVariant, useCustomPrice]);
 
-  // useEffect(() => {
-  //   const subtotal = items.reduce((acc, item) => {
-  //     const existing = Number(item.subtotal ?? 0);
-  //     if (Number.isFinite(existing) && existing > 0) {
-  //       return acc + existing;
-  //     }
-  //     const qtySafe = Math.max(1, Number(item.qty ?? 1));
-  //     const widthSafe = Math.max(0, Number(item.width ?? 0));
-  //     const densitySafe = Number(item.fileDensity ?? 1) || 1;
-  //     const unitSafe = Number(item.unitPrice ?? 0);
-  //     const fallback = unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
-  //     return acc + fallback;
-  //   }, 0);
-  //   setTotalPrice(subtotal);
-  //   setNetTotal(Math.max(0, subtotal - Number(discount || 0)));
-  // }, [items, discount]);
+  useEffect(() => {
+    if (loading) return;
+    const subtotal = calculateOrderSubtotal(items);
+    const rawDiscount = Number(discount ?? 0);
+    const safeDiscount = Math.min(Math.max(0, rawDiscount), subtotal);
+    setTotalPrice(subtotal);
+    setNetTotal(Math.max(0, subtotal - safeDiscount));
+    if (Math.abs(rawDiscount - safeDiscount) > 0.005) {
+      setDiscount(safeDiscount);
+      setDiscountInput(String(safeDiscount));
+    }
+  }, [items, discount, loading]);
 
   const previewSubtotal = useMemo(() => {
     if (!selectedVariant) return 0;
@@ -465,6 +476,19 @@ export default function EditOrderPage() {
   const closeDrawer = () => {
     setSlot(null);
     setEditingLineId(null);
+  };
+
+  const handleDiscountChange = (value: string) => {
+    setDiscountInput(value);
+    const normalized = value.replace(",", ".").trim();
+    if (!normalized) {
+      setDiscount(0);
+      return;
+    }
+    const parsed = parseFloat(normalized);
+    if (!Number.isNaN(parsed)) {
+      setDiscount(parsed);
+    }
   };
 
   const addOrUpdateLine = () => {
@@ -606,6 +630,9 @@ export default function EditOrderPage() {
         _action: "delete" as const,
       }));
 
+      const subtotal = calculateOrderSubtotal(items);
+      const safeDiscount = Math.min(Math.max(0, Number(discount ?? 0)), subtotal);
+
       const payload = {
         customerName,
         customerPhone,
@@ -613,6 +640,7 @@ export default function EditOrderPage() {
         status,
         deliveryAt: deliveryAt || null, // ✅ API artık bekliyor (YYYY-MM-DD)
         orderType: orderType,
+        discount: safeDiscount,
         items: [...payloadItems, ...deleteOps],
       };
 
@@ -643,6 +671,10 @@ export default function EditOrderPage() {
   const aksesuarItems = useMemo(
     () => groupedByCategoryName.get("AKSESUAR") || [],
     [groupedByCategoryName]
+  );
+  const clampedDiscount = useMemo(
+    () => Math.min(Math.max(0, Number(discount ?? 0)), totalPrice),
+    [discount, totalPrice]
   );
   const remainingAmount = useMemo(
     () => Math.max(0, Number(netTotal || 0) - Number(paidAmount || 0)),
@@ -942,6 +974,28 @@ export default function EditOrderPage() {
           />
         </div>
 
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="text-sm font-semibold text-neutral-700">
+              İskonto (₺)
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                className="input flex-1 text-right"
+                type="text"
+                inputMode="decimal"
+                value={discountInput}
+                onChange={(e) => handleDiscountChange(e.target.value)}
+                aria-label="İskonto tutarı"
+              />
+              <span className="text-sm text-neutral-500">TL</span>
+            </div>
+            <p className="mt-1 text-xs text-neutral-500">
+              Genel toplamdan düşülecek tutarı girin.
+            </p>
+          </div>
+        </div>
+
         {/* Toplam Kartları */}
         <section className="mt-4 rounded-3xl border border-neutral-200 bg-white/90 p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -956,7 +1010,7 @@ export default function EditOrderPage() {
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-4">
             <StatRow label="Toplam" value={`${fmt(totalPrice)} ₺`} />
-            <StatRow label="İskonto" value={`${fmt(discount)} ₺`} />
+            <StatRow label="İskonto" value={`${fmt(clampedDiscount)} ₺`} />
             <StatRow label="Ödenen" value={`${fmt(paidAmount)} ₺`} />
             <StatRow label="Kalan" value={`${fmt(remainingAmount)} ₺`} />
           </div>

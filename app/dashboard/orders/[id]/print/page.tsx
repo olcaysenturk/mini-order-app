@@ -35,6 +35,7 @@ type Order = {
   deliveryAt?: string | null;
   discount?: any;
   paidTotal?: any;
+  netTotal?: any;
 };
 type Profile = {
   companyName?: string;
@@ -365,16 +366,16 @@ export default function PrintOrderPage() {
           <div className="text-sm mt-3.5">
             <div
               className={`grid gap-2 sm:grid-cols-${
-                order.discount > 0 ? 3 : 2
+                order.discount > 0 ? 4 : 2
               }`}
             >
               {order.discount > 0 && (
                 <div className="rounded-xs border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white ">
                   <div className="flex items-center justify-between px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-amber-100 text-amber-700 text-xs font-semibold">
+                      {/* <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-amber-100 text-amber-700 text-xs font-semibold">
                         %
-                      </span>
+                      </span> */}
                       <span className="text-[12px] text-neutral-500">
                         İskonto
                       </span>
@@ -390,9 +391,9 @@ export default function PrintOrderPage() {
               <div className="rounded-xs border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white ">
                 <div className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 text-xs font-semibold">
+                    {/* <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 text-xs font-semibold">
                       ₺
-                    </span>
+                    </span> */}
                     <span className="text-[12px] text-neutral-500">Ödenen</span>
                   </div>
                   <span className="font-semibold tabular-nums">
@@ -401,17 +402,32 @@ export default function PrintOrderPage() {
                 </div>
               </div>
 
+              {/* Kalan */}
+              <div className="rounded-xs border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white ">
+                <div className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    {/* <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                      Σ
+                    </span> */}
+                    <span className="text-[12px] text-neutral-500">Kalan</span>
+                  </div>
+                  <span className="font-semibold tabular-nums">
+                    {fmt(order.netTotal - order.paidTotal)} ₺
+                  </span>
+                </div>
+              </div>
+
               {/* Toplam */}
               <div className="rounded-xs border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white ">
                 <div className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 text-xs font-semibold">
+                    {/* <span className="print:hidden inline-flex size-6 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 text-xs font-semibold">
                       Σ
-                    </span>
+                    </span> */}
                     <span className="text-[12px] text-neutral-500">Toplam</span>
                   </div>
                   <span className="font-semibold tabular-nums">
-                    {fmt(total)} ₺
+                    {fmt(order.netTotal)} ₺
                   </span>
                 </div>
               </div>
