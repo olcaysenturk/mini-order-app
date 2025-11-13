@@ -49,6 +49,7 @@ type Order = {
   deliveryDate?: string; // "YYYY-MM-DD"
   orderType?: 0 | 1;     // 0: Yeni Sipariş, 1: Fiyat Teklifi
   subTotal?: 0;
+  grandTotal?: any;
 };
 
 type Payment = {
@@ -1515,6 +1516,8 @@ export default function OrdersPage() {
               const amount = payAmount[payModalOpenId!] ?? "";
               const method = payMethod[payModalOpenId!] ?? "CASH";
               const note = payNote[payModalOpenId!] ?? "";
+              const orderInfo = orders.find((order) => order.id === payModalOpenId);
+              const balance = (orderInfo?.subTotal || 0) - (orderInfo?.paidTotal || 0) - (orderInfo?.discount || 0)
 
               return (
                 <>
@@ -1534,15 +1537,15 @@ export default function OrdersPage() {
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div className="rounded-sm bg-neutral-50 p-2">
                           <div className="text-neutral-500">Net</div>
-                          <div className="font-semibold">{fmt(d.netTotal)} ₺</div>
+                          <div className="font-semibold">{fmt(orderInfo?.subTotal)} ₺</div>
                         </div>
                         <div className="rounded-sm bg-emerald-50 p-2">
                           <div className="text-emerald-700">Ödenen</div>
-                          <div className="font-semibold text-emerald-700">{fmt(d.paidTotal)} ₺</div>
+                          <div className="font-semibold text-emerald-700">{fmt(orderInfo?.paidTotal)} ₺</div>
                         </div>
                         <div className="rounded-sm bg-amber-50 p-2">
                           <div className="text-amber-700">Kalan</div>
-                          <div className="font-semibold text-amber-700">{fmt(d.balance)} ₺</div>
+                          <div className="font-semibold text-amber-700">{fmt(balance)} ₺</div>
                         </div>
                       </div>
 
