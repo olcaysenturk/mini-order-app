@@ -27,6 +27,9 @@ type OrderItem = {
   unitPrice: number;
   subtotal: number;
   note?: string | null;
+  categoryId?: string;
+  variantId?: string;
+  lineStatus?: Status;
   category: { name: string };
   variant: { name: string };
 };
@@ -83,6 +86,7 @@ type OrderDetail = {
   paidTotal: number;
   balance: number;
   audits: OrderAuditEntry[];
+  items: OrderItem[];
 };
 
 /* ========= Utils ========= */
@@ -110,6 +114,205 @@ const auditActionLabel: Record<string, string> = {
   "order.delete": "Sipariş silindi",
   "order.restore": "Sipariş geri alındı",
 };
+
+const orderTypeLabel: Record<number, string> = {
+  0: "Yeni Sipariş",
+  1: "Fiyat Teklifi",
+};
+
+const auditFieldLabels: Record<string, string> = {
+  note: "Sipariş Notu",
+  customerName: "Müşteri Adı",
+  customerPhone: "Müşteri Telefonu",
+  status: "Sipariş Durumu",
+  previousStatus: "Önceki Durum",
+  newStatus: "Yeni Durum",
+  deliveryAt: "Teslim Tarihi",
+  deliveryDate: "Teslim Tarihi",
+  discount: "İndirim",
+  orderType: "Sipariş Tipi",
+  storLines: "Stor Satırları",
+  accessoryLines: "Aksesuar Satırları",
+  restore: "Geri Alma",
+};
+
+type AuditFieldRow = { key: string; label: string; value: string };
+type AuditItemDisplay = {
+  key: string;
+  categoryName: string;
+  productName: string;
+  qtyText: string;
+  widthText: string;
+  heightText: string;
+  unitPriceText: string;
+  subtotalText: string;
+  actionLabel: string;
+  statusLabel?: string | null;
+  note?: string | null;
+};
+
+const lineStatusLabel: Record<string, string> = {
+  pending: statusLabel.pending,
+  processing: statusLabel.processing,
+  completed: statusLabel.completed,
+  cancelled: statusLabel.cancelled,
+};
+
+function parseAuditNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const normalized = value.replace(/\s+/g, "").replace(",", ".");
+    const num = Number(normalized);
+    return Number.isFinite(num) ? num : null;
+  }
+  return null;
+}
+
+function formatAuditFieldValue(key: string, value: unknown): string | null {
+  if (value === null || typeof value === "undefined") return null;
+  if (key === "status" || key === "previousStatus" || key === "newStatus") {
+    if (typeof value === "string") return statusLabel[value as Status] ?? value;
+    return null;
+  }
+  if (key === "orderType") {
+    const idx = typeof value === "number" ? value : parseInt(String(value), 10);
+    return Number.isNaN(idx) ? null : orderTypeLabel[idx as 0 | 1] ?? String(value);
+  }
+  if (key === "deliveryAt" || key === "deliveryDate") {
+    if (typeof value === "string") {
+      const date = parseYMDToLocalDate(value);
+      if (date) {
+        return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium" }).format(date);
+      }
+    }
+  }
+  if (key === "discount") {
+    const num = parseAuditNumber(value);
+    return num === null ? null : fmt(num);
+  }
+  if (key === "restore") {
+    return value ? "Evet" : "Hayır";
+  }
+  if ((key === "storLines" || key === "accessoryLines") && Array.isArray(value)) {
+    const arr = value.map((v) => String(v)).filter(Boolean);
+    return arr.length ? arr.join(", ") : null;
+  }
+  if (Array.isArray(value)) {
+    const arr = value.map((v) => String(v)).filter(Boolean);
+    return arr.length ? arr.join(", ") : null;
+  }
+  if (typeof value === "object") return null;
+  return String(value);
+}
+
+function extractAuditFieldRows(payload: any): AuditFieldRow[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const rows: AuditFieldRow[] = [];
+  Object.entries(payload).forEach(([key, raw]) => {
+    if (key === "items") return;
+    const value = formatAuditFieldValue(key, raw);
+    if (!value) return;
+    rows.push({ key, label: auditFieldLabels[key] ?? key, value });
+  });
+  return rows;
+}
+
+function resolveAuditItemNames(item: any, refItems: OrderItem[]): { categoryName: string; productName: string } {
+  const safeCategory = item?.category?.name || item?.categoryName || "Kategori";
+  const safeProduct = item?.variant?.name || item?.variantName || item?.productName || "Ürün";
+
+  const searchId = item?.id ? String(item.id) : null;
+  if (searchId) {
+    const exact = refItems.find((it) => it.id === searchId);
+    if (exact) {
+      return {
+        categoryName: exact.category?.name ?? safeCategory,
+        productName: exact.variant?.name ?? safeProduct,
+      };
+    }
+  }
+
+  const variantId = item?.variantId || item?.variant?.id;
+  if (variantId) {
+    const matchByVariant = refItems.find((it) => (it as any).variantId === variantId);
+    if (matchByVariant) {
+      return {
+        categoryName: matchByVariant.category?.name ?? safeCategory,
+        productName: matchByVariant.variant?.name ?? safeProduct,
+      };
+    }
+  }
+
+  const matchByCategory = item?.categoryId
+    ? refItems.find((it) => (it as any).categoryId === item.categoryId)
+    : null;
+
+  return {
+    categoryName: matchByCategory?.category?.name ?? safeCategory,
+    productName:
+      item?.variant?.name ||
+      item?.variantName ||
+      item?.productName ||
+      (variantId ? String(variantId) : safeProduct),
+  };
+}
+
+function extractAuditItemRows(payload: any, refItems: OrderItem[]): AuditItemDisplay[] {
+  if (!payload || typeof payload !== "object") return [];
+  const rawItems = Array.isArray(payload.items) ? payload.items : [];
+  if (!rawItems.length) return [];
+
+  return rawItems.map((item: any, idx: number) => {
+    const { categoryName, productName } = resolveAuditItemNames(item, refItems);
+    const qty = parseAuditNumber(item?.qty ?? item?.quantity);
+    const width = parseAuditNumber(item?.width);
+    const height = parseAuditNumber(item?.height);
+    const unitPrice = parseAuditNumber(item?.unitPrice);
+    const subtotal = parseAuditNumber(item?.subtotal) ?? (qty && unitPrice ? qty * unitPrice : null);
+
+    const qtyText = typeof qty === "number" ? fmtInt(qty) : "—";
+    const widthText = typeof width === "number" ? fmtInt(width) : "—";
+    const heightText = typeof height === "number" ? fmtInt(height) : "—";
+    const unitPriceText = typeof unitPrice === "number" ? fmt(unitPrice) : "—";
+    const subtotalText = typeof subtotal === "number" ? fmt(subtotal) : "—";
+
+    let actionLabel = "Güncellendi";
+    if (item?._action === "delete") actionLabel = "Silindi";
+    else if (!item?.id) actionLabel = "Eklendi";
+
+    const statusValue = typeof item?.lineStatus === "string" ? item.lineStatus : null;
+    const statusLabelText = statusValue ? lineStatusLabel[statusValue] ?? statusValue : null;
+
+    const key = String(item?.id ?? item?.variantId ?? `audit-item-${idx}`);
+
+    return {
+      key,
+      categoryName,
+      productName,
+      qtyText,
+      widthText,
+      heightText,
+      unitPriceText,
+      subtotalText,
+      actionLabel,
+      statusLabel: statusLabelText,
+      note: item?.note ?? null,
+    };
+  });
+}
+
+function formatAuditFallback(payload: unknown): string {
+  if (payload === null || typeof payload === "undefined") {
+    return "";
+  }
+  if (typeof payload === "string") return payload;
+  if (typeof payload === "number" || typeof payload === "boolean") return String(payload);
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
 
 const methodLabel: Record<PaymentMethod, string> = {
   CASH: "Nakit",
@@ -466,6 +669,22 @@ export default function OrdersPage() {
                 Number(data.paidTotal ?? data.totalPaid ?? 0)
             )
         ),
+        items: Array.isArray(data.items)
+          ? data.items.map((it: any) => ({
+              id: it.id,
+              qty: Number(it.qty ?? 0),
+              width: Number(it.width ?? 0),
+              height: Number(it.height ?? 0),
+              unitPrice: Number(it.unitPrice ?? 0),
+              subtotal: Number(it.subtotal ?? 0),
+              note: it.note ?? null,
+              categoryId: it.categoryId,
+              variantId: it.variantId,
+              lineStatus: it.lineStatus ?? null,
+              category: { name: it.category?.name ?? "-" },
+              variant: { name: it.variant?.name ?? "-" },
+            }))
+          : [],
         audits: Array.isArray(data.audits)
           ? data.audits.map((audit: any) => ({
               id: audit.id,
@@ -1090,6 +1309,7 @@ export default function OrdersPage() {
                 const num = displayed.length - globalIndex;
                 const isOpen = openIds.has(order.id);
                 const d = detailById[order.id];
+                const referenceItems = d?.items && d.items.length > 0 ? d.items : order.items;
                 const detailId = `order-detail-${order.id}`;
 
                 const net = Number(order.netTotal ?? order.total ?? 0);
@@ -1347,11 +1567,11 @@ export default function OrdersPage() {
                                       </tbody>
                                     </table>
                                   </div>
-                        ) : (
-                          <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
-                        )}
-                      </>
-                    )}
+                                ) : (
+                                  <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
+                                )}
+                              </>
+                            )}
                   </div>
                 </div>
 
@@ -1376,6 +1596,10 @@ export default function OrdersPage() {
                                 dateStyle: "medium",
                                 timeStyle: "short",
                               }).format(new Date(entry.createdAt));
+                              const fieldRows = extractAuditFieldRows(entry.payload);
+                              const itemRows = extractAuditItemRows(entry.payload, referenceItems);
+                              const hasStructured = fieldRows.length > 0 || itemRows.length > 0;
+                              const fallbackPayload = hasStructured ? "" : formatAuditFallback(entry.payload);
                               return (
                                 <li key={entry.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1383,7 +1607,81 @@ export default function OrdersPage() {
                                     <span className="text-xs text-neutral-500">{dateText}</span>
                                   </div>
                                   <div className="mt-1 text-xs text-neutral-600">İşlemi yapan: {actor}</div>
-                                  
+                                  {hasStructured && (
+                                    <div className="mt-2 space-y-3">
+                                      {fieldRows.length > 0 && (
+                                        <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                                          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                            Başlık değişiklikleri
+                                          </div>
+                                          <table className="mt-1 w-full text-xs sm:text-sm">
+                                            <tbody>
+                                              {fieldRows.map((row) => (
+                                                <tr key={row.key} className="border-t border-neutral-100 first:border-t-0">
+                                                  <th className="w-32 px-1 py-1 text-left font-medium text-neutral-600">{row.label}</th>
+                                                  <td className="px-1 py-1 text-neutral-800">{row.value}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )}
+                                      {itemRows.length > 0 && (
+                                        <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                                          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                            Kalem değişiklikleri
+                                          </div>
+                                          <div className="mt-1 overflow-x-auto">
+                                            <table className="min-w-full text-xs sm:text-sm">
+                                              <thead className="bg-neutral-50 text-neutral-600">
+                                                <tr>
+                                                  <th className="px-2 py-1 text-left">Ürün</th>
+                                                  <th className="px-2 py-1 text-right">Adet</th>
+                                                  <th className="px-2 py-1 text-right">En</th>
+                                                  <th className="px-2 py-1 text-right">Boy</th>
+                                                  <th className="px-2 py-1 text-right">Birim ₺</th>
+                                                  <th className="px-2 py-1 text-right">Tutar ₺</th>
+                                                  <th className="px-2 py-1 text-left">İşlem</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {itemRows.map((row) => (
+                                                  <tr key={row.key} className="border-t border-neutral-100">
+                                                    <td className="px-2 py-1">
+                                                      <div className="font-medium text-neutral-800">{row.productName}</div>
+                                                      <div className="text-[11px] text-neutral-500">{row.categoryName}</div>
+                                                      {row.note && <div className="mt-0.5 text-[11px] text-neutral-500">{row.note}</div>}
+                                                    </td>
+                                                    <td className="px-2 py-1 text-right">{row.qtyText}</td>
+                                                    <td className="px-2 py-1 text-right">{row.widthText}</td>
+                                                    <td className="px-2 py-1 text-right">{row.heightText}</td>
+                                                    <td className="px-2 py-1 text-right">{row.unitPriceText}</td>
+                                                    <td className="px-2 py-1 text-right">{row.subtotalText}</td>
+                                                    <td className="px-2 py-1 text-left">
+                                                      <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700">
+                                                        {row.actionLabel}
+                                                      </span>
+                                                      {row.statusLabel && (
+                                                        <div className="mt-0.5 text-[11px] text-neutral-500">Durum: {row.statusLabel}</div>
+                                                      )}
+                                                    </td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!hasStructured && fallbackPayload && (
+                                    <div className="mt-2 rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                                      <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Değişiklikler</div>
+                                      <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-neutral-800">
+                                        {fallbackPayload}
+                                      </pre>
+                                    </div>
+                                  )}
                                 </li>
                               );
                             })}
