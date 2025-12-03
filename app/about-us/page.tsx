@@ -1,22 +1,32 @@
 // app/about/page.tsx — LIGHT MODE · modern (landing referanslı)
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { absoluteUrl, getOgImage, siteMetadata } from "@/app/lib/seo";
 
 /** ======= SEO ======= */
-export const metadata = {
+export const metadata: Metadata = {
   title: "Hakkımızda — Perdexa",
   description:
     "Perdexa ekibini, misyonumuzu ve perde sipariş yönetimini nasıl daha hızlı ve hatasız hale getirdiğimizi keşfedin.",
-  alternates: { canonical: "/about" },
+  keywords: [...siteMetadata.keywords, "perdexa hakkında", "perdexa ekip vizyonu"],
+  alternates: { canonical: absoluteUrl("/about-us") },
   openGraph: {
     title: "Hakkımızda — Perdexa",
     description:
       "Perdexa’nın hikayesi, değerleri ve perde işinizi büyütmenize yardımcı olan ürün vizyonu.",
-    url: "/about",
-    siteName: "Perdexa",
-    images: [{ url: "/og/perdexa.png", width: 1200, height: 630, alt: "Perdexa Önizleme" }],
-    locale: "tr_TR",
+    url: absoluteUrl("/about-us"),
+    siteName: siteMetadata.shortName,
+    images: [{ url: getOgImage(), width: 1200, height: 630, alt: "Perdexa ekibi ve hikayesi" }],
+    locale: siteMetadata.locale,
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Hakkımızda — Perdexa",
+    description:
+      "Perdexa’nın hikayesi, değerleri ve perde işletmelerine sağladığı faydalar.",
+    images: [getOgImage()],
   },
 };
 
@@ -25,13 +35,13 @@ export default function AboutPage() {
     "@context": "https://schema.org",
     "@type": "AboutPage",
     name: "Hakkımızda — Perdexa",
-    url: "/about",
+    url: absoluteUrl("/about-us"),
     mainEntity: {
       "@type": "Organization",
-      name: "Perdexa",
-      url: "/",
-      brand: "Perdexa",
-      sameAs: ["https://www.linkedin.com/company/perdexa"],
+      name: siteMetadata.name,
+      url: absoluteUrl("/"),
+      brand: siteMetadata.name,
+      sameAs: Object.values(siteMetadata.socialProfiles),
     },
   };
 

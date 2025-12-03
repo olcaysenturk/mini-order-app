@@ -1,11 +1,31 @@
 // app/legal/privacy/page.tsx — LIGHT MODE · modern (landing referanslı)
+import type { Metadata } from "next";
 import Link from "next/link";
+import { absoluteUrl, getOgImage, siteMetadata } from "@/app/lib/seo";
 
 /** ======= SEO ======= */
-export const metadata = {
+export const metadata: Metadata = {
   title: "Gizlilik — Perdexa",
   description:
     "Perdexa gizlilik politikası: hangi verileri işlediğimiz, hukuki sebepler, saklama süreleri, üçüncü taraflar ve haklarınız.",
+  keywords: [...siteMetadata.keywords, "perdexa gizlilik politikası", "perdexa kvkk"],
+  alternates: { canonical: absoluteUrl("/legal/privacy") },
+  openGraph: {
+    title: "Gizlilik — Perdexa",
+    description:
+      "Perdexa'nın veri işleme süreçleri, hukuki dayanakları ve KVKK/GDPR uyumu hakkında detaylar.",
+    url: absoluteUrl("/legal/privacy"),
+    siteName: siteMetadata.shortName,
+    images: [{ url: getOgImage(), width: 1200, height: 630, alt: "Perdexa gizlilik politikası" }],
+    locale: siteMetadata.locale,
+    type: "article",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Gizlilik — Perdexa",
+    description: "Perdexa'nın veri koruma yaklaşımı ve KVKK/GDPR uyumluluğu.",
+    images: [getOgImage()],
+  },
 };
 
 export default function PrivacyPage() {
@@ -15,9 +35,9 @@ export default function PrivacyPage() {
     "@context": "https://schema.org",
     "@type": "PrivacyPolicy",
     name: "Perdexa Gizlilik Politikası",
-    url: "/legal/privacy",
+    url: absoluteUrl("/legal/privacy"),
     dateModified: "2025-10-19",
-    publisher: { "@type": "Organization", name: "Perdexa" },
+    publisher: { "@type": "Organization", name: siteMetadata.name, url: absoluteUrl("/") },
   };
 
   return (

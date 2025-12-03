@@ -1,24 +1,32 @@
 // app/contact/page.tsx — LIGHT MODE · modern (landing referanslı)
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { SubmitButton } from "../components/SubmitButton";
+import { absoluteUrl, getOgImage, siteMetadata } from "@/app/lib/seo";
 
 /** ======= SEO / OpenGraph ======= */
-export const metadata = {
+export const metadata: Metadata = {
   title: "İletişim — Perdexa",
   description:
     "Perdexa ekibiyle iletişime geçin. Destek, satış ve iş ortaklıkları için formu doldurun.",
+  keywords: [...siteMetadata.keywords, "perdexa iletişim", "perdexa destek"],
+  alternates: { canonical: absoluteUrl("/contact") },
   openGraph: {
     title: "İletişim — Perdexa",
-    description:
-      "Perdexa ile ilgili destek, satış ve iş birlikleri için bize yazın.",
-    url: "https://perdexa.com/contact",
-    siteName: "Perdexa",
-    images: [{ url: "/og/perdexa.png", width: 1200, height: 630, alt: "Perdexa Önizleme" }],
-    locale: "tr_TR",
+    description: "Perdexa ile ilgili destek, satış ve iş birlikleri için bize yazın.",
+    url: absoluteUrl("/contact"),
+    siteName: siteMetadata.shortName,
+    images: [{ url: getOgImage(), width: 1200, height: 630, alt: "Perdexa iletişim kanalları" }],
+    locale: siteMetadata.locale,
     type: "website",
   },
-  alternates: { canonical: "/contact" },
+  twitter: {
+    card: "summary_large_image",
+    title: "İletişim — Perdexa",
+    description: "Destek, satış, ortaklık sorularınız için Perdexa ekibine yazın.",
+    images: [getOgImage()],
+  },
 };
 
 /** ======= Server Action ======= */
@@ -61,13 +69,13 @@ export default async function ContactPage({
     "@context": "https://schema.org",
     "@type": "ContactPage",
     name: "Perdexa İletişim",
-    url: "/contact",
-    publisher: { "@type": "Organization", name: "Perdexa" },
+    url: absoluteUrl("/contact"),
+    publisher: { "@type": "Organization", name: siteMetadata.name, url: absoluteUrl("/") },
     contactPoint: [
       {
         "@type": "ContactPoint",
         contactType: "customer support",
-        email: "info@perdexa.com",
+        email: siteMetadata.contactEmail,
         availableLanguage: ["tr", "en"],
         areaServed: "TR",
       },

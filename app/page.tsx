@@ -1,34 +1,108 @@
 // app/page.tsx — LIGHT MODE · modern landing (A11Y + SEO)
 // Server Component
 
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/options";
 import VideoHero from "@/app/components/VideoHero";
+import { absoluteUrl, getOgImage, siteMetadata } from "@/app/lib/seo";
 
 /** ======= SEO / OpenGraph ======= */
-export const metadata = {
-  title: "Perdexa — Perde Siparişlerini Tek Yerden Yönetin",
-  description:
-    "Perdexa ile kategori & ürün tanımla, m² ve pile sıklığına göre otomatik hesapla, yazdırılabilir A4 çıktılar al. Çoklu kullanıcı, çok cihaz, bulutta güvenli.",
+export const metadata: Metadata = {
+  title: siteMetadata.title,
+  description: siteMetadata.description,
+  keywords: [...siteMetadata.keywords, "perde yazılımı", "perde sipariş otomasyonu"],
+  metadataBase: new URL(siteMetadata.siteUrl),
+  alternates: { canonical: absoluteUrl("/") },
   openGraph: {
-    title: "Perdexa — Perde Siparişlerini Tek Yerden Yönetin",
+    title: siteMetadata.title,
     description:
       "Perde işinizi hızlandırın: otomatik fiyat, yazdırılabilir A4, raporlama, çoklu kullanıcı, rol & yetki.",
-    url: "https://perdexa.com",
-    siteName: "Perdexa",
-    images: [{ url: "/og/perdexa.png", width: 1200, height: 630, alt: "Perdexa Önizleme" }],
-    locale: "tr_TR",
+    url: absoluteUrl("/"),
+    siteName: siteMetadata.shortName,
+    images: [{ url: getOgImage(), width: 1200, height: 630, alt: "Perdexa perde sipariş yazılımı" }],
+    locale: siteMetadata.locale,
     type: "website",
   },
-  metadataBase: new URL("https://perdexa.com"),
-  alternates: { canonical: "/" },
+  twitter: {
+    card: "summary_large_image",
+    title: siteMetadata.title,
+    description: siteMetadata.description,
+    images: [getOgImage()],
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default async function Home() {
   const session = await getServerSession(authOptions);
   if (session?.user) redirect("/dashboard/orders");
+  const softwareLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: siteMetadata.name,
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    description: siteMetadata.description,
+    url: absoluteUrl("/"),
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "TRY",
+      availability: "https://schema.org/InStock",
+      url: absoluteUrl("/auth/register"),
+    },
+    brand: {
+      "@type": "Brand",
+      name: siteMetadata.name,
+      url: absoluteUrl("/"),
+    },
+    contactPoint: [
+      {
+        "@type": "ContactPoint",
+        contactType: "customer support",
+        email: siteMetadata.contactEmail,
+        availableLanguage: ["tr", "en"],
+      },
+    ],
+  };
+
+  const faqLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: [
+      {
+        "@type": "Question",
+        name: "Perdexa nedir?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text:
+            "Perdexa, perde ve tekstil mağazalarının teklif, ölçü, sipariş ve raporlama süreçlerini tek panelde toplar.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Perdexa hangi özellikleri içeriyor?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text:
+            "Kategori & ürün yönetimi, m² ve pile hesabı, yazdırılabilir A4 formlar, raporlar, PDF/WhatsApp paylaşımı ve çok kullanıcılı yapı sunar.",
+        },
+      },
+      {
+        "@type": "Question",
+        name: "Kurulum ne kadar sürüyor?",
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: "Standart kurulum dakikalar sürer; demo hesabı ile hemen deneyebilirsiniz.",
+        },
+      },
+    ],
+  };
 
   return (
     <main id="main" className="relative min-h-screen overflow-hidden bg-white text-neutral-900">
@@ -360,6 +434,18 @@ export default async function Home() {
           </div>
         </div>
       </section>
+
+      {/* JSON-LD */}
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(softwareLd) }}
+      />
+      <script
+        type="application/ld+json"
+        suppressHydrationWarning
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }}
+      />
     </main>
   );
 }

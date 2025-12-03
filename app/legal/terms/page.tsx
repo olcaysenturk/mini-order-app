@@ -1,11 +1,30 @@
 // app/legal/terms/page.tsx — LIGHT MODE · modern (landing referanslı)
+import type { Metadata } from "next";
 import Link from "next/link";
+import { absoluteUrl, getOgImage, siteMetadata } from "@/app/lib/seo";
 
 /** ======= SEO ======= */
-export const metadata = {
+export const metadata: Metadata = {
   title: "Kullanım Şartları — Perdexa",
   description:
     "Perdexa kullanım şartları: hizmet kapsamı, hesap, ücretlendirme, kullanım kuralları, fikri mülkiyet, sorumluluk, fesih ve diğer hukuki koşullar.",
+  keywords: [...siteMetadata.keywords, "perdexa kullanım şartları", "perdexa sözleşme"],
+  alternates: { canonical: absoluteUrl("/legal/terms") },
+  openGraph: {
+    title: "Kullanım Şartları — Perdexa",
+    description: "Perdexa hizmetini kullanırken kabul ettiğiniz tüm koşullar ve sorumluluklar.",
+    url: absoluteUrl("/legal/terms"),
+    siteName: siteMetadata.shortName,
+    images: [{ url: getOgImage(), width: 1200, height: 630, alt: "Perdexa kullanım şartları" }],
+    locale: siteMetadata.locale,
+    type: "article",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Kullanım Şartları — Perdexa",
+    description: "Hesap, ücretlendirme ve kullanım kurallarına dair güncel Perdexa şartları.",
+    images: [getOgImage()],
+  },
 };
 
 export default function TermsPage() {
@@ -14,9 +33,9 @@ export default function TermsPage() {
     "@context": "https://schema.org",
     "@type": "WebPage",
     name: "Kullanım Şartları",
-    url: "/legal/terms",
+    url: absoluteUrl("/legal/terms"),
     dateModified: "2025-10-19",
-    isPartOf: { "@type": "WebSite", name: "Perdexa" },
+    isPartOf: { "@type": "WebSite", name: siteMetadata.name, url: absoluteUrl("/") },
   };
 
   return (

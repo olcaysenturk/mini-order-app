@@ -9,25 +9,64 @@ import { Toaster } from 'sonner'
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/options";
 import ImpersonationBanner from "./components/ImpersonationBanner";
+import { absoluteUrl, getOgImage, siteMetadata } from "@/app/lib/seo";
 
 
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteMetadata.siteUrl),
   title: {
-    default: "PERDEXA",
-    template: "%s — PERDEXA",
+    default: siteMetadata.shortName,
+    template: "%s — Perdexa",
   },
-  description: "Kategori/Ürün + Sipariş",
-  metadataBase: new URL("https://perde-konagi.local"),
+  description: siteMetadata.description,
+  keywords: siteMetadata.keywords,
+  applicationName: siteMetadata.shortName,
+  authors: [{ name: siteMetadata.name, url: siteMetadata.siteUrl }],
+  creator: siteMetadata.name,
+  publisher: siteMetadata.name,
+  category: "Business SaaS",
+  alternates: {
+    canonical: absoluteUrl(),
+  },
   openGraph: {
-    title: "PERDEXA",
-    description: "Kategori/Ürün + Sipariş",
     type: "website",
+    locale: siteMetadata.locale,
+    url: siteMetadata.siteUrl,
+    siteName: siteMetadata.name,
+    title: siteMetadata.title,
+    description: siteMetadata.description,
+    emails: [siteMetadata.contactEmail],
+    images: [
+      {
+        url: getOgImage(),
+        width: 1200,
+        height: 630,
+        alt: "Perdexa perde sipariş yönetimi ekran önizlemesi",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "PERDEXA",
-    description: "Kategori/Ürün + Sipariş",
+    title: siteMetadata.title,
+    description: siteMetadata.description,
+    images: [getOgImage()],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+      "max-snippet": -1,
+    },
+  },
+  verification: {
+    other: {
+      "linkedin:owner": siteMetadata.socialProfiles.linkedin,
+    },
   },
 };
 
