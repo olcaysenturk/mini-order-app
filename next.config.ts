@@ -6,9 +6,7 @@ const nextConfig: NextConfig = {
     // production build sırasında lint hatalarını yok say
     ignoreDuringBuilds: true,
   },
-  experimental: {
-    serverComponentsExternalPackages: ['nodemailer'],
-  },
+  serverExternalPackages: ["nodemailer"],
 };
 
 export default nextConfig;
