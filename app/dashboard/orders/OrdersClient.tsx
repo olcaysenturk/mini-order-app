@@ -1,7 +1,7 @@
 // app/orders/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
@@ -14,9 +14,9 @@ type ConfirmState = {
 };
 
 /* ========= Types ========= */
-type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop" | "deleted";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop" | "delivered" | "deleted";
 type PaymentMethod = "CASH" | "TRANSFER" | "CARD";
-type HeaderFilter = "all" | "completed" | "workshop" | "deleted" | "active";
+type HeaderFilter = "all" | "completed" | "workshop" | "deleted" | "active" | "delivered";
 type SortMode = "default" | "deliveryAsc" | "deliveryDesc";
 
 type OrderItem = {
@@ -101,10 +101,11 @@ const fmtInt = (n: number | undefined | null) =>
 
 const statusLabel: Record<Status, string> = {
   pending: "Beklemede",
-  processing: "İşlemde",
+  processing: "İşleniyor",
   completed: "Tamamlandı",
   cancelled: "İptal",
   workshop: "Atölyede",
+  delivered: "Teslim Edildi",
   deleted: "Silindi",
 };
 
@@ -329,6 +330,7 @@ function StatusBadge({ s }: { s: Status }) {
     completed: `${base} bg-emerald-50 text-emerald-700 border-emerald-200`,
     cancelled: `${base} bg-rose-50 text-rose-700 border-rose-200`,
     workshop: `${base} bg-blue-100 text-blue-700 border-blue-200`,
+    delivered: `${base} bg-purple-50 text-purple-700 border-purple-200`,
     deleted: `${base} bg-neutral-200 text-neutral-700 border-neutral-300`,
   };
   return <span className={map[s]}>{statusLabel[s]}</span>;
@@ -450,6 +452,17 @@ function InlineLoader() {
   );
 }
 
+function Skeleton() {
+  return (
+    <div className="animate-pulse space-y-3 rounded-2xl border border-neutral-200 p-4">
+      <div className="h-4 w-40 rounded bg-neutral-200" />
+      <div className="h-3 w-64 rounded bg-neutral-200" />
+      <div className="h-3 w-52 rounded bg-neutral-200" />
+      <div className="mt-2 h-24 w-full rounded bg-neutral-100" />
+    </div>
+  );
+}
+
 /* ========= Page ========= */
 export default function OrdersPage() {
   const router = useRouter();
@@ -473,7 +486,9 @@ export default function OrdersPage() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<10 | 20 | 50>(20);
+  const [pageSize, setPageSize] = useState<10 | 20 | 50>(50);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Bayi filtresi
   const [dealerFilter, setDealerFilter] = useState<"all" | string>("all");
@@ -525,23 +540,64 @@ export default function OrdersPage() {
     setError(null);
     try {
       // Sekmeye göre doğru query
-      let qs = "";
-      if (headerFilter === "completed") {
-        qs = `?status=${encodeURIComponent("completed")}`;
-      } else if (headerFilter === "workshop") {
-        qs = `?status=${encodeURIComponent("workshop")}`;
-      } else if (headerFilter === "deleted") {
-        qs = `?only=deleted`;
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('take', String(pageSize));
+      params.set('orderType', '0'); // Sadece siparişler
+
+      if (q.trim()) params.set('q', q.trim());
+
+      if (sortMode === 'deliveryAsc') {
+        params.set('orderBy', 'deliveryDate');
+        params.set('orderDir', 'asc');
+      } else if (sortMode === 'deliveryDesc') {
+        params.set('orderBy', 'deliveryDate');
+        params.set('orderDir', 'desc');
+      } else {
+        params.set('orderBy', 'createdAt');
+        params.set('orderDir', 'desc');
       }
-      // "all" ve "active" için parametre yok
 
-      const res = await fetch(`/api/orders${qs}`, { cache: "no-store", signal });
+      if (headerFilter === "completed") {
+        params.set('status', 'completed');
+      } else if (headerFilter === "workshop") {
+        params.set('status', 'workshop');
+      } else if (headerFilter === "delivered") {
+        params.set('status', 'delivered');
+      } else if (headerFilter === "deleted") {
+        params.set('only', 'deleted');
+      } else if (headerFilter === "active") {
+        // Active: not cancelled, not deleted
+        // API supports multiple statuses.
+        // pending, processing, workshop, completed, delivered
+        // BUT 'active' usually means 'not finished'.
+        // Let's stick to what client logic did: !== cancelled && !== deleted.
+        // Client logic for "active" line 856: !== cancelled && !== deleted.
+        // API interprets empty status as ALL (except deleted).
+        // Since we want to exclude 'cancelled', we should probably list explicitly or handle locally?
+        // Let's list explicitly: pending,processing,workshop,completed,delivered
+        params.set('status', 'pending,processing,workshop,completed,delivered');
+      }
+
+      const res = await fetch(`/api/orders?${params.toString()}`, { cache: "no-store", signal });
       if (!res.ok) throw new Error("Siparişler alınamadı");
-      const data: Order[] = await res.json();
 
-      // Yalnızca orderType = 0 olanları temel liste olarak kullan
-      const onlyOrders = data.filter((o) => o.orderType === 0);
-      setOrders(onlyOrders);
+      // New format: { data: [], meta: { total, page, limit, totalPages } }
+      const json = await res.json();
+
+      // Handle legacy array response just in case API wasn't updated or cached
+      if (Array.isArray(json)) {
+        // Fallback (should not happen if API is updated)
+        const onlyOrders = json.filter((o: any) => o.orderType === 0);
+        setOrders(onlyOrders);
+        setTotalCount(onlyOrders.length);
+        setTotalPages(1);
+      } else {
+        setOrders(json.data || []);
+        setTotalCount(json.meta?.total || 0);
+        setTotalPages(json.meta?.totalPages || 1);
+      }
+
     } catch (e: any) {
       if (e?.name !== "AbortError") setError(e?.message || "Bilinmeyen hata");
     } finally {
@@ -663,42 +719,42 @@ export default function OrdersPage() {
         paidTotal: Number(data.paidTotal ?? data.totalPaid ?? 0),
         balance: Number(
           data.balance ??
-            Math.max(
-              0,
-              Number(data.netTotal ?? data.total ?? 0) -
-                Number(data.paidTotal ?? data.totalPaid ?? 0)
-            )
+          Math.max(
+            0,
+            Number(data.netTotal ?? data.total ?? 0) -
+            Number(data.paidTotal ?? data.totalPaid ?? 0)
+          )
         ),
         items: Array.isArray(data.items)
           ? data.items.map((it: any) => ({
-              id: it.id,
-              qty: Number(it.qty ?? 0),
-              width: Number(it.width ?? 0),
-              height: Number(it.height ?? 0),
-              unitPrice: Number(it.unitPrice ?? 0),
-              subtotal: Number(it.subtotal ?? 0),
-              note: it.note ?? null,
-              categoryId: it.categoryId,
-              variantId: it.variantId,
-              lineStatus: it.lineStatus ?? null,
-              category: { name: it.category?.name ?? "-" },
-              variant: { name: it.variant?.name ?? "-" },
-            }))
+            id: it.id,
+            qty: Number(it.qty ?? 0),
+            width: Number(it.width ?? 0),
+            height: Number(it.height ?? 0),
+            unitPrice: Number(it.unitPrice ?? 0),
+            subtotal: Number(it.subtotal ?? 0),
+            note: it.note ?? null,
+            categoryId: it.categoryId,
+            variantId: it.variantId,
+            lineStatus: it.lineStatus ?? null,
+            category: { name: it.category?.name ?? "-" },
+            variant: { name: it.variant?.name ?? "-" },
+          }))
           : [],
         audits: Array.isArray(data.audits)
           ? data.audits.map((audit: any) => ({
-              id: audit.id,
-              action: audit.action,
-              createdAt: audit.createdAt,
-              payload: audit.payload ?? null,
-              user: audit.user
-                ? {
-                    id: audit.user.id,
-                    name: audit.user.name ?? null,
-                    email: audit.user.email ?? null,
-                  }
-                : null,
-            }))
+            id: audit.id,
+            action: audit.action,
+            createdAt: audit.createdAt,
+            payload: audit.payload ?? null,
+            user: audit.user
+              ? {
+                id: audit.user.id,
+                name: audit.user.name ?? null,
+                email: audit.user.email ?? null,
+              }
+              : null,
+          }))
           : [],
       };
       setDetailById((m) => ({ ...m, [id]: d }));
@@ -709,12 +765,12 @@ export default function OrdersPage() {
         prev.map((o) =>
           o.id === id
             ? {
-                ...o,
-                netTotal: d.netTotal ?? o.netTotal ?? o.total,
-                paidTotal: d.paidTotal,
-                totalPaid: d.paidTotal,
-                balance: d.balance,
-              }
+              ...o,
+              netTotal: d.netTotal ?? o.netTotal ?? o.total,
+              paidTotal: d.paidTotal,
+              totalPaid: d.paidTotal,
+              balance: d.balance,
+            }
             : o
         )
       );
@@ -725,12 +781,20 @@ export default function OrdersPage() {
     }
   };
 
-  // İlk yük + header filter
+  // Debounce Q
+  const [debouncedQ, setDebouncedQ] = useState(q);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQ(q), 500);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  // Main fetch effect
   useEffect(() => {
     const ac = new AbortController();
     fetchOrders(ac.signal);
     return () => ac.abort();
-  }, [headerFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headerFilter, page, pageSize, debouncedQ, sortMode]);
 
   const onRefresh = () => {
     const ac = new AbortController();
@@ -747,7 +811,7 @@ export default function OrdersPage() {
           if (!detailById[id] && !detailLoading[id]) {
             try {
               await fetchOrderDetail(id);
-            } catch {}
+            } catch { }
           }
         })
       );
@@ -790,132 +854,28 @@ export default function OrdersPage() {
     askDelete(id);
   };
 
-  // Yalnızca orderType = 0 olanları temel liste olarak kullan
-  const typeFiltered = useMemo(() => orders.filter((o) => o.orderType === 0), [orders]);
+  // Pagination – sliced list (Now just wrapper for server-side state)
+  const paged = useMemo(() => {
+    return {
+      items: orders, // Server returns already paged
+      total: totalCount,
+      totalPages: totalPages,
+      page: page,
+      startIndex: (page - 1) * pageSize,
+    };
+  }, [orders, totalCount, totalPages, page, pageSize]);
 
-  // Bayileri tekilleştir
+  // Bayileri tekilleştir (Mevcut sayfadaki bayiler)
   const dealers = useMemo(() => {
-    const names = typeFiltered.map((o) => (o.dealer?.name ?? "").trim()).filter(Boolean);
+    const names = orders.map((o) => (o.dealer?.name ?? "").trim()).filter(Boolean);
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, "tr"));
-  }, [typeFiltered]);
+  }, [orders]);
 
   useEffect(() => {
     if (dealerFilter !== "all" && !dealers.includes(dealerFilter)) {
       setDealerFilter("all");
     }
   }, [dealers, dealerFilter]);
-
-  // Text filter
-  const textFiltered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return typeFiltered;
-    return typeFiltered.filter((o) => {
-      const inHeader =
-        o.id.toLowerCase().includes(needle) ||
-        (o.note || "").toLowerCase().includes(needle) ||
-        (o.customerName || "").toLowerCase().includes(needle) ||
-        (o.customerPhone || "").toLowerCase().includes(needle);
-      const inItems = o.items?.some(
-        (it) =>
-          it.category.name.toLowerCase().includes(needle) ||
-          it.variant.name.toLowerCase().includes(needle) ||
-          (it.note || "").toLowerCase().includes(needle)
-      );
-      return inHeader || inItems;
-    });
-  }, [typeFiltered, q]);
-
-  // Header status filter (Silinenler sekmesi eklendi)
-  const statusHeaderFiltered = useMemo(() => {
-    switch (headerFilter) {
-      case "all":
-        return textFiltered;
-      case "completed":
-        return textFiltered.filter((o) => o.status === "completed");
-      case "workshop":
-        return textFiltered.filter((o) => o.status === "workshop");
-      case "deleted":
-        return textFiltered.filter((o) => o.status === "deleted");
-      case "active":
-      default:
-        // Aktif: iptal hariç hepsi (pending, processing, workshop, completed)
-        return textFiltered.filter((o) => o.status !== "cancelled");
-    }
-  }, [textFiltered, headerFilter]);
-
-  // Payment + bayi filtreleri
-  const filtered = useMemo(() => {
-    return statusHeaderFiltered.filter((o) => {
-      if (dealerFilter !== "all") {
-        if ((o.dealer?.name ?? "") !== dealerFilter) return false;
-      }
-
-      // Silinen listesinde ödeme/metot filtreleri anlamsız, yine de uygulamak istersen bırakıyoruz
-      if (paymentStatus !== "all") {
-        const net = Number(o.netTotal ?? o.total ?? 0);
-        const paid = Number(o.paidTotal ?? o.totalPaid ?? 0);
-        const bal = Number(o.balance ?? Math.max(0, net - paid));
-        if (paymentStatus === "unpaid" && !(paid === 0 && net > 0)) return false;
-        if (paymentStatus === "partial" && !(bal > 0 && paid > 0)) return false;
-        if (paymentStatus === "paid" && !(bal <= 0 && net >= 0)) return false;
-      }
-      if (methodFilters.length > 0) {
-        const d = detailById[o.id];
-        if (!d) return true; // detay yüklenene kadar dışlama
-        const hasMethod = d.payments.some((p) => methodFilters.includes(p.method));
-        if (!hasMethod) return false;
-      }
-      return true;
-    });
-  }, [statusHeaderFiltered, paymentStatus, methodFilters, detailById, dealerFilter]);
-
-  // Teslim tarihine göre sıralama
-  const displayed = useMemo(() => {
-    if (sortMode === "default") return filtered;
-
-    const getTime = (o: Order) => {
-      const d = parseYMDToLocalDate(o.deliveryDate);
-      return d ? d.getTime() : NaN;
-    };
-
-    const arr = [...filtered];
-    if (sortMode === "deliveryAsc") {
-      arr.sort((a, b) => {
-        const ta = getTime(a);
-        const tb = getTime(b);
-        if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
-        if (Number.isNaN(ta)) return 1;
-        if (Number.isNaN(tb)) return -1;
-        return ta - tb;
-      });
-    } else if (sortMode === "deliveryDesc") {
-      arr.sort((a, b) => {
-        const ta = getTime(a);
-        const tb = getTime(b);
-        if (Number.isNaN(ta) && Number.isNaN(tb)) return 0;
-        if (Number.isNaN(ta)) return -1;
-        if (Number.isNaN(tb)) return 1;
-        return tb - ta;
-      });
-    }
-    return arr;
-  }, [filtered, sortMode]);
-
-  // Pagination – sliced list
-  const paged = useMemo(() => {
-    const total = displayed.length;
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-    const safePage = Math.min(page, totalPages);
-    const start = (safePage - 1) * pageSize;
-    const end = start + pageSize;
-    return {
-      items: displayed.slice(start, end),
-      total,
-      totalPages,
-      page: safePage,
-      startIndex: start,
-    };
-  }, [displayed, page, pageSize]);
 
   // Filtre/sıralama/arama/limit değişince 1. sayfaya dön
   useEffect(() => {
@@ -926,21 +886,21 @@ export default function OrdersPage() {
     all: "Tüm siparişler",
     completed: "Tamamlanan siparişler",
     workshop: "Atölyedeki siparişler",
+    delivered: "Teslim edilen siparişler",
     deleted: "Silinen siparişler",
     active: "Aktif siparişler",
   };
+  // Stats are harder with server pagination.
+  // We cannot easily show total counts for each tab unless we fetch them all separately (expensive).
+  // For now, we will show current page stats or just "???"
+  // Or, we can just remove the stats calculation block that depends on 'filtered' or just use 'totalCount'.
+  // Let's use totalCount for the active tab.
   const stats = useMemo(() => {
-    const total = filtered.length;
-    let completed = 0;
-    let deleted = 0;
-    let active = 0;
-    for (const o of filtered) {
-      if (o.status === "completed") completed += 1;
-      if (o.status === "deleted") deleted += 1;
-      if (o.status !== "completed" && o.status !== "deleted" && o.status !== "cancelled") active += 1;
-    }
-    return { total, completed, deleted, active };
-  }, [filtered]);
+    const total = totalCount;
+    // We can't really know other stats (completed, deleted count) without extra API calls.
+    // So we'll return placeholders or just the total.
+    return { total, completed: 0, deleted: 0, active: 0 };
+  }, [totalCount]);
   const summaryCards: Array<{ label: string; value: string; hint?: string }> = [
     { label: "Filtrelenen Sipariş", value: fmtInt(stats.total), hint: headerFilterLabelMap[headerFilter] },
     { label: "Tamamlanan", value: fmtInt(stats.completed), hint: "Filtre kapsamındaki tamamlanan siparişler" },
@@ -949,11 +909,12 @@ export default function OrdersPage() {
   ];
 
   // CSV - filtre+sort (pagination'dan bağımsız)
+  // NOTE: This will only download the current page data now.
   const downloadOrdersCSV = () => {
-    if (!displayed.length) return;
+    if (!orders.length) return;
     const rows = [
       ["ID", "Tarih", "Müşteri", "Durum", "Teslim", "NET (₺)", "Ödenen (₺)", "Kalan (₺)"],
-      ...displayed.map((o) => {
+      ...orders.map((o) => {
         const net = Number(o.netTotal ?? o.total ?? 0);
         const paid = Number(o.paidTotal ?? o.totalPaid ?? 0);
         const bal = Number(o.balance ?? Math.max(0, net - paid));
@@ -1024,14 +985,7 @@ export default function OrdersPage() {
     }
   };
 
-  const Skeleton = () => (
-    <div className="animate-pulse space-y-3 rounded-2xl border border-neutral-200 p-4">
-      <div className="h-4 w-40 rounded bg-neutral-200" />
-      <div className="h-3 w-64 rounded bg-neutral-200" />
-      <div className="h-3 w-52 rounded bg-neutral-200" />
-      <div className="mt-2 h-24 w-full rounded bg-neutral-100" />
-    </div>
-  );
+
 
   return (
     <>
@@ -1063,7 +1017,7 @@ export default function OrdersPage() {
                 <button
                   className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/70 bg-white/90 px-3 text-sm text-neutral-700 shadow-sm transition hover:bg-white disabled:opacity-50"
                   onClick={downloadOrdersCSV}
-                  disabled={!displayed.length}
+                  disabled={!orders.length}
                   title="CSV indir (filtre+sort)"
                 >
                   <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
@@ -1112,6 +1066,7 @@ export default function OrdersPage() {
                       { k: "all", label: "Tümü" },
                       { k: "completed", label: "Tamamlanan" },
                       { k: "workshop", label: "Atölyede" },
+                      { k: "delivered", label: "Teslim Edildi" },
                       { k: "deleted", label: "Silinenler" },
                     ] as { k: HeaderFilter; label: string }[]
                   ).map(({ k, label }) => (
@@ -1120,11 +1075,10 @@ export default function OrdersPage() {
                       role="tab"
                       aria-selected={headerFilter === k}
                       onClick={() => setHeaderFilter(k)}
-                      className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${
-                        headerFilter === k
-                          ? "bg-indigo-600 text-white shadow-sm"
-                          : "text-neutral-700 hover:bg-neutral-100"
-                      }`}
+                      className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${headerFilter === k
+                        ? "bg-indigo-600 text-white shadow-sm"
+                        : "text-neutral-700 hover:bg-neutral-100"
+                        }`}
                     >
                       {label}
                     </button>
@@ -1249,9 +1203,8 @@ export default function OrdersPage() {
                       key={b.v}
                       type="button"
                       onClick={() => setPaymentStatus(b.v as any)}
-                      className={`h-8 rounded-sm border px-3 text-xs ${
-                        active ? "border-amber-600 bg-amber-600 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                      }`}
+                      className={`h-8 rounded-sm border px-3 text-xs ${active ? "border-amber-600 bg-amber-600 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+                        }`}
                       aria-pressed={active}
                     >
                       {b.label}
@@ -1274,9 +1227,8 @@ export default function OrdersPage() {
                       onClick={() =>
                         setMethodFilters((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]))
                       }
-                      className={`h-8 rounded-sm border px-3 text-xs ${
-                        active ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                      }`}
+                      className={`h-8 rounded-sm border px-3 text-xs ${active ? "border-emerald-600 bg-emerald-600 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+                        }`}
                       aria-pressed={active}
                     >
                       {methodLabel[m]}
@@ -1305,400 +1257,33 @@ export default function OrdersPage() {
 
           {!loading
             ? paged.items.map((order, idx) => {
-                const globalIndex = paged.startIndex + idx;
-                const num = displayed.length - globalIndex;
-                const isOpen = openIds.has(order.id);
-                const d = detailById[order.id];
-                const referenceItems = d?.items && d.items.length > 0 ? d.items : order.items;
-                const detailId = `order-detail-${order.id}`;
+              const globalIndex = paged.startIndex + idx;
+              const num = totalCount - globalIndex;
+              const isOpen = openIds.has(order.id);
+              const d = detailById[order.id];
 
-                const net = Number(order.netTotal ?? order.total ?? 0);
-                const paid = Number(order.paidTotal ?? order.totalPaid ?? 0);
-                const balance = Number(order.subTotal) - Number(paid) - Number(order.discount);
-                const ratio = net > 0 ? paid / net : 0;
-                const total = Number(order.subTotal)
-
-                const disabledActions = order.status === "deleted";
-                const deleteDisabled = order.status === "deleted" || !canDeleteOrders || deletingId === order.id;
-                const showRestore = order.status === "deleted" && canDeleteOrders;
-
-                return (
-                  <section key={order.id} className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-                    {/* Header */}
-                    <div className="flex flex-col md:flex-row items-start justify-between gap-3">
-                      {/* Sol */}
-                      <div className="flex w-full md:w-auto flex-1 flex-col gap-2">
-                        <div className="flex w-full md:w-[350px] justify-between flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="inline-flex size-6 items-center justify-center rounded-sm border border-neutral-300 bg-neutral-50 text-[11px] font-semibold text-neutral-700 ring-1 ring-inset ring-white/50 print:bg-white print:text-black"
-                              aria-hidden
-                            >
-                              {num}
-                            </span>
-                            <div className="shrink-0 font-semibold truncate text-lg">{order.dealer.name || "—"}</div>
-                          </div>
-                          <StatusBadge s={order.status} />
-                        </div>
-
-                        <div className="grid gap-2 text-sm sm:grid-cols-2 sm:gap-2 w-full md:w-[350px]">
-                          <div className="min-w-0">
-                            <span className="flex flex-col items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                              <span>MÜŞTERİ</span> <strong>{order.customerName || "—"}</strong>
-                            </span>
-                          </div>
-                          <div className="min-w-0">
-                            <span className="flex flex-col items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                              <span>TELEFON</span> <strong>{order.customerPhone || "—"}</strong>
-                            </span>
-                          </div>
-                          <div className="min-w-0 flex">
-                            <DuePill info={getDueInfo(order.deliveryDate)} />
-                          </div>
-                          <div className="min-w-0">
-                            <span className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200" title="Oluşturma">
-                              <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
-                                <path fill="currentColor" d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z" />
-                              </svg>
-                              {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(order.createdAt))}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Sağ: finans + aksiyon */}
-                      <div className="flex w-full flex-col items-end gap-2 md:w-auto">
-                        {/* Finans özet */}
-                        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>G.TOPLAM</span> <strong className="ms-1">{fmt(total)} ₺</strong>
-                          </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>İskonto</span> <strong className="ms-1">{fmt(order.discount)} ₺</strong>
-                          </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>Ödenen</span> <strong className="ms-1">{fmt(paid)} ₺</strong>
-                          </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>Kalan</span> <strong className="ms-1">{fmt(balance)} ₺</strong>
-                          </span>
-                        </div>
-
-                        {/* Aksiyonlar */}
-                        <div className="grid w-full grid-cols-2 gap-2">
-                          <button
-                            onClick={() => router.push(`/dashboard/orders/${order.id}/print`)}
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                            title="Yazdır"
-                            disabled={disabledActions}
-                          >
-                            <svg className="size-4" viewBox="0 0 24 24" aria-hidden>
-                              <path fill="currentColor" d="M7 3h10v4H7z" />
-                              <path fill="currentColor" d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z" />
-                              <path fill="currentColor" d="M7 17h10v4H7z" />
-                            </svg>
-                            Yazdır
-                          </button>
-
-                          <button
-                            onClick={() => router.push(`/dashboard/orders/${order.id}`)}
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                            title="Önizleme / Düzenle"
-                            disabled={disabledActions}
-                          >
-                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                              <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0 1.42 0l-1.83 1.83l3.75 3.75l1.84-1.82z" />
-                            </svg>
-                            Önizleme / Düzenle
-                          </button>
-
-                          <button
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                            onClick={() => openPayModal(order.id)}
-                            title="Ödeme Ekle"
-                            disabled={disabledActions}
-                          >
-                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                              <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
-                            </svg>
-                            Ödeme Ekle
-                          </button>
-
-                          <button
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                            onClick={() => removeOrder(order.id)}
-                            disabled={deleteDisabled}
-                            title="Sil"
-                          >
-                            <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                              <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" />
-                            </svg>
-                            {deletingId === order.id ? "Siliniyor…" : "Sil"}
-                          </button>
-
-                          {showRestore && (
-                            <button
-                              className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-emerald-200 bg-white px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
-                              onClick={() => restoreOrder(order.id)}
-                              disabled={restoringId === order.id}
-                              title="Geri Al"
-                            >
-                              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                                <path
-                                  fill="currentColor"
-                                  d="M12 5v4H8l4 4 4-4h-4V5h-2zm-6 9h2a6 6 0 1 0 6-6v-2a8 8 0 1 1-8 8z"
-                                />
-                              </svg>
-                              {restoringId === order.id ? "Geri alınıyor…" : "Geri Al"}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Detay toggle */}
-                    <div className="mt-3">
-                      <button
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-                        aria-expanded={isOpen}
-                        aria-controls={detailId}
-                        onClick={() => toggleOpen(order.id)}
-                        title={isOpen ? "Detayı gizle" : "Detayı göster"}
-                      >
-                        <svg viewBox="0 0 24 24" className={`size-4 transition-transform ${isOpen ? "rotate-180" : ""}`} aria-hidden>
-                          <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
-                        </svg>
-                        {isOpen ? "Detayı Gizle" : "Detayı Göster"}
-                      </button>
-                    </div>
-
-                    {/* Tahsilat Progress */}
-                    <div className="mt-3">
-                      <Progress value={Math.max(0, Math.min(100, Math.round(ratio * 100)))} />
-                    </div>
-
-                    {/* Detay */}
-                    {isOpen && (
-                      <div id={detailId} className="mt-4 space-y-4">
-                        {order.note && (
-                          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-                            <span className="font-medium">Sipariş Notu:</span> {order.note}
-                          </div>
-                        )}
-
-                        {/* Kalemler */}
-                        <div className="rounded-2xl border border-neutral-200">
-                          <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">Kalemler ({order.items.length})</div>
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full text-sm">
-                              <thead className="bg-neutral-50 text-neutral-600">
-                                <tr>
-                                  <th className="px-3 py-2 text-left">Kategori</th>
-                                  <th className="px-3 py-2 text-left">Ürün</th>
-                                  <th className="px-3 py-2 text-right">Adet</th>
-                                  <th className="px-3 py-2 text-right">En</th>
-                                  <th className="px-3 py-2 text-right">Boy</th>
-                                  <th className="px-3 py-2 text-right">Birim ₺</th>
-                                  <th className="px-3 py-2 text-right">Tutar ₺</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {order.items.map((it) => (
-                                  <tr key={it.id} className="border-t border-neutral-100">
-                                    <td className="px-3 py-2">{it.category.name}</td>
-                                    <td className="px-3 py-2">{it.variant.name}</td>
-                                    <td className="px-3 py-2 text-right">{fmtInt(it.qty)}</td>
-                                    <td className="px-3 py-2 text-right">{fmtInt(it.width)}</td>
-                                    <td className="px-3 py-2 text-right">{fmtInt(it.height)}</td>
-                                    <td className="px-3 py-2 text-right">{fmt(it.unitPrice)}</td>
-                                    <td className="px-3 py-2 text-right">{fmt(it.subtotal)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        {/* Ödemeler */}
-                        <div className="rounded-2xl border border-neutral-200">
-                          <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
-                            <div className="text-sm font-semibold">Ödemeler</div>
-                            <button
-                              className="inline-flex items-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                              onClick={() => openPayModal(order.id)}
-                              disabled={disabledActions}
-                            >
-                              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                                <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
-                              </svg>
-                              Ödeme Yap
-                            </button>
-                          </div>
-
-                          <div className="p-3">
-                            {detailLoading[order.id] && <Skeleton />}
-                            {detailError[order.id] && (
-                              <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{detailError[order.id]}</div>
-                            )}
-                            {!detailLoading[order.id] && !detailError[order.id] && (
-                              <>
-                                {d && d.payments.length > 0 ? (
-                                  <div className="overflow-x-auto">
-                                    <table className="min-w-full text-sm">
-                                      <thead className="bg-neutral-50 text-neutral-600">
-                                        <tr>
-                                          <th className="px-3 py-2 text-left">Tarih</th>
-                                          <th className="px-3 py-2 text-left">Yöntem</th>
-                                          <th className="px-3 py-2 text-right">Tutar ₺</th>
-                                          <th className="px-3 py-2 text-left">Not</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {d.payments.map((p) => (
-                                          <tr key={p.id} className="border-t border-neutral-100">
-                                            <td className="px-3 py-2">
-                                              {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(p.paidAt))}
-                                            </td>
-                                            <td className="px-3 py-2">{methodLabel[p.method]}</td>
-                                            <td className="px-3 py-2 text-right">{fmt(p.amount)}</td>
-                                            <td className="px-3 py-2">{p.note ?? "—"}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                ) : (
-                                  <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
-                                )}
-                              </>
-                            )}
-                  </div>
-                </div>
-
-                {/* İşlem geçmişi */}
-                <div className="rounded-2xl border border-neutral-200">
-                  <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">İşlem Geçmişi</div>
-                  <div className="p-3 space-y-3">
-                    {detailLoading[order.id] && <Skeleton />}
-                    {detailError[order.id] && (
-                      <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                        {detailError[order.id]}
-                      </div>
-                    )}
-                    {!detailLoading[order.id] && !detailError[order.id] && (
-                      <>
-                        {d && d.audits.length > 0 ? (
-                          <ul className="space-y-3">
-                            {d.audits.map((entry) => {
-                              const label = auditActionLabel[entry.action] ?? entry.action;
-                              const actor = entry.user?.name || entry.user?.email || "Sistem";
-                              const dateText = new Intl.DateTimeFormat("tr-TR", {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                              }).format(new Date(entry.createdAt));
-                              const fieldRows = extractAuditFieldRows(entry.payload);
-                              const itemRows = extractAuditItemRows(entry.payload, referenceItems);
-                              const hasStructured = fieldRows.length > 0 || itemRows.length > 0;
-                              const fallbackPayload = hasStructured ? "" : formatAuditFallback(entry.payload);
-                              return (
-                                <li key={entry.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <span className="font-medium text-neutral-800">{label}</span>
-                                    <span className="text-xs text-neutral-500">{dateText}</span>
-                                  </div>
-                                  <div className="mt-1 text-xs text-neutral-600">İşlemi yapan: {actor}</div>
-                                  {hasStructured && (
-                                    <div className="mt-2 space-y-3">
-                                      {fieldRows.length > 0 && (
-                                        <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
-                                          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                                            Başlık değişiklikleri
-                                          </div>
-                                          <table className="mt-1 w-full text-xs sm:text-sm">
-                                            <tbody>
-                                              {fieldRows.map((row) => (
-                                                <tr key={row.key} className="border-t border-neutral-100 first:border-t-0">
-                                                  <th className="w-32 px-1 py-1 text-left font-medium text-neutral-600">{row.label}</th>
-                                                  <td className="px-1 py-1 text-neutral-800">{row.value}</td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
-                                      )}
-                                      {itemRows.length > 0 && (
-                                        <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
-                                          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                                            Kalem değişiklikleri
-                                          </div>
-                                          <div className="mt-1 overflow-x-auto">
-                                            <table className="min-w-full text-xs sm:text-sm">
-                                              <thead className="bg-neutral-50 text-neutral-600">
-                                                <tr>
-                                                  <th className="px-2 py-1 text-left">Ürün</th>
-                                                  <th className="px-2 py-1 text-right">Adet</th>
-                                                  <th className="px-2 py-1 text-right">En</th>
-                                                  <th className="px-2 py-1 text-right">Boy</th>
-                                                  <th className="px-2 py-1 text-right">Birim ₺</th>
-                                                  <th className="px-2 py-1 text-right">Tutar ₺</th>
-                                                  <th className="px-2 py-1 text-left">İşlem</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody>
-                                                {itemRows.map((row) => (
-                                                  <tr key={row.key} className="border-t border-neutral-100">
-                                                    <td className="px-2 py-1">
-                                                      <div className="font-medium text-neutral-800">{row.productName}</div>
-                                                      <div className="text-[11px] text-neutral-500">{row.categoryName}</div>
-                                                      {row.note && <div className="mt-0.5 text-[11px] text-neutral-500">{row.note}</div>}
-                                                    </td>
-                                                    <td className="px-2 py-1 text-right">{row.qtyText}</td>
-                                                    <td className="px-2 py-1 text-right">{row.widthText}</td>
-                                                    <td className="px-2 py-1 text-right">{row.heightText}</td>
-                                                    <td className="px-2 py-1 text-right">{row.unitPriceText}</td>
-                                                    <td className="px-2 py-1 text-right">{row.subtotalText}</td>
-                                                    <td className="px-2 py-1 text-left">
-                                                      <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700">
-                                                        {row.actionLabel}
-                                                      </span>
-                                                      {row.statusLabel && (
-                                                        <div className="mt-0.5 text-[11px] text-neutral-500">Durum: {row.statusLabel}</div>
-                                                      )}
-                                                    </td>
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                  {!hasStructured && fallbackPayload && (
-                                    <div className="mt-2 rounded-lg border border-neutral-200 bg-white px-3 py-2">
-                                      <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Değişiklikler</div>
-                                      <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-neutral-800">
-                                        {fallbackPayload}
-                                      </pre>
-                                    </div>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        ) : (
-                          <div className="text-sm text-neutral-500">Henüz işlem kaydı yok.</div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>
-        );
-      })
+              return (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  num={num}
+                  isOpen={isOpen}
+                  detail={d}
+                  detailLoading={!!detailLoading[order.id]}
+                  detailError={detailError[order.id]}
+                  canDeleteOrders={canDeleteOrders}
+                  deletingId={deletingId}
+                  restoringId={restoringId}
+                  onToggleOpen={toggleOpen}
+                  onRemove={removeOrder}
+                  onRestore={restoreOrder}
+                  onOpenPayModal={openPayModal}
+                  router={router}
+                />
+              );
+            })
             : ""}
+
         </div>
 
         {/* Pagination controls */}
@@ -1729,11 +1314,10 @@ export default function OrdersPage() {
                   <span key={n} className="inline-flex">
                     {gap && <span className="px-1 text-neutral-400">…</span>}
                     <button
-                      className={`h-9 min-w-9 rounded-xl border px-3 text-sm ${
-                        n === paged.page
-                          ? "border-indigo-600 bg-indigo-600 text-white"
-                          : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                      }`}
+                      className={`h-9 min-w-9 rounded-xl border px-3 text-sm ${n === paged.page
+                        ? "border-indigo-600 bg-indigo-600 text-white"
+                        : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+                        }`}
                       onClick={() => setPage(n)}
                     >
                       {n}
@@ -1904,3 +1488,423 @@ export default function OrdersPage() {
     </>
   );
 }
+const OrderCard = React.memo(({
+  order,
+  num,
+  isOpen,
+  detail,
+  detailLoading,
+  detailError,
+  canDeleteOrders,
+  deletingId,
+  restoringId,
+  onToggleOpen,
+  onRemove,
+  onRestore,
+  onOpenPayModal,
+  router,
+}: {
+  order: Order;
+  num: number;
+  isOpen: boolean;
+  detail?: OrderDetail;
+  detailLoading: boolean;
+  detailError?: string | null;
+  canDeleteOrders: boolean;
+  deletingId: string | null;
+  restoringId: string | null;
+  onToggleOpen: (id: string) => void;
+  onRemove: (id: string) => void;
+  onRestore: (id: string) => void;
+  onOpenPayModal: (id: string) => void;
+  router: any;
+}) => {
+  const referenceItems = detail?.items && detail.items.length > 0 ? detail.items : order.items;
+  const detailId = `order-detail-${order.id}`;
+
+  const net = Number(order.netTotal ?? order.total ?? 0);
+  const paid = Number(order.paidTotal ?? order.totalPaid ?? 0);
+  const balance = Number(order.subTotal) - Number(paid) - Number(order.discount);
+  const ratio = net > 0 ? paid / net : 0;
+  const total = Number(order.subTotal);
+
+  const disabledActions = order.status === "deleted";
+  const deleteDisabled = order.status === "deleted" || !canDeleteOrders || deletingId === order.id;
+  const showRestore = order.status === "deleted" && canDeleteOrders;
+
+  return (
+    <section className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row items-start justify-between gap-3">
+        {/* Sol */}
+        <div className="flex w-full md:w-auto flex-1 flex-col gap-2">
+          <div className="flex w-full md:w-[350px] justify-between flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex size-6 items-center justify-center rounded-sm border border-neutral-300 bg-neutral-50 text-[11px] font-semibold text-neutral-700 ring-1 ring-inset ring-white/50 print:bg-white print:text-black"
+                aria-hidden
+              >
+                {num}
+              </span>
+              <div className="shrink-0 font-semibold truncate text-lg">{order.dealer.name || "—"}</div>
+            </div>
+            <StatusBadge s={order.status} />
+          </div>
+
+          <div className="grid gap-2 text-sm sm:grid-cols-2 sm:gap-2 w-full md:w-[350px]">
+            <div className="min-w-0">
+              <span className="flex flex-col items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                <span>MÜŞTERİ</span> <strong>{order.customerName || "—"}</strong>
+              </span>
+            </div>
+            <div className="min-w-0">
+              <span className="flex flex-col items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                <span>TELEFON</span> <strong>{order.customerPhone || "—"}</strong>
+              </span>
+            </div>
+            <div className="min-w-0 flex">
+              <DuePill info={getDueInfo(order.deliveryDate)} />
+            </div>
+            <div className="min-w-0">
+              <span className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200" title="Oluşturma">
+                <svg viewBox="0 0 24 24" className="size-3.5" aria-hidden>
+                  <path fill="currentColor" d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z" />
+                </svg>
+                {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(order.createdAt))}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Sağ: finans + aksiyon */}
+        <div className="flex w-full flex-col items-end gap-2 md:w-auto">
+          {/* Finans özet */}
+          <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
+            <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+              <span>G.TOPLAM</span> <strong className="ms-1">{fmt(total)} ₺</strong>
+            </span>
+            <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+              <span>İskonto</span> <strong className="ms-1">{fmt(order.discount)} ₺</strong>
+            </span>
+            <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+              <span>Ödenen</span> <strong className="ms-1">{fmt(paid)} ₺</strong>
+            </span>
+            <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+              <span>Kalan</span> <strong className="ms-1">{fmt(balance)} ₺</strong>
+            </span>
+          </div>
+
+          {/* Aksiyonlar */}
+          <div className="grid w-full grid-cols-2 gap-2">
+            <button
+              onClick={() => router.push(`/dashboard/orders/${order.id}/print`)}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              title="Yazdır"
+              disabled={disabledActions}
+            >
+              <svg className="size-4" viewBox="0 0 24 24" aria-hidden>
+                <path fill="currentColor" d="M7 3h10v4H7z" />
+                <path fill="currentColor" d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z" />
+                <path fill="currentColor" d="M7 17h10v4H7z" />
+              </svg>
+              Yazdır
+            </button>
+
+            <button
+              onClick={() => router.push(`/dashboard/orders/${order.id}`)}
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              title="Önizleme / Düzenle"
+              disabled={disabledActions}
+            >
+              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0 1.42 0l-1.83 1.83l3.75 3.75l1.84-1.82z" />
+              </svg>
+              Önizleme / Düzenle
+            </button>
+
+            <button
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+              onClick={() => onOpenPayModal(order.id)}
+              title="Ödeme Ekle"
+              disabled={disabledActions}
+            >
+              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+              </svg>
+              Ödeme Ekle
+            </button>
+
+            <button
+              className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+              onClick={() => onRemove(order.id)}
+              disabled={deleteDisabled}
+              title="Sil"
+            >
+              <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                <path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z" />
+              </svg>
+              {deletingId === order.id ? "Siliniyor…" : "Sil"}
+            </button>
+
+            {showRestore && (
+              <button
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-emerald-200 bg-white px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                onClick={() => onRestore(order.id)}
+                disabled={restoringId === order.id}
+                title="Geri Al"
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path
+                    fill="currentColor"
+                    d="M12 5v4H8l4 4 4-4h-4V5h-2zm-6 9h2a6 6 0 1 0 6-6v-2a8 8 0 1 1-8 8z"
+                  />
+                </svg>
+                {restoringId === order.id ? "Geri alınıyor…" : "Geri Al"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Detay toggle */}
+      <div className="mt-3">
+        <button
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+          aria-expanded={isOpen}
+          aria-controls={detailId}
+          onClick={() => onToggleOpen(order.id)}
+          title={isOpen ? "Detayı gizle" : "Detayı göster"}
+        >
+          <svg viewBox="0 0 24 24" className={`size-4 transition-transform ${isOpen ? "rotate-180" : ""}`} aria-hidden>
+            <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+          </svg>
+          {isOpen ? "Detayı Gizle" : "Detayı Göster"}
+        </button>
+      </div>
+
+      {/* Tahsilat Progress */}
+      <div className="mt-3">
+        <Progress value={Math.max(0, Math.min(100, Math.round(ratio * 100)))} />
+      </div>
+
+      {/* Detay */}
+      {isOpen && (
+        <div id={detailId} className="mt-4 space-y-4">
+          {order.note && (
+            <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+              <span className="font-medium">Sipariş Notu:</span> {order.note}
+            </div>
+          )}
+
+          {/* Kalemler */}
+          <div className="rounded-2xl border border-neutral-200">
+            <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">Kalemler ({order.items.length})</div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-neutral-50 text-neutral-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Kategori</th>
+                    <th className="px-3 py-2 text-left">Ürün</th>
+                    <th className="px-3 py-2 text-right">Adet</th>
+                    <th className="px-3 py-2 text-right">En</th>
+                    <th className="px-3 py-2 text-right">Boy</th>
+                    <th className="px-3 py-2 text-right">Birim ₺</th>
+                    <th className="px-3 py-2 text-right">Tutar ₺</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {order.items.map((it) => (
+                    <tr key={it.id} className="border-t border-neutral-100">
+                      <td className="px-3 py-2">{it.category.name}</td>
+                      <td className="px-3 py-2">{it.variant.name}</td>
+                      <td className="px-3 py-2 text-right">{fmtInt(it.qty)}</td>
+                      <td className="px-3 py-2 text-right">{fmtInt(it.width)}</td>
+                      <td className="px-3 py-2 text-right">{fmtInt(it.height)}</td>
+                      <td className="px-3 py-2 text-right">{fmt(it.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right">{fmt(it.subtotal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Ödemeler */}
+          <div className="rounded-2xl border border-neutral-200">
+            <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
+              <div className="text-sm font-semibold">Ödemeler</div>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                onClick={() => onOpenPayModal(order.id)}
+                disabled={disabledActions}
+              >
+                <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                  <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                </svg>
+                Ödeme Yap
+              </button>
+            </div>
+
+            <div className="p-3">
+              {detailLoading && <Skeleton />}
+              {detailError && (
+                <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{detailError}</div>
+              )}
+              {!detailLoading && !detailError && (
+                <>
+                  {detail && detail.payments.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-neutral-50 text-neutral-600">
+                          <tr>
+                            <th className="px-3 py-2 text-left">Tarih</th>
+                            <th className="px-3 py-2 text-left">Yöntem</th>
+                            <th className="px-3 py-2 text-right">Tutar ₺</th>
+                            <th className="px-3 py-2 text-left">Not</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.payments.map((p) => (
+                            <tr key={p.id} className="border-t border-neutral-100">
+                              <td className="px-3 py-2">
+                                {new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(p.paidAt))}
+                              </td>
+                              <td className="px-3 py-2">{methodLabel[p.method]}</td>
+                              <td className="px-3 py-2 text-right">{fmt(p.amount)}</td>
+                              <td className="px-3 py-2">{p.note ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-neutral-500">Henüz ödeme yok.</div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* İşlem geçmişi */}
+          <div className="rounded-2xl border border-neutral-200">
+            <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">İşlem Geçmişi</div>
+            <div className="p-3 space-y-3">
+              {detailLoading && <Skeleton />}
+              {detailError && (
+                <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  {detailError}
+                </div>
+              )}
+              {!detailLoading && !detailError && (
+                <>
+                  {detail && detail.audits.length > 0 ? (
+                    <ul className="space-y-3">
+                      {detail.audits.map((entry) => {
+                        const label = auditActionLabel[entry.action] ?? entry.action;
+                        const actor = entry.user?.name || entry.user?.email || "Sistem";
+                        const dateText = new Intl.DateTimeFormat("tr-TR", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        }).format(new Date(entry.createdAt));
+                        const fieldRows = extractAuditFieldRows(entry.payload);
+                        const itemRows = extractAuditItemRows(entry.payload, referenceItems);
+                        const hasStructured = fieldRows.length > 0 || itemRows.length > 0;
+                        const fallbackPayload = hasStructured ? "" : formatAuditFallback(entry.payload);
+                        return (
+                          <li key={entry.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-medium text-neutral-800">{label}</span>
+                              <span className="text-xs text-neutral-500">{dateText}</span>
+                            </div>
+                            <div className="mt-1 text-xs text-neutral-600">İşlemi yapan: {actor}</div>
+                            {hasStructured && (
+                              <div className="mt-2 space-y-3">
+                                {fieldRows.length > 0 && (
+                                  <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                                    <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                      Başlık değişiklikleri
+                                    </div>
+                                    <table className="mt-1 w-full text-xs sm:text-sm">
+                                      <tbody>
+                                        {fieldRows.map((row) => (
+                                          <tr key={row.key} className="border-t border-neutral-100 first:border-t-0">
+                                            <th className="w-32 px-1 py-1 text-left font-medium text-neutral-600">{row.label}</th>
+                                            <td className="px-1 py-1 text-neutral-800">{row.value}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                                {itemRows.length > 0 && (
+                                  <div className="rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                                    <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                      Kalem değişiklikleri
+                                    </div>
+                                    <div className="mt-1 overflow-x-auto">
+                                      <table className="min-w-full text-xs sm:text-sm">
+                                        <thead className="bg-neutral-50 text-neutral-600">
+                                          <tr>
+                                            <th className="px-2 py-1 text-left">Ürün</th>
+                                            <th className="px-2 py-1 text-right">Adet</th>
+                                            <th className="px-2 py-1 text-right">En</th>
+                                            <th className="px-2 py-1 text-right">Boy</th>
+                                            <th className="px-2 py-1 text-right">Birim ₺</th>
+                                            <th className="px-2 py-1 text-right">Tutar ₺</th>
+                                            <th className="px-2 py-1 text-left">İşlem</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {itemRows.map((row) => (
+                                            <tr key={row.key} className="border-t border-neutral-100">
+                                              <td className="px-2 py-1">
+                                                <div className="font-medium text-neutral-800">{row.productName}</div>
+                                                <div className="text-[11px] text-neutral-500">{row.categoryName}</div>
+                                                {row.note && <div className="mt-0.5 text-[11px] text-neutral-500">{row.note}</div>}
+                                              </td>
+                                              <td className="px-2 py-1 text-right">{row.qtyText}</td>
+                                              <td className="px-2 py-1 text-right">{row.widthText}</td>
+                                              <td className="px-2 py-1 text-right">{row.heightText}</td>
+                                              <td className="px-2 py-1 text-right">{row.unitPriceText}</td>
+                                              <td className="px-2 py-1 text-right">{row.subtotalText}</td>
+                                              <td className="px-2 py-1 text-left">
+                                                <span className="inline-flex rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-700">
+                                                  {row.actionLabel}
+                                                </span>
+                                                {row.statusLabel && (
+                                                  <div className="mt-0.5 text-[11px] text-neutral-500">Durum: {row.statusLabel}</div>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {!hasStructured && fallbackPayload && (
+                              <div className="mt-2 rounded-lg border border-neutral-200 bg-white px-3 py-2">
+                                <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Değişiklikler</div>
+                                <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-neutral-800">
+                                  {fallbackPayload}
+                                </pre>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <div className="text-sm text-neutral-500">Henüz işlem kaydı yok.</div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+});

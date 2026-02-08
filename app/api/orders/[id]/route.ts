@@ -285,8 +285,9 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       // (Basit formül) subtotal = unitPrice * qty * (width/100) * fileDensity
       // Not: Eğer STOR/diğer ayrımı istiyorsan burada kategori adına göre
       // m² veya file yoğunluğu mantığını uygulayabilirsin (POST'takiyle aynı).
+      const wmt = new Prisma.Decimal(Math.max(100, widthInt)).div(100)
       const subtotal  = price
-        .mul(new Prisma.Decimal(widthInt).div(100))
+        .mul(wmt)
         .mul(density)
         .mul(qtyInt)
 

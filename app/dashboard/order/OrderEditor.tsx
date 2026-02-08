@@ -9,13 +9,7 @@ import { PageOverlay } from "@/app/components/PageOverlay";
 import { parseYMDToLocalDate } from "@/app/lib/date";
 
 /* ========= Types ========= */
-type Status =
-  | "processing"
-  | "pending"
-  | "completed"
-  | "cancelled"
-  | "workshop"
-  | "deleted";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop" | "delivered" | "deleted";
 type PaymentMethod = "CASH" | "TRANSFER" | "CARD";
 
 type Profile = {
@@ -87,15 +81,17 @@ const statusLabel: Record<Status, string> = {
   completed: "Tamamlandı",
   cancelled: "İptal",
   workshop: "Atölyede",
+  delivered: "Teslim Edildi",
   deleted: "Silindi",
 };
 const statusDot: Record<Status, string> = {
-  pending: "bg-amber-500",
   processing: "bg-blue-500",
-  completed: "bg-emerald-600",
-  cancelled: "bg-rose-600",
-  workshop: "bg-blue-100",
-  deleted: "bg-red-100",
+  pending: "bg-orange-500",
+  completed: "bg-green-500",
+  cancelled: "bg-red-500",
+  workshop: "bg-indigo-500",
+  delivered: "bg-purple-600",
+  deleted: "bg-gray-500",
 };
 
 const isStorPerdeByName = (name: string) => normalize(name) === "STOR PERDE";
@@ -117,7 +113,7 @@ function calcSubtotal(
   const w = Math.max(0, Number(width) || 0);
   const h = Math.max(0, Number(height) || 0);
   if (isStorPerdeByName(catName)) {
-    const area = (w / 100) * (h / 100);
+    const area = (Math.max(100, w) / 100) * (h / 100);
     return price * (area || 0) * q;
   } else if (isFonPerdeByName(catName)) {
     return price * q;
@@ -225,8 +221,8 @@ export default function OrderEditor({
     setDealerId(setup.dealerId);
     setDealerName(
       setup.dealerName ||
-        branches.find((b) => b.id === setup.dealerId)?.name ||
-        "Seçili Bayi"
+      branches.find((b) => b.id === setup.dealerId)?.name ||
+      "Seçili Bayi"
     );
     setSelectedCustomerId(setup.customerId ?? null);
     setCustomerName(setup.customerName || "");
@@ -429,18 +425,18 @@ export default function OrderEditor({
         prev.map((it) =>
           it.id === editingLineId
             ? {
-                ...it,
-                categoryId: selectedCategory.id,
-                variantId: selectedVariant.id,
-                qty: q,
-                width: w,
-                height: h,
-                unitPrice: price,
-                note: lineNote || null,
-                fileDensity: d,
-                subtotal: sub,
-                lineStatus,
-              }
+              ...it,
+              categoryId: selectedCategory.id,
+              variantId: selectedVariant.id,
+              qty: q,
+              width: w,
+              height: h,
+              unitPrice: price,
+              note: lineNote || null,
+              fileDensity: d,
+              subtotal: sub,
+              lineStatus,
+            }
             : it
         )
       );
@@ -864,8 +860,8 @@ export default function OrderEditor({
                     useCustomSubtotal
                       ? subtotalInput
                       : selectedVariant
-                      ? fmt(previewSubtotal)
-                      : ""
+                        ? fmt(previewSubtotal)
+                        : ""
                   }
                   onChange={(e) => setSubtotalInput(e.target.value)}
                   disabled={!useCustomSubtotal}
@@ -1269,8 +1265,9 @@ function Header({
           >
             <option value="pending">Beklemede</option>
             <option value="processing">İşlemde</option>
-            <option value="completed">Tamamlandı</option>
             <option value="workshop">Atölyede</option>
+            <option value="completed">Tamamlandı</option>
+            <option value="delivered">Teslim Edildi</option>
             <option value="cancelled">İptal</option>
           </select>
         </div>
@@ -1279,8 +1276,8 @@ function Header({
           <span className="inline-block min-w-[80px] text-red-700">
             {orderDeliveryDate
               ? parseYMDToLocalDate(orderDeliveryDate).toLocaleDateString(
-                  "tr-TR"
-                )
+                "tr-TR"
+              )
               : "—"}
           </span>
         </div>
@@ -1331,8 +1328,8 @@ function SectionEditable({
           const it = ordered[i] || null;
           const variantName = it
             ? catById
-                .get(it.categoryId)
-                ?.variants?.find((v) => v.id === it.variantId)?.name ?? "—"
+              .get(it.categoryId)
+              ?.variants?.find((v) => v.id === it.variantId)?.name ?? "—"
             : null;
 
           return (
@@ -1353,9 +1350,8 @@ function SectionEditable({
                   {/* Üst sağ: durum rozeti + hızlı select */}
                   <div className="absolute right-1 top-1 flex items-center gap-1 print:hidden">
                     <span
-                      className={`inline-block h-2.5 w-2.5 rounded-full ${
-                        statusDot[it.lineStatus]
-                      }`}
+                      className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot[it.lineStatus]
+                        }`}
                     />
                     <select
                       className="border text-[10px] rounded px-1 py-0.5 bg-white"
@@ -1448,8 +1444,8 @@ function SectionQuickPlus({
           const it = visibleRows[visIndex];
           const variantName = it
             ? catById
-                .get(it.categoryId)
-                ?.variants?.find((v) => v.id === it.variantId)?.name ?? "—"
+              .get(it.categoryId)
+              ?.variants?.find((v) => v.id === it.variantId)?.name ?? "—"
             : null;
 
           let label = <span className="print:hidden">+ Ekle</span>;

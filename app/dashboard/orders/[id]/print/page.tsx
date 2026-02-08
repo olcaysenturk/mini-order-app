@@ -6,7 +6,7 @@ import { parseYMDToLocalDate } from "@/app/lib/date";
 import { PageOverlay } from "@/app/components/PageOverlay";
 
 /* ========= Types ========= */
-type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop" | "delivered";
 type Variant = { id: string; name: string; unitPrice: number };
 type Category = { id: string; name: string; variants: Variant[] };
 type LineItem = {
@@ -82,7 +82,8 @@ const statusLabelMap: Record<Status, string> = {
   processing: "İşlemde",
   completed: "Tamamlandı",
   cancelled: "İptal",
-  workshop: "Atölyede"
+  workshop: "Atölyede",
+  delivered: "Teslim Edildi"
 };
 
 /* ========= Component ========= */
@@ -168,7 +169,7 @@ export default function PrintOrderPage() {
       const t = setTimeout(() => {
         try {
           window.print();
-        } catch {}
+        } catch { }
       }, 100);
       return () => clearTimeout(t);
     }
@@ -365,9 +366,8 @@ export default function PrintOrderPage() {
 
           <div className="text-sm mt-3.5">
             <div
-              className={`grid gap-2 sm:grid-cols-${
-                order.discount > 0 ? 4 : 2
-              }`}
+              className={`grid gap-2 sm:grid-cols-${order.discount > 0 ? 4 : 2
+                }`}
             >
               {order.discount > 0 && (
                 <div className="rounded-xs border border-neutral-200 bg-gradient-to-br from-neutral-50 to-white ">
@@ -635,9 +635,8 @@ function SectionListPrint({
               <div className="w-6 text-right text-xs">{i + 1}-</div>
               <div className="h-[23px] flex-1 border-0 border-b border-[#999] p-0 pl-2 text-left text-sm">
                 {it
-                  ? `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${
-                      it.height
-                    } cm • ${fmt(it.subtotal)} ₺`
+                  ? `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${it.height
+                  } cm • ${fmt(it.subtotal)} ₺`
                   : ""}
               </div>
             </div>

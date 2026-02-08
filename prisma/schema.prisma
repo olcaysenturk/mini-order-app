@@ -536,6 +536,7 @@ enum OrderStatus {
   completed
   cancelled
   workshop
+  delivered
   deleted
 }
 

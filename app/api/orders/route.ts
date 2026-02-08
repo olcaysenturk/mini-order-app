@@ -132,11 +132,25 @@ export async function GET(req: NextRequest) {
       sp.get('includeDeleted')?.toLowerCase() === 'true'
     const onlyDeleted = sp.get('only') === 'deleted'
 
-    const takeRaw = Number(sp.get('take') || '100')
-    const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 100
+    const takeRaw = Number(sp.get('take') || '50')
+    const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 50
+
+    const pageRaw = Number(sp.get('page') || '1')
+    const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1
+    const skip = (page - 1) * take
+
+    const orderTypeRaw = sp.get('orderType')
+    const orderType = orderTypeRaw ? Number(orderTypeRaw) : undefined
+
+    const orderByParam = sp.get('orderBy') || 'createdAt'
+    const orderDirParam = sp.get('orderDir') === 'asc' ? 'asc' : 'desc'
 
     // AND biriktirerek koşulları kur
     const and: Prisma.OrderWhereInput[] = [{ tenantId }]
+
+    if (orderType !== undefined && !Number.isNaN(orderType)) {
+      and.push({ orderType: orderType as any }) // 0 or 1
+    }
 
     if (branchIdParam) and.push({ branchId: branchIdParam })
     if (customerIdParam) and.push({ customerId: customerIdParam })
@@ -176,11 +190,23 @@ export async function GET(req: NextRequest) {
 
     const where: Prisma.OrderWhereInput = and.length ? { AND: and } : {}
 
-    // 1) Siparişleri çek
+    // Sort mapping
+    let orderByArg: Prisma.OrderOrderByWithRelationInput = { createdAt: 'desc' }
+    if (orderByParam === 'deliveryDate') {
+      orderByArg = { deliveryAt: orderDirParam }
+    } else if (orderByParam === 'createdAt') {
+      orderByArg = { createdAt: orderDirParam }
+    }
+
+    // 1) Toplam sayıyı çek (Pagination meta için)
+    const totalCount = await prisma.order.count({ where })
+
+    // 2) Siparişleri çek
     const orders = await prisma.order.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: orderByArg,
       take,
+      skip,
       include: {
         items: {
           include: {
@@ -194,9 +220,9 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    if (orders.length === 0) return NextResponse.json([])
+    // if (orders.length === 0) return NextResponse.json([]) // Return empty wrapper instead
 
-    // 2) Ödemeleri grupla
+    // 3) Ödemeleri grupla
     const orderIds = orders.map((o) => o.id)
     const paymentSums = await prisma.orderPayment.groupBy({
       by: ['orderId'],
@@ -207,7 +233,7 @@ export async function GET(req: NextRequest) {
       paymentSums.map((r) => [r.orderId, Number(r._sum.amount ?? 0)])
     )
 
-    // 3) Ek gider (OrderExtra) toplamlarını çek
+    // 4) Ek gider (OrderExtra) toplamlarını çek
     const extraSums = await prisma.orderExtra.groupBy({
       by: ['orderId'],
       where: { orderId: { in: orderIds } },
@@ -217,8 +243,8 @@ export async function GET(req: NextRequest) {
       extraSums.map((r) => [r.orderId, Number(r._sum.subtotal ?? 0)])
     )
 
-    // 4) Payload
-    const payload = orders.map((o) => {
+    // 5) Payload
+    const data = orders.map((o) => {
       // const itemsSubTotal = o.items.reduce((sum, it) => sum + Number(it.subtotal ?? 0), 0)
       // const extrasSubTotal = Number(extraMap.get(o.id) ?? 0)
       // const subTotal = itemsSubTotal + extrasSubTotal
@@ -282,7 +308,15 @@ export async function GET(req: NextRequest) {
       }
     })
 
-    return NextResponse.json(payload)
+    return NextResponse.json({
+      data,
+      meta: {
+        total: totalCount,
+        page,
+        limit: take,
+        totalPages: Math.ceil(totalCount / take),
+      },
+    })
   } catch (e) {
     console.error('GET /orders error:', e)
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
@@ -393,7 +427,7 @@ export async function POST(req: NextRequest) {
       const unitPrice = new Prisma.Decimal(it.unitPrice)
       const density = new Prisma.Decimal(Number(it.fileDensity) || 1)
 
-      const wmt = new Prisma.Decimal(width).div(100)
+      const wmt = new Prisma.Decimal(Math.max(100, width)).div(100);
       const hmt = new Prisma.Decimal(height).div(100)
 
       // STOR = m², Diğer = max(1, (en/100)*file)

@@ -34,7 +34,7 @@ export default function ImpersonationBanner() {
   if (!isImp) return null;
 
   return (
-    <div className="sticky top-0 z-[100] w-full bg-amber-100/95 text-amber-900 border-b border-amber-300 backdrop-blur">
+    <div className="sticky print:hidden top-0 z-[100] w-full bg-amber-100/95 text-amber-900 border-b border-amber-300 backdrop-blur">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3 py-2 text-sm">
         <div className="min-w-0">
           <div className="font-semibold">İMPERSONATION MODU</div>

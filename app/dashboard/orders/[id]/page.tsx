@@ -8,7 +8,7 @@ import { PageOverlay } from "@/app/components/PageOverlay";
 /* ========= Types ========= */
 type Variant = { id: string; name: string; unitPrice: number };
 type Category = { id: string; name: string; variants: Variant[] };
-type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop";
+type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop" | "delivered";
 
 type LineItem = {
   id: string;
@@ -68,18 +68,29 @@ type Branch = {
   address?: string | null;
 };
 
-const calculateLineSubtotal = (item: LineItem) => {
+const calculateLineSubtotal = (item: LineItem, catName: string = "") => {
   const stored = Number(item.subtotal ?? 0);
-  if (Number.isFinite(stored) && stored > 0) return stored;
+  // We re-calculate to ensure consistency with new logic
   const qtySafe = Math.max(1, Number(item.qty ?? 1));
   const widthSafe = Math.max(0, Number(item.width ?? 0));
   const densitySafe = Number(item.fileDensity ?? 1) || 1;
   const unitSafe = Number(item.unitPrice ?? 0);
+
+  const isStor = normalize(catName) === "STOR PERDE";
+  if (isStor) {
+    const w = Math.max(100, widthSafe);
+    const area = (w / 100) * (Math.max(0, Number(item.height ?? 0)) / 100);
+    return unitSafe * (area || 0) * qtySafe;
+  }
+
   return unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
 };
 
-const calculateOrderSubtotal = (lines: LineItem[]) =>
-  lines.reduce((acc, item) => acc + calculateLineSubtotal(item), 0);
+const calculateOrderSubtotal = (lines: LineItem[], catById: Map<string, Category>) =>
+  lines.reduce((acc, item) => {
+    const catName = catById.get(item.categoryId)?.name || "";
+    return acc + calculateLineSubtotal(item, catName);
+  }, 0);
 
 /* ========= Helpers ========= */
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -104,7 +115,8 @@ const statusLabelMap: Record<Status, string> = {
   processing: "İşlemde",
   completed: "Tamamlandı",
   cancelled: "İptal",
-  workshop: "Atölyede"
+  workshop: "Atölyede",
+  delivered: "Teslim Edildi"
 };
 const statusDot: Record<Status, string> = {
   pending: "bg-amber-500",
@@ -112,6 +124,7 @@ const statusDot: Record<Status, string> = {
   completed: "bg-emerald-600",
   cancelled: "bg-rose-600",
   workshop: "bg-blue-100",
+  delivered: "bg-purple-600",
 };
 
 // ISO/Date → YYYY-MM-DD (input için)
@@ -242,6 +255,13 @@ export default function EditOrderPage() {
   const [discountInput, setDiscountInput] = useState("0");
   const [paidAmount, setPaidAmount] = useState(0);
 
+  // Payment Modal State
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState<"CASH" | "TRANSFER" | "CARD">("CASH");
+  const [payNote, setPayNote] = useState("");
+  const [paySaving, setPaySaving] = useState(false);
+
   /* ==== Load ==== */
   useEffect(() => {
     let alive = true;
@@ -320,6 +340,16 @@ export default function EditOrderPage() {
   }, [id]);
 
   /* ==== Derived ==== */
+  const catById = useMemo(
+    () => new Map(categories.map((c) => [c.id, c])),
+    [categories]
+  );
+  const variantById = useMemo(() => {
+    const m = new Map<string, Variant>();
+    for (const c of categories) for (const v of c.variants) m.set(v.id, v);
+    return m;
+  }, [categories]);
+
   const selectedCategory = useMemo(
     () => categories.find((c) => c.id === catId),
     [categories, catId]
@@ -347,7 +377,7 @@ export default function EditOrderPage() {
 
   useEffect(() => {
     if (loading) return;
-    const subtotal = calculateOrderSubtotal(items);
+    const subtotal = calculateOrderSubtotal(items, catById);
     const rawDiscount = Number(discount ?? 0);
     const safeDiscount = Math.min(Math.max(0, rawDiscount), subtotal);
     setTotalPrice(subtotal);
@@ -365,18 +395,21 @@ export default function EditOrderPage() {
     const q = Math.max(1, Math.floor(qty));
     const w = Math.max(0, Math.floor(width));
     const d = Number(fileDensity) || 1;
-    return price * ((w / 100) * d || 1) * q;
-  }, [selectedVariant, useCustomPrice, unitPriceInput, qty, width, fileDensity]);
 
-  const catById = useMemo(
-    () => new Map(categories.map((c) => [c.id, c])),
-    [categories]
-  );
-  const variantById = useMemo(() => {
-    const m = new Map<string, Variant>();
-    for (const c of categories) for (const v of c.variants) m.set(v.id, v);
-    return m;
-  }, [categories]);
+    // Stor Perde logic
+    const selectedCatName = catById.get(selectedCategory?.id || "")?.name || "";
+    const isStor = normalize(selectedCatName) === "STOR PERDE";
+
+    if (isStor) {
+      const wEff = Math.max(100, w);
+      const area = (wEff / 100) * (height / 100);
+      return price * (area || 0) * q;
+    }
+
+    return price * ((w / 100) * d || 1) * q;
+  }, [selectedVariant, useCustomPrice, unitPriceInput, qty, width, height, fileDensity, selectedCategory, catById]);
+
+
 
   const groupedByCategoryName = useMemo(() => {
     const g = new Map<string, LineItem[]>();
@@ -421,7 +454,7 @@ export default function EditOrderPage() {
   //   [items]
   // );
 
-  
+
 
   function LegendDot({ c, label }: { c: string; label: string }) {
     return (
@@ -498,8 +531,19 @@ export default function EditOrderPage() {
     const price =
       Number(useCustomPrice ? unitPriceInput : selectedVariant.unitPrice) || 0;
     const d = Number(fileDensity) || 1;
-    const sub = price * ((w / 100) * d || 1) * q;
+
+    // Subtotal logic with Stor check
     const selectedCatName = catById.get(selectedCategory.id)?.name || "";
+    const isStor = normalize(selectedCatName) === "STOR PERDE";
+    let sub = 0;
+    if (isStor) {
+      const wEff = Math.max(100, w);
+      const area = (wEff / 100) * (height / 100);
+      sub = price * (area || 0) * q;
+    } else {
+      sub = price * ((w / 100) * d || 1) * q;
+    }
+
     const isSlotted = isSlottedByName(selectedCatName);
 
     if (editingLineId) {
@@ -507,21 +551,21 @@ export default function EditOrderPage() {
         prev.map((it) =>
           it.id === editingLineId
             ? {
-                ...it,
-                categoryId: selectedCategory.id,
-                variantId: selectedVariant.id,
-                qty: q,
-                width: w,
-                height,
-                unitPrice: price,
-                note: lineNote || null,
-                fileDensity: d,
-                subtotal: sub,
-                slotIndex: isSlotted
-                  ? targetSlotIndex ?? it.slotIndex ?? 0
-                  : null,
-                lineStatus,
-              }
+              ...it,
+              categoryId: selectedCategory.id,
+              variantId: selectedVariant.id,
+              qty: q,
+              width: w,
+              height,
+              unitPrice: price,
+              note: lineNote || null,
+              fileDensity: d,
+              subtotal: sub,
+              slotIndex: isSlotted
+                ? targetSlotIndex ?? it.slotIndex ?? 0
+                : null,
+              lineStatus,
+            }
             : it
         )
       );
@@ -568,8 +612,8 @@ export default function EditOrderPage() {
       catById
         .get(line.categoryId)
         ?.variants?.find((v) => v.id === line.variantId)?.unitPrice ??
-        line.unitPrice ??
-        0
+      line.unitPrice ??
+      0
     );
     const currentUnit = Number(line.unitPrice ?? variantPrice);
     setUnitPriceInput(currentUnit);
@@ -630,7 +674,7 @@ export default function EditOrderPage() {
         _action: "delete" as const,
       }));
 
-      const subtotal = calculateOrderSubtotal(items);
+      const subtotal = calculateOrderSubtotal(items, catById);
       const safeDiscount = Math.min(Math.max(0, Number(discount ?? 0)), subtotal);
 
       const payload = {
@@ -688,80 +732,80 @@ export default function EditOrderPage() {
     <>
       <PageOverlay show={saving} label="Kaydediliyor…" />
       <div className="mx-auto my-4 bg-white text-black print:my-0 print:bg-white print:text-black">
-      {/* Toolbar (ekranda görünsün) */}
-      <div className="print:hidden border-b border-neutral-200 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 mb-10">
-        <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-            {/* Left: title + tiny meta like list header */}
-            <div className="min-w-0">
-              <h1 className="truncate text-base font-semibold text-neutral-900">
-                Siparişi Düzenle
-              </h1>
-            </div>
+        {/* Toolbar (ekranda görünsün) */}
+        <div className="print:hidden  bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 mb-10">
+          <div className="container mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+            <div className="flex flex-wrap items-center justify-between gap-3 py-3 border-b border-neutral-200">
+              {/* Left: title + tiny meta like list header */}
+              <div className="min-w-0">
+                <h1 className="truncate text-base font-semibold text-neutral-900">
+                  Siparişi Düzenle
+                </h1>
+              </div>
 
-            {/* Right: actions (list page style) */}
-            <div className="flex items-center gap-2">
-              {/* Segmented-like pair (desktop) */}
-              <div className="hidden sm:flex overflow-hidden rounded-xl border border-neutral-200 bg-white p-0.5">
-                {/* A4 Yazdır */}
-                <button
-                  onClick={() => router.push(`/dashboard/orders/${orderId}/print`)}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-                  title="A4 Yazdır"
-                >
-                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                    <path fill="currentColor" d="M7 3h10v4H7z" />
-                    <path
-                      fill="currentColor"
-                      d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
-                    />
-                    <path fill="currentColor" d="M7 17h10v4H7z" />
-                  </svg>
-                  A4 Yazdır
-                </button>
+              {/* Right: actions (list page style) */}
+              <div className="flex items-center gap-2">
+                {/* Segmented-like pair (desktop) */}
+                <div className="hidden sm:flex overflow-hidden rounded-xl border border-neutral-200 bg-white p-0.5">
+                  {/* A4 Yazdır */}
+                  <button
+                    onClick={() => router.push(`/dashboard/orders/${orderId}/print`)}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                    title="A4 Yazdır"
+                  >
+                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                      <path fill="currentColor" d="M7 3h10v4H7z" />
+                      <path
+                        fill="currentColor"
+                        d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
+                      />
+                      <path fill="currentColor" d="M7 17h10v4H7z" />
+                    </svg>
+                    A4 Yazdır
+                  </button>
 
-                {/* Barkod Yazdır */}
-                <button
-                  onClick={() => router.push(`/dashboard/orders/${orderId}/label`)}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-                  title="Barkod Yazdır"
-                >
-                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                    <path
-                      fill="currentColor"
-                      d="M3 4h2v16H3zM6 4h1v16H6zM9 4h2v16H9zM12 4h1v16h-1zM15 4h2v16h-2zM19 4h1v16h-1z"
-                    />
-                  </svg>
-                  Barkod Yazdır
-                </button>
+                  {/* Barkod Yazdır */}
+                  <button
+                    onClick={() => router.push(`/dashboard/orders/${orderId}/label`)}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                    title="Barkod Yazdır"
+                  >
+                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                      <path
+                        fill="currentColor"
+                        d="M3 4h2v16H3zM6 4h1v16H6zM9 4h2v16H9zM12 4h1v16h-1zM15 4h2v16h-2zM19 4h1v16h-1z"
+                      />
+                    </svg>
+                    Barkod Yazdır
+                  </button>
 
-                {/* Değişiklikleri Kaydet */}
-                <button
-                  disabled={saving}
-                  onClick={saveOrder}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
-                  title="Değişiklikleri Kaydet"
-                >
-                  {saving ? (
-                    <>
-                      <span className="size-4 rounded-full border-2 border-neutral-300 border-t-neutral-700 animate-spin" />
-                      Kaydediliyor…
-                    </>
-                  ) : (
-                    <>
-                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                        <path
-                          fill="currentColor"
-                          d="M17 3H5a2 2 0 0 0-2 2v14h18V7l-4-4zM7 5h8v4H7V5zm13 12H4V7h2v4h10V7h.59L20 9.41V17z"
-                        />
-                      </svg>
-                      Değişiklikleri Kaydet
-                    </>
-                  )}
-                </button>
+                  {/* Değişiklikleri Kaydet */}
+                  <button
+                    disabled={saving}
+                    onClick={saveOrder}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Değişiklikleri Kaydet"
+                  >
+                    {saving ? (
+                      <>
+                        <span className="size-4 rounded-full border-2 border-neutral-300 border-t-neutral-700 animate-spin" />
+                        Kaydediliyor…
+                      </>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                          <path
+                            fill="currentColor"
+                            d="M17 3H5a2 2 0 0 0-2 2v14h18V7l-4-4zM7 5h8v4H7V5zm13 12H4V7h2v4h10V7h.59L20 9.41V17z"
+                          />
+                        </svg>
+                        Değişiklikleri Kaydet
+                      </>
+                    )}
+                  </button>
 
-                {/* Sipariş Listesi */}
-                {/* <button
+                  {/* Sipariş Listesi */}
+                  {/* <button
                   onClick={() => router.push(`/dashboard/orders`)}
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
                   title="Sipariş Listesi"
@@ -774,62 +818,62 @@ export default function EditOrderPage() {
                   </svg>
                   Sipariş Listesi
                 </button> */}
-              </div>
+                </div>
 
-              {/* Stacked pair (mobile) */}
-              <div className="grid w-full grid-cols-2 gap-2 sm:hidden">
-                <button
-                  onClick={() => window.print()}
-                  className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-                  title="A4 Yazdır"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path fill="currentColor" d="M7 3h10v4H7z" />
-                      <path
-                        fill="currentColor"
-                        d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
-                      />
-                      <path fill="currentColor" d="M7 17h10v4H7z" />
-                    </svg>
-                    A4 Yazdır
-                  </span>
-                </button>
+                {/* Stacked pair (mobile) */}
+                <div className="grid w-full grid-cols-2 gap-2 sm:hidden">
+                  <button
+                    onClick={() => window.print()}
+                    className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                    title="A4 Yazdır"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path fill="currentColor" d="M7 3h10v4H7z" />
+                        <path
+                          fill="currentColor"
+                          d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
+                        />
+                        <path fill="currentColor" d="M7 17h10v4H7z" />
+                      </svg>
+                      A4 Yazdır
+                    </span>
+                  </button>
 
-                <button
-                  onClick={() => router.push(`/dashboard/orders/${orderId}/label`)}
-                  className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-                  title="Barkod Yazdır"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path
-                        fill="currentColor"
-                        d="M3 4h2v16H3zM6 4h1v16H6zM9 4h2v16H9zM12 4h1v16h-1zM15 4h2v16h-2zM19 4h1v16h-1z"
-                      />
-                    </svg>
-                    Barkod Yazdır
-                  </span>
-                </button>
+                  <button
+                    onClick={() => router.push(`/dashboard/orders/${orderId}/label`)}
+                    className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                    title="Barkod Yazdır"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path
+                          fill="currentColor"
+                          d="M3 4h2v16H3zM6 4h1v16H6zM9 4h2v16H9zM12 4h1v16h-1zM15 4h2v16h-2zM19 4h1v16h-1z"
+                        />
+                      </svg>
+                      Barkod Yazdır
+                    </span>
+                  </button>
 
-                <button
-                  disabled={saving}
-                  onClick={saveOrder}
-                  className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
-                  title="Değişiklikleri Kaydet"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path
-                        fill="currentColor"
-                        d="M17 3H5a2 2 0 0 0-2 2v14h18V7l-4-4zM7 5h8v4H7V5zm13 12H4V7h2v4h10V7h.59L20 9.41V17z"
-                      />
-                    </svg>
-                    Kaydet
-                  </span>
-                </button>
+                  <button
+                    disabled={saving}
+                    onClick={saveOrder}
+                    className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+                    title="Değişiklikleri Kaydet"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path
+                          fill="currentColor"
+                          d="M17 3H5a2 2 0 0 0-2 2v14h18V7l-4-4zM7 5h8v4H7V5zm13 12H4V7h2v4h10V7h.59L20 9.41V17z"
+                        />
+                      </svg>
+                      Kaydet
+                    </span>
+                  </button>
 
-                {/* <button
+                  {/* <button
                   onClick={() => router.push(`/dashboard/orders`)}
                   className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
                   title="Sipariş Listesi"
@@ -844,528 +888,553 @@ export default function EditOrderPage() {
                     Liste
                   </span>
                 </button> */}
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* A4 Alanı */}
-      <div className="m-auto w-[210mm] min-h-[297mm] print:w-auto print:min-h-[auto]">
-        <Header
-          customerName={customerName}
-          customerPhone={customerPhone}
-          status={status}
-          profile={profile}
-          headerBranches={headerBranches}
-          deliveryAt={deliveryAt}
-        />
-
-        {/* Düzenlenebilir alanlar */}
-        <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
-          <div>
-            <label className="text-sm block">Durum</label>
-            <select
-              className="select mt-1 w-full"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as Status)}
-            >
-              <option value="pending">Beklemede</option>
-              <option value="processing">İşlemde</option>
-              <option value="workshop">Atölyede</option>
-              <option value="completed">Tamamlandı</option>
-              <option value="cancelled">İptal</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-sm block">Teslim Tarihi</label>
-            <input
-              type="date"
-              className="select mt-1 w-full"
-              value={deliveryAt}
-              onChange={(e) => setDeliveryAt(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-sm block">Sipariş Tipi</label>
-            <select
-              className="select mt-1 w-full"
-              value={orderType}
-              onChange={(e) => setOrderType(Number(e.target.value))}
-            >
-              <option value="0">Yeni Sipariş</option>
-              <option value="1">Sipariş Teklifi</option>
-            </select>
-          </div>
-          <div></div>
-          <div className="mt-4 text-[10px] flex gap-4 print:hidden justify-end">
-            <LegendDot c={statusDot.pending} label="Beklemede" />
-            <LegendDot c={statusDot.processing} label="İşlemde" />
-            <LegendDot c={statusDot.completed} label="Tamamlandı" />
-            <LegendDot c={statusDot.cancelled} label="İptal" />
-            <LegendDot c={statusDot.workshop} label="Atölyede" />
-          </div>
-        </div>
-
-        {/* Slotted kategoriler */}
-        {Object.keys(BOX_COUNTS).map((title) => {
-          const key = normalize(title);
-          const boxCount = BOX_COUNTS[key];
-          const slots =
-            slottedByCategoryName.get(title) || Array(boxCount).fill(undefined);
-          return (
-            <SectionEditable
-              key={title}
-              title={title}
-              slots={slots}
-              boxCount={boxCount}
-              variantById={variantById}
-              onAddAt={(idx) => openAddAt(title, idx)}
-              onRemove={(id) => removeLine(id)}
-              onEdit={(id) => {
-                const line = items.find((x) => x.id === id);
-                if (line) {
-                  setTargetSlotIndex(
-                    Number.isFinite(line.slotIndex as any)
-                      ? (line.slotIndex as number)
-                      : null
-                  );
-                  editLine(line);
-                }
-              }}
-              onSwapSlots={(from, to) => swapInCategory(title, from, to)}
-              onStatusChange={updateLineStatus}
-            />
-          );
-        })}
-
-        {/* Slotted olmayanlar */}
-        <SectionQuickPlus
-          title="STOR PERDE"
-          items={storItems}
-          variantById={variantById}
-          onAddAt={(i) => openQuickFor("STOR PERDE", i)}
-          onEdit={(id) => {
-            const line = items.find((x) => x.id === id);
-            if (line) editLine(line);
-          }}
-        />
-        <SectionQuickPlus
-          title="AKSESUAR"
-          items={aksesuarItems}
-          variantById={variantById}
-          onAddAt={(i) => openQuickFor("AKSESUAR", i)}
-          onEdit={(id) => {
-            const line = items.find((x) => x.id === id);
-            if (line) editLine(line);
-          }}
-        />
-
-        {/* Not */}
-        <div className="mt-6">
-          <label className="text-sm font-semibold text-neutral-700">
-            Sipariş Notu
-          </label>
-          <textarea
-            className="input mt-2 min-h-[120px] w-full resize-y rounded-2xl"
-            value={orderNote}
-            placeholder="Bu siparişe özel not ekleyin…"
-            onChange={(e) => setOrderNote(e.target.value)}
+        {/* A4 Alanı */}
+        <div className="m-auto w-[210mm] min-h-[297mm] print:w-auto print:min-h-[auto]">
+          <Header
+            customerName={customerName}
+            customerPhone={customerPhone}
+            status={status}
+            profile={profile}
+            headerBranches={headerBranches}
+            deliveryAt={deliveryAt}
           />
-        </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="text-sm font-semibold text-neutral-700">
-              İskonto (₺)
-            </label>
-            <div className="mt-1 flex items-center gap-2">
-              <input
-                className="input flex-1 text-right"
-                type="text"
-                inputMode="decimal"
-                value={discountInput}
-                onChange={(e) => handleDiscountChange(e.target.value)}
-                aria-label="İskonto tutarı"
-              />
-              <span className="text-sm text-neutral-500">TL</span>
-            </div>
-            <p className="mt-1 text-xs text-neutral-500">
-              Genel toplamdan düşülecek tutarı girin.
-            </p>
-          </div>
-        </div>
-
-        {/* Toplam Kartları */}
-        <section className="mt-4 rounded-3xl border border-neutral-200 bg-white/90 p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          {/* Düzenlenebilir alanlar */}
+          <div className="grid grid-cols-3 gap-3 my-4 print:hidden">
             <div>
-              <h3 className="text-base font-semibold text-neutral-900">
-                Özet
-              </h3>
-              <p className="text-xs text-neutral-500">
-                Kalemler değiştikçe rakamlar otomatik güncellenir.
+              <label className="text-sm block">Durum</label>
+              <select
+                className="select mt-1 w-full"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as Status)}
+              >
+                <option value="pending">Beklemede</option>
+                <option value="processing">İşlemde</option>
+                <option value="workshop">Atölyede</option>
+                <option value="completed">Tamamlandı</option>
+                <option value="delivered">Teslim Edildi</option>
+                <option value="cancelled">İptal</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm block">Teslim Tarihi</label>
+              <input
+                type="date"
+                className="select mt-1 w-full"
+                value={deliveryAt}
+                onChange={(e) => setDeliveryAt(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-sm block">Sipariş Tipi</label>
+              <select
+                className="select mt-1 w-full"
+                value={orderType}
+                onChange={(e) => setOrderType(Number(e.target.value))}
+              >
+                <option value="0">Yeni Sipariş</option>
+                <option value="1">Sipariş Teklifi</option>
+              </select>
+            </div>
+            <div></div>
+            <div className="mt-4 text-[10px] flex gap-4 print:hidden justify-end">
+              <LegendDot c={statusDot.pending} label="Beklemede" />
+              <LegendDot c={statusDot.processing} label="İşlemde" />
+              <LegendDot c={statusDot.workshop} label="Atölyede" />
+              <LegendDot c={statusDot.delivered} label="Teslim" />
+              <LegendDot c={statusDot.completed} label="Tamamlandı" />
+              <LegendDot c={statusDot.cancelled} label="İptal" />
+            </div>
+          </div>
+
+          {/* Slotted kategoriler */}
+          {Object.keys(BOX_COUNTS).map((title) => {
+            const key = normalize(title);
+            const boxCount = BOX_COUNTS[key];
+            const slots =
+              slottedByCategoryName.get(title) || Array(boxCount).fill(undefined);
+            return (
+              <SectionEditable
+                key={title}
+                title={title}
+                slots={slots}
+                boxCount={boxCount}
+                variantById={variantById}
+                onAddAt={(idx) => openAddAt(title, idx)}
+                onRemove={(id) => removeLine(id)}
+                onEdit={(id) => {
+                  const line = items.find((x) => x.id === id);
+                  if (line) {
+                    setTargetSlotIndex(
+                      Number.isFinite(line.slotIndex as any)
+                        ? (line.slotIndex as number)
+                        : null
+                    );
+                    editLine(line);
+                  }
+                }}
+                onSwapSlots={(from, to) => swapInCategory(title, from, to)}
+                onStatusChange={updateLineStatus}
+              />
+            );
+          })}
+
+          {/* Slotted olmayanlar */}
+          <SectionQuickPlus
+            title="STOR PERDE"
+            items={storItems}
+            variantById={variantById}
+            onAddAt={(i) => openQuickFor("STOR PERDE", i)}
+            onEdit={(id) => {
+              const line = items.find((x) => x.id === id);
+              if (line) editLine(line);
+            }}
+          />
+          <SectionQuickPlus
+            title="AKSESUAR"
+            items={aksesuarItems}
+            variantById={variantById}
+            onAddAt={(i) => openQuickFor("AKSESUAR", i)}
+            onEdit={(id) => {
+              const line = items.find((x) => x.id === id);
+              if (line) editLine(line);
+            }}
+          />
+
+          {/* Not */}
+          <div className="mt-6">
+            <label className="text-sm font-semibold text-neutral-700">
+              Sipariş Notu
+            </label>
+            <textarea
+              className="input mt-2 min-h-[120px] w-full resize-y rounded-2xl"
+              value={orderNote}
+              placeholder="Bu siparişe özel not ekleyin…"
+              onChange={(e) => setOrderNote(e.target.value)}
+            />
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="text-sm font-semibold text-neutral-700">
+                İskonto (₺)
+              </label>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  className="input flex-1 text-right"
+                  type="text"
+                  inputMode="decimal"
+                  value={discountInput}
+                  onChange={(e) => handleDiscountChange(e.target.value)}
+                  aria-label="İskonto tutarı"
+                />
+                <span className="text-sm text-neutral-500">TL</span>
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                Genel toplamdan düşülecek tutarı girin. <b className="text-red-600">Bu alan ödeme girmek için değildir.</b>
               </p>
             </div>
+            <div>
+              <label className="text-sm font-semibold text-neutral-700">
+                Ödeme
+              </label>
+              <div className="mt-1">
+                <button
+                  className="inline-flex h-[38px] w-full items-center justify-center gap-2 rounded-xl border border-neutral-300 bg-white text-sm font-semibold text-neutral-700 hover:bg-neutral-50"
+                  onClick={() => {
+                    setPayAmount("");
+                    setPayNote("");
+                    setShowPayModal(true);
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                    <path fill="currentColor" d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z" />
+                  </svg>
+                  Ödeme Ekle
+                </button>
+                <p className="mt-1 text-xs text-neutral-500">
+                  Nakit, Havale veya Kart ile alınan ödemeleri buradan ekleyin.
+                </p>
+              </div>
+            </div>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-4">
-            <StatRow label="Toplam" value={`${fmt(totalPrice)} ₺`} />
-            <StatRow label="İskonto" value={`${fmt(clampedDiscount)} ₺`} />
-            <StatRow label="Ödenen" value={`${fmt(paidAmount)} ₺`} />
-            <StatRow label="Kalan" value={`${fmt(remainingAmount)} ₺`} />
-          </div>
+
+          {/* Toplam Kartları */}
+          <section className="mt-4 rounded-3xl border border-neutral-200 bg-white/90 p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">
+                  Özet
+                </h3>
+                <p className="text-xs text-neutral-500">
+                  Kalemler değiştikçe rakamlar otomatik güncellenir.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-4">
+              <StatRow label="Toplam" value={`${fmt(totalPrice)} ₺`} />
+              <StatRow label="İskonto" value={`${fmt(clampedDiscount)} ₺`} />
+              <StatRow label="Ödenen" value={`${fmt(paidAmount)} ₺`} />
+              <StatRow label="Kalan" value={`${fmt(remainingAmount)} ₺`} />
+            </div>
             <div className="sm:col-span-2 rounded-2xl bg-indigo-500 px-4 py-3 text-white shadow-inner mt-3">
               <div className="text-xs font-medium uppercase tracking-wide text-white/80">
                 Genel Toplam
               </div>
               <div className="mt-1 text-2xl font-semibold">{fmt(netTotal)} ₺</div>
             </div>
-        </section>
+          </section>
 
-        <div className="mt-4 text-[10px] tracking-wide">
-          ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>.
-          MÜŞTERİDEN KAYNAKLI HATALI ÖLÇÜLERDE <b>TERZİ ÜCRETİ ALINMAKTADIR</b>.
+          <div className="mt-4 text-[10px] tracking-wide">
+            ÖZEL SİPARİŞLE YAPILAN TÜLLERDE <b>DEĞİŞİM YAPILMAMAKTADIR</b>.
+            MÜŞTERİDEN KAYNAKLI HATALI ÖLÇÜLERDE <b>TERZİ ÜCRETİ ALINMAKTADIR</b>.
+          </div>
         </div>
-      </div>
 
-      {/* Drawer */}
-      {slot && (
-        <div
-          className="fixed inset-0 bg-black/40 z-50 print:hidden"
-          onClick={closeDrawer}
-        >
+        {/* Drawer */}
+        {slot && (
           <div
-            className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-black/40 z-50 print:hidden"
+            onClick={closeDrawer}
           >
-            <div className="flex items-center justify-between mb-3">
-              <div className="text-lg font-semibold">
-                {editingLineId
-                  ? "Satırı Düzenle"
-                  : `${slot.title} - Kutucuk #${slot.index + 1}`}
+            <div
+              className="absolute right-0 top-0 h-full w-full max-w-[520px] bg-white shadow-xl p-4 overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-lg font-semibold">
+                  {editingLineId
+                    ? "Satırı Düzenle"
+                    : `${slot.title} - Kutucuk #${slot.index + 1}`}
+                </div>
+                <button className="btn-secondary" onClick={closeDrawer}>
+                  Kapat
+                </button>
               </div>
-              <button className="btn-secondary" onClick={closeDrawer}>
-                Kapat
-              </button>
-            </div>
 
-            {/* Kategori & Varyant (+Yeni) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="text-sm">Kategori</label>
-                <select
-                  className="select mt-1"
-                  value={catId}
-                  onChange={(e) => setCatId(e.target.value)}
-                >
-                  <option value="">Seçin</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm">Ürün</label>
-                <div className="mt-1 flex items-center gap-2">
+              {/* Kategori & Varyant (+Yeni) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-sm">Kategori</label>
                   <select
-                    className="select flex-1"
-                    value={varId}
-                    onChange={(e) => setVarId(e.target.value)}
-                    disabled={!selectedCategory}
+                    className="select mt-1"
+                    value={catId}
+                    onChange={(e) => setCatId(e.target.value)}
                   >
-                    {!selectedCategory && <option>Önce kategori seçin</option>}
-                    {selectedCategory &&
-                      selectedCategory.variants.length === 0 && (
-                        <option>Ürün yok</option>
-                      )}
-                    {selectedCategory?.variants.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
+                    <option value="">Seçin</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
                       </option>
                     ))}
                   </select>
-                  <button
-                    type="button"
-                    className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
-                    disabled={!selectedCategory}
-                    onClick={() => {
-                      setNewVarName("");
-                      setNewVarPrice("");
-                      setShowVarModal(true);
-                    }}
-                    title="Yeni ürün ekle"
-                  >
-                    + Yeni
-                  </button>
+                </div>
+                <div>
+                  <label className="text-sm">Ürün</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <select
+                      className="select flex-1"
+                      value={varId}
+                      onChange={(e) => setVarId(e.target.value)}
+                      disabled={!selectedCategory}
+                    >
+                      {!selectedCategory && <option>Önce kategori seçin</option>}
+                      {selectedCategory &&
+                        selectedCategory.variants.length === 0 && (
+                          <option>Ürün yok</option>
+                        )}
+                      {selectedCategory?.variants.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
+                      disabled={!selectedCategory}
+                      onClick={() => {
+                        setNewVarName("");
+                        setNewVarPrice("");
+                        setShowVarModal(true);
+                      }}
+                      title="Yeni ürün ekle"
+                    >
+                      + Yeni
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Ölçüler */}
-            <div className="grid grid-cols-3 gap-3 mb-3">
-              <div>
-                <label className="text-sm">Adet</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={qty}
-                  onChange={(e) => setQty(parseInt(e.target.value || "1"))}
-                />
-              </div>
-              <div>
-                <label className="text-sm">En (cm)</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={width}
-                  onChange={(e) => setWidth(parseInt(e.target.value || "0"))}
-                />
-              </div>
-              <div>
-                <label className="text-sm">Boy (cm)</label>
-                <input
-                  className="input mt-1 text-right"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={height}
-                  onChange={(e) => setHeight(parseInt(e.target.value || "0"))}
-                />
-              </div>
-            </div>
-
-            {/* Pile Sıklığı + Birim Fiyat */}
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="text-sm">Pile Sıklığı</label>
-                <select
-                  className="select mt-1"
-                  value={String(fileDensity)}
-                  onChange={(e) => setFileDensity(parseFloat(e.target.value))}
-                >
-                  <option value="1">1.0x</option>
-                  <option value="1.5">1.5x</option>
-                  <option value="2">2.0x</option>
-                  <option value="2.5">2.5x</option>
-                  <option value="3">3.0x</option>
-                  <option value="3.5">3.5x</option>
-                  <option value="4">4.0x</option>
-                  <option value="4.5">4.5x</option>
-                  <option value="5">5.0x</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-sm">Birim Fiyat</label>
-                <div className="mt-1 flex items-center gap-2">
+              {/* Ölçüler */}
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                  <label className="text-sm">Adet</label>
                   <input
-                    className="input flex-1 text-right disabled:bg-neutral-100"
+                    className="input mt-1 text-right"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={qty}
+                    onChange={(e) => setQty(parseInt(e.target.value || "1"))}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm">En (cm)</label>
+                  <input
+                    className="input mt-1 text-right"
                     type="number"
                     min={0}
-                    step="0.01"
-                    value={
-                      Number.isFinite(unitPriceInput) ? unitPriceInput : 0
-                    }
-                    onChange={(e) =>
-                      setUnitPriceInput(parseFloat(e.target.value || "0"))
-                    }
-                    disabled={!useCustomPrice || !selectedVariant}
-                    placeholder={
-                      selectedVariant
-                        ? fmt(Number(selectedVariant.unitPrice))
-                        : "—"
-                    }
+                    step={1}
+                    value={width}
+                    onChange={(e) => setWidth(parseInt(e.target.value || "0"))}
                   />
-                  <label className="flex items-center gap-1 text-xs whitespace-nowrap">
-                    <input
-                      type="checkbox"
-                      className="size-4"
-                      disabled={!selectedVariant}
-                      checked={useCustomPrice}
-                      onChange={(e) => setUseCustomPrice(e.target.checked)}
-                    />
-                    Elle
-                  </label>
+                </div>
+                <div>
+                  <label className="text-sm">Boy (cm)</label>
+                  <input
+                    className="input mt-1 text-right"
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={height}
+                    onChange={(e) => setHeight(parseInt(e.target.value || "0"))}
+                  />
                 </div>
               </div>
-            </div>
 
-            {/* Satır Durumu */}
-            <div className="mb-4">
-              <label className="text-sm">Satır Durumu</label>
-              <select
-                className="select mt-1 w-full"
-                value={lineStatus}
-                onChange={(e) => setLineStatus(e.target.value as Status)}
-              >
-                <option value="pending">Beklemede</option>
-                <option value="processing">İşlemde</option>
-                <option value="completed">Tamamlandı</option>
-                <option value="cancelled">İptal</option>
-              </select>
-            </div>
-
-            {/* Ara Toplam + Not */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className="text-sm">Ara Toplam</label>
-                <input
-                  className="input mt-1 text-right"
-                  value={selectedVariant ? fmt(previewSubtotal) : ""}
-                  readOnly
-                  placeholder="—"
-                />
+              {/* Pile Sıklığı + Birim Fiyat */}
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-sm">Pile Sıklığı</label>
+                  <select
+                    className="select mt-1"
+                    value={String(fileDensity)}
+                    onChange={(e) => setFileDensity(parseFloat(e.target.value))}
+                  >
+                    <option value="1">1.0x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="2">2.0x</option>
+                    <option value="2.5">2.5x</option>
+                    <option value="3">3.0x</option>
+                    <option value="3.5">3.5x</option>
+                    <option value="4">4.0x</option>
+                    <option value="4.5">4.5x</option>
+                    <option value="5">5.0x</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm">Birim Fiyat</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      className="input flex-1 text-right disabled:bg-neutral-100"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={
+                        Number.isFinite(unitPriceInput) ? unitPriceInput : 0
+                      }
+                      onChange={(e) =>
+                        setUnitPriceInput(parseFloat(e.target.value || "0"))
+                      }
+                      disabled={!useCustomPrice || !selectedVariant}
+                      placeholder={
+                        selectedVariant
+                          ? fmt(Number(selectedVariant.unitPrice))
+                          : "—"
+                      }
+                    />
+                    <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        disabled={!selectedVariant}
+                        checked={useCustomPrice}
+                        onChange={(e) => setUseCustomPrice(e.target.checked)}
+                      />
+                      Elle
+                    </label>
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="text-sm">Satır Notu</label>
-                <input
-                  className="input mt-1"
-                  value={lineNote}
-                  onChange={(e) => setLineNote(e.target.value)}
-                  placeholder="Bu satıra özel not…"
-                />
+
+              {/* Satır Durumu */}
+              <div className="mb-4">
+                <label className="text-sm">Satır Durumu</label>
+                <select
+                  className="select mt-1 w-full"
+                  value={lineStatus}
+                  onChange={(e) => setLineStatus(e.target.value as Status)}
+                >
+                  <option value="pending">Beklemede</option>
+                  <option value="processing">İşlemde</option>
+                  <option value="completed">Tamamlandı</option>
+                  <option value="cancelled">İptal</option>
+                </select>
+              </div>
+
+              {/* Ara Toplam + Not */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="text-sm">Ara Toplam</label>
+                  <input
+                    className="input mt-1 text-right"
+                    value={selectedVariant ? fmt(previewSubtotal) : ""}
+                    readOnly
+                    placeholder="—"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm">Satır Notu</label>
+                  <input
+                    className="input mt-1"
+                    value={lineNote}
+                    onChange={(e) => setLineNote(e.target.value)}
+                    placeholder="Bu satıra özel not…"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button className="btn" onClick={addOrUpdateLine}>
+                  {editingLineId ? "Kaydet" : "Kutucuğa Ekle"}
+                </button>
+                {editingLineId && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      if (editingLineId) removeLine(editingLineId);
+                      closeDrawer();
+                    }}
+                  >
+                    Satırı Sil
+                  </button>
+                )}
               </div>
             </div>
+          </div>
+        )}
 
-            <div className="flex gap-2">
-              <button className="btn" onClick={addOrUpdateLine}>
-                {editingLineId ? "Kaydet" : "Kutucuğa Ekle"}
-              </button>
-              {editingLineId && (
+        {/* Yeni Varyant Modal */}
+        {showVarModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setShowVarModal(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <div className="text-base font-semibold">Yeni Ürün</div>
                 <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    if (editingLineId) removeLine(editingLineId);
-                    closeDrawer();
+                  className="inline-flex size-8 items-center justify-center rounded-xl border border-neutral-200 hover:bg-neutral-50"
+                  onClick={() => setShowVarModal(false)}
+                  aria-label="Kapat"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm">Kategori</label>
+                  <input
+                    className="input mt-1 w-full"
+                    value={selectedCategory?.name || "—"}
+                    readOnly
+                  />
+                </div>
+                <div>
+                  <label className="text-sm">Ürün Adı *</label>
+                  <input
+                    className="input mt-1 w-full"
+                    value={newVarName}
+                    onChange={(e) => setNewVarName(e.target.value)}
+                    placeholder="Örn: Deluxe 280 cm"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm">Birim Fiyat (₺) *</label>
+                  <input
+                    className="input mt-1 w-full text-right"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={newVarPrice}
+                    onChange={(e) => setNewVarPrice(e.target.value)}
+                  />
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    Ondalık için virgül veya nokta kullanabilirsiniz.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50"
+                  onClick={() => setShowVarModal(false)}
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  className="h-9 rounded-xl bg-neutral-900 px-3 text-sm font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
+                  disabled={
+                    !selectedCategory ||
+                    !newVarName.trim() ||
+                    !newVarPrice.trim() ||
+                    savingVariant
+                  }
+                  onClick={async () => {
+                    if (!selectedCategory) return;
+                    const price = parseFloat(newVarPrice.replace(",", "."));
+                    if (!Number.isFinite(price) || price < 0) {
+                      toast.error("Geçerli bir fiyat girin.");
+                      return;
+                    }
+                    try {
+                      setSavingVariant(true);
+                      const created = await createVariant(selectedCategory.id, {
+                        name: newVarName.trim(),
+                        unitPrice: price,
+                      });
+                      setCategories((prev) =>
+                        prev.map((c) =>
+                          c.id !== selectedCategory.id
+                            ? c
+                            : { ...c, variants: [...c.variants, created] }
+                        )
+                      );
+                      setVarId(created.id);
+                      setUseCustomPrice(false);
+                      setUnitPriceInput(Number(created.unitPrice ?? 0));
+                      toast.success("Ürün eklendi");
+                      setShowVarModal(false);
+                    } catch (err: any) {
+                      toast.error(err?.message || "Ürün eklenemedi");
+                    } finally {
+                      setSavingVariant(false);
+                    }
                   }}
                 >
-                  Satırı Sil
+                  {savingVariant ? "Kaydediliyor…" : "Ekle"}
                 </button>
-              )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Yeni Varyant Modal */}
-      {showVarModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => setShowVarModal(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-base font-semibold">Yeni Ürün</div>
-              <button
-                className="inline-flex size-8 items-center justify-center rounded-xl border border-neutral-200 hover:bg-neutral-50"
-                onClick={() => setShowVarModal(false)}
-                aria-label="Kapat"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm">Kategori</label>
-                <input
-                  className="input mt-1 w-full"
-                  value={selectedCategory?.name || "—"}
-                  readOnly
-                />
-              </div>
-              <div>
-                <label className="text-sm">Ürün Adı *</label>
-                <input
-                  className="input mt-1 w-full"
-                  value={newVarName}
-                  onChange={(e) => setNewVarName(e.target.value)}
-                  placeholder="Örn: Deluxe 280 cm"
-                />
-              </div>
-              <div>
-                <label className="text-sm">Birim Fiyat (₺) *</label>
-                <input
-                  className="input mt-1 w-full text-right"
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  value={newVarPrice}
-                  onChange={(e) => setNewVarPrice(e.target.value)}
-                />
-                <p className="mt-1 text-[11px] text-neutral-500">
-                  Ondalık için virgül veya nokta kullanabilirsiniz.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50"
-                onClick={() => setShowVarModal(false)}
-              >
-                Vazgeç
-              </button>
-              <button
-                type="button"
-                className="h-9 rounded-xl bg-neutral-900 px-3 text-sm font-semibold text-white hover:bg-neutral-800 disabled:opacity-50"
-                disabled={
-                  !selectedCategory ||
-                  !newVarName.trim() ||
-                  !newVarPrice.trim() ||
-                  savingVariant
-                }
-                onClick={async () => {
-                  if (!selectedCategory) return;
-                  const price = parseFloat(newVarPrice.replace(",", "."));
-                  if (!Number.isFinite(price) || price < 0) {
-                    toast.error("Geçerli bir fiyat girin.");
-                    return;
-                  }
-                  try {
-                    setSavingVariant(true);
-                    const created = await createVariant(selectedCategory.id, {
-                      name: newVarName.trim(),
-                      unitPrice: price,
-                    });
-                    setCategories((prev) =>
-                      prev.map((c) =>
-                        c.id !== selectedCategory.id
-                          ? c
-                          : { ...c, variants: [...c.variants, created] }
-                      )
-                    );
-                    setVarId(created.id);
-                    setUseCustomPrice(false);
-                    setUnitPriceInput(Number(created.unitPrice ?? 0));
-                    toast.success("Ürün eklendi");
-                    setShowVarModal(false);
-                  } catch (err: any) {
-                    toast.error(err?.message || "Ürün eklenemedi");
-                  } finally {
-                    setSavingVariant(false);
-                  }
-                }}
-              >
-                {savingVariant ? "Kaydediliyor…" : "Ekle"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Print styles */}
-      <style jsx global>{`
+        {/* Print styles */}
+        <style jsx global>{`
         @media print {
           @page {
             size: A4 portrait;
@@ -1400,8 +1469,145 @@ export default function EditOrderPage() {
           box-shadow: none !important;
         }
       `}</style>
+        <PayModal
+          open={showPayModal}
+          onClose={() => setShowPayModal(false)}
+          amount={payAmount}
+          setAmount={setPayAmount}
+          method={payMethod}
+          setMethod={setPayMethod}
+          note={payNote}
+          setNote={setPayNote}
+          saving={paySaving}
+          onSave={async () => {
+            const val = parseFloat(payAmount.replace(",", "."));
+            if (!Number.isFinite(val) || val <= 0) {
+              toast.error("Geçerli bir tutar girin.");
+              return;
+            }
+            try {
+              setPaySaving(true);
+              const res = await fetch(`/api/orders/${orderId}/payments`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  amount: val,
+                  method: payMethod,
+                  note: payNote,
+                }),
+              });
+              if (!res.ok) throw new Error("Ödeme eklenemedi");
+              toast.success("Ödeme eklendi!");
+              setPaidAmount((prev) => prev + val);
+              setShowPayModal(false);
+              // Refresh order logic if needed, but derived state updates automatically via useEffect if we refetch.
+              // But here we just updated local state `paidAmount`.
+            } catch (e) {
+              toast.error("Hata oluştu.");
+            } finally {
+              setPaySaving(false);
+            }
+          }}
+        />
       </div>
     </>
+  );
+}
+
+function PayModal({
+  open,
+  onClose,
+  amount,
+  setAmount,
+  method,
+  setMethod,
+  note,
+  setNote,
+  onSave,
+  saving,
+}: {
+  open: boolean;
+  onClose: () => void;
+  amount: string;
+  setAmount: (v: string) => void;
+  method: "CASH" | "TRANSFER" | "CARD";
+  setMethod: (v: "CASH" | "TRANSFER" | "CARD") => void;
+  note: string;
+  setNote: (v: string) => void;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 print:hidden"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Ödeme Ekle</h3>
+          <button
+            onClick={onClose}
+            className="flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm font-medium">Tutar (₺)</label>
+            <input
+              className="input mt-1 w-full text-lg font-bold"
+              placeholder="0,00"
+              autoFocus
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Yöntem</label>
+            <div className="mt-1 flex gap-2">
+              {(["CASH", "TRANSFER", "CARD"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMethod(m)}
+                  className={`flex-1 rounded-lg border py-2 text-xs font-semibold ${method === m
+                    ? "border-emerald-600 bg-emerald-50 text-emerald-700"
+                    : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50"
+                    }`}
+                >
+                  {m === "CASH"
+                    ? "Nakit"
+                    : m === "TRANSFER"
+                      ? "Havale/EFT"
+                      : "Kredi Kartı"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium">Not</label>
+            <input
+              className="input mt-1 w-full"
+              placeholder="Opsiyonel açıklama..."
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+          <button
+            onClick={onSave}
+            disabled={saving || !amount}
+            className="btn mt-2 w-full justify-center bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            {saving ? "Kaydediliyor..." : "Ödemeyi Kaydet"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1454,12 +1660,14 @@ function Header({
 
       <div className="w-[300px] text-left">
         <div className="mb-3">
-          <img
-            src={profile?.logoUrl || ""}
-            alt=""
-            height={60}
-            style={{ width: "100%", height: "150px" }}
-          />
+          {profile?.logoUrl ? (
+            <img
+              src={profile.logoUrl}
+              alt=""
+              height={60}
+              style={{ width: "100%", height: "150px" }}
+            />
+          ) : null}
         </div>
         <div className="text-xs flex justify-between">
           <b>Müşteri Adı:</b>
@@ -1546,9 +1754,8 @@ function SectionEditable({
           return (
             <div
               key={i}
-              className={`min-h-[60px] border border-black/70 p-2 border-l-0 border-b-0 relative group ${statusColor} ${
-                dragIdx === i ? "bg-black/5" : ""
-              }`}
+              className={`min-h-[60px] border border-black/70 p-2 border-l-0 border-b-0 relative group ${statusColor} ${dragIdx === i ? "bg-black/5" : ""
+                }`}
               onDragOver={handleDragOver}
               onDrop={handleDrop(i)}
             >
@@ -1568,9 +1775,8 @@ function SectionEditable({
                 >
                   <div className="absolute right-1 top-1 flex items-center gap-1 print:hidden opacity-0 group-hover:opacity-100 transition">
                     <span
-                      className={`inline-block h-2.5 w-2.5 rounded-full ${
-                        statusDot[it.lineStatus]
-                      }`}
+                      className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot[it.lineStatus]
+                        }`}
                     />
                     <select
                       className="border text-[10px] rounded px-1 py-0.5 bg-white"
@@ -1657,8 +1863,7 @@ function SectionQuickPlus({
                 title={it ? "Düzenle" : "Ekle"}
               >
                 {it ? (
-                  `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${
-                    it.height
+                  `${variant?.name ?? "—"} • ${it.qty} adet • ${it.width}×${it.height
                   } cm • ${fmt(it.subtotal)}`
                 ) : (
                   <span className="print:hidden">+ Ekle</span>
