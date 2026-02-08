@@ -203,23 +203,20 @@ export default function ReportsPage() {
     setError(null);
     try {
       const statusQs = `status=${encodeURIComponent(STATUS_PRESETS[filter])}`;
-      const [r1, r2, r3, r4, r6, r7, r8] = await Promise.all([
-        fetch(`/api/reports?section=overview&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=payments&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=categories&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=variants&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=daily&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=branches&${statusQs}`, { cache: "no-store" }),
-        fetch(`/api/reports?section=items_agg&${statusQs}`, { cache: "no-store" }),
-      ]);
+      const r = await fetch(`/api/reports?section=dashboard&${statusQs}`, { cache: "no-store" });
 
-      setOver(r1.ok ? ((await r1.json()) as OverviewResp) : null);
-      setPay(r2.ok ? ((await r2.json()) as PaymentsResp) : null);
-      setCats(r3.ok ? ((await r3.json()) as CategoriesResp) : null);
-      setVars(r4.ok ? ((await r4.json()) as VariantsResp) : null);
-      setDaily(r6.ok ? ((await r6.json()) as DailyResp) : null);
-      setBranches(r7.ok ? ((await r7.json()) as BranchesResp) : null);
-      setItemsAgg(r8.ok ? ((await r8.json()) as ItemsAggResp) : null);
+      if (r.ok) {
+        const data = await r.json();
+        setOver(data.overview || null);
+        setPay(data.payments || null);
+        setCats(data.categories || null);
+        setVars(data.variants || null);
+        setDaily(data.daily || null);
+        setBranches(data.branches || null);
+        setItemsAgg(data.itemsAgg || null);
+      } else {
+        throw new Error('Raporlar yüklenemedi');
+      }
     } catch (e: any) {
       setError(e?.message || "Bilinmeyen hata");
     } finally {

@@ -496,7 +496,7 @@ export default function OrdersPage() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<10 | 20 | 50>(50);
+  const [pageSize, setPageSize] = useState<10 | 20 | 50>(10); // İlk yüklemede 10 kayıt
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 

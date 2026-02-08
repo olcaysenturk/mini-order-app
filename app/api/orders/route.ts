@@ -132,8 +132,8 @@ export async function GET(req: NextRequest) {
       sp.get('includeDeleted')?.toLowerCase() === 'true'
     const onlyDeleted = sp.get('only') === 'deleted'
 
-    const takeRaw = Number(sp.get('take') || '50')
-    const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 50
+    const takeRaw = Number(sp.get('take') || '20')
+    const take = Number.isFinite(takeRaw) ? Math.min(Math.max(takeRaw, 1), 200) : 20
 
     const pageRaw = Number(sp.get('page') || '1')
     const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1
@@ -198,75 +198,64 @@ export async function GET(req: NextRequest) {
       orderByArg = { createdAt: orderDirParam }
     }
 
-    // 1) Toplam sayıyı çek (Pagination meta için)
-    const totalCount = await prisma.order.count({ where })
-
-    // 2) Siparişleri çek
-    const orders = await prisma.order.findMany({
-      where,
-      orderBy: orderByArg,
-      take,
-      skip,
-      include: {
-        items: {
-          include: {
-            category: { select: { name: true } },
-            variant: { select: { name: true } },
-          },
-          orderBy: [{ categoryId: 'asc' }, { slotIndex: 'asc' as const }, { id: 'asc' }],
+    // 1-2) Paralel olarak count ve orders'ı çek (items olmadan - lazy load)
+    const [totalCount, orders] = await Promise.all([
+      prisma.order.count({ where }),
+      prisma.order.findMany({
+        where,
+        orderBy: orderByArg,
+        take,
+        skip,
+        select: {
+          id: true,
+          createdAt: true,
+          deliveryAt: true,
+          note: true,
+          status: true,
+          customerName: true,
+          customerPhone: true,
+          total: true,
+          discount: true,
+          netTotal: true,
+          orderType: true,
+          customerId: true,
+          branchId: true,
+          // items: REMOVED - will be loaded on demand via /api/orders/[id]
+          customer: { select: { id: true, name: true, phone: true } },
+          branch: { select: { id: true, name: true } },
         },
-        customer: { select: { id: true, name: true, phone: true } },
-        branch: { select: { id: true, name: true } },
-      },
-    })
+      })
+    ])
 
     // if (orders.length === 0) return NextResponse.json([]) // Return empty wrapper instead
 
-    // 3) Ödemeleri grupla
+    // 3-4) Paralel olarak payments ve extras'ı çek
     const orderIds = orders.map((o) => o.id)
-    const paymentSums = await prisma.orderPayment.groupBy({
-      by: ['orderId'],
-      where: { tenantId, orderId: { in: orderIds } },
-      _sum: { amount: true },
-    })
+    const [paymentSums, extraSums] = await Promise.all([
+      prisma.orderPayment.groupBy({
+        by: ['orderId'],
+        where: { tenantId, orderId: { in: orderIds } },
+        _sum: { amount: true },
+      }),
+      prisma.orderExtra.groupBy({
+        by: ['orderId'],
+        where: { orderId: { in: orderIds } },
+        _sum: { subtotal: true },
+      })
+    ])
+    
     const paidMap = new Map<string, number>(
       paymentSums.map((r) => [r.orderId, Number(r._sum.amount ?? 0)])
     )
-
-    // 4) Ek gider (OrderExtra) toplamlarını çek
-    const extraSums = await prisma.orderExtra.groupBy({
-      by: ['orderId'],
-      where: { orderId: { in: orderIds } },
-      _sum: { subtotal: true },
-    })
     const extraMap = new Map<string, number>(
       extraSums.map((r) => [r.orderId, Number(r._sum.subtotal ?? 0)])
     )
 
-    // 5) Payload
+    // 5) Payload (items olmadan - daha hızlı)
     const data = orders.map((o) => {
-      // const itemsSubTotal = o.items.reduce((sum, it) => sum + Number(it.subtotal ?? 0), 0)
-      // const extrasSubTotal = Number(extraMap.get(o.id) ?? 0)
-      // const subTotal = itemsSubTotal + extrasSubTotal
-
-      const subTotal = o.items.reduce((acc, item) => {
-        const existing = Number(item.subtotal ?? 0);
-        if (Number.isFinite(existing) && existing > 0) {
-          return acc + existing;
-        }
-        const qtySafe = Math.max(1, Number(item.qty ?? 1));
-        const widthSafe = Math.max(0, Number(item.width ?? 0));
-        const densitySafe = Number(item.fileDensity ?? 1) || 1;
-        const unitSafe = Number(item.unitPrice ?? 0);
-        const fallback = unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
-        return acc + fallback;
-      }, 0);
-
-
-      const discount = Math.max(0, Number((o as any).discount ?? 0))
-      const grandTotal = Math.max(0, subTotal - discount)
-      const total = Number(o.total ?? subTotal)
-      const netTotal = Number((o as any).netTotal ?? grandTotal)
+      const discount = Math.max(0, Number(o.discount ?? 0))
+      const total = Number(o.total ?? 0)
+      const netTotal = Number(o.netTotal ?? 0)
       const paidTotal = Number(paidMap.get(o.id) ?? 0)
       const balance = Math.max(0, netTotal - paidTotal)
 
@@ -285,26 +274,13 @@ export async function GET(req: NextRequest) {
         total,
         discount,
         netTotal,
-        subTotal,
-        grandTotal,
+        subTotal: total, // Use total as subTotal since we don't have items
+        grandTotal: netTotal,
         paidTotal,
         totalPaid: paidTotal, // legacy
         balance,
         orderType: o.orderType,
-        items: o.items.map((it) => ({
-          id: it.id,
-          qty: it.qty,
-          width: it.width,
-          height: it.height,
-          unitPrice: Number(it.unitPrice),
-          fileDensity: Number(it.fileDensity),
-          subtotal: Number(it.subtotal),
-          note: it.note,
-          slotIndex: it.slotIndex ?? null,
-          lineStatus: (it as any).lineStatus ?? 'processing',
-          category: { name: it.category.name },
-          variant: { name: it.variant.name },
-        })),
+        // items: REMOVED - fetch via /api/orders/[id] when needed
       }
     })
 
@@ -315,6 +291,10 @@ export async function GET(req: NextRequest) {
         page,
         limit: take,
         totalPages: Math.ceil(totalCount / take),
+      },
+    }, {
+      headers: {
+        'Cache-Control': 'private, max-age=30, stale-while-revalidate=60',
       },
     })
   } catch (e) {

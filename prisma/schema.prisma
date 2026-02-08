@@ -371,6 +371,7 @@ model Order {
 
   @@index([tenantId, branchId, createdAt])
   @@index([tenantId, status, createdAt])
+  @@index([tenantId, orderType, createdAt])
   @@index([tenantId, customerId])
   @@index([tenantId, customerName])
   @@index([tenantId, customerPhone])
@@ -446,6 +447,7 @@ model OrderPayment {
   order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([orderId])
   @@index([tenantId, orderId, paidAt])
   @@index([tenantId, paidAt])
 }

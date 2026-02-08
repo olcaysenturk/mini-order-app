@@ -135,7 +135,7 @@ export async function GET(req: NextRequest) {
           year: Number(totals.year ?? 0),
         },
         series30d: series,
-      }, { headers: { 'Cache-Control': 'private, max-age=60' } })
+      }, { headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=600' } })
     }
 
     /* ======= SECTION: PAYMENTS ======= */
@@ -249,7 +249,7 @@ export async function GET(req: NextRequest) {
         unpaid: { amount: Number(s.unpaid_amount ?? 0), count: Number(s.unpaid_count ?? 0) },
         methods,
         last30dCumulative: cumulative,
-      }, { headers: { 'Cache-Control': 'private, max-age=60' } })
+      }, { headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=600' } })
     }
 
     /* ======= SECTION: ITEMS_AGG ======= */
@@ -334,7 +334,7 @@ export async function GET(req: NextRequest) {
           return { date: key, revenue: mRev.get(key) ?? 0, paid: mPaid.get(key) ?? 0 }
         })
 
-      return NextResponse.json({ last30d }, { headers: { 'Cache-Control': 'private, max-age=60' } })
+      return NextResponse.json({ last30d }, { headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=600' } })
     }
 
     /* ======= SECTION: CATEGORIES ======= */
@@ -668,6 +668,314 @@ export async function GET(req: NextRequest) {
       `)
 
       return NextResponse.json({ rows }, { headers: { 'Cache-Control': 'private, max-age=10' } })
+    }
+
+    /* ======= SECTION: DASHBOARD (Combined) ======= */
+    if (section === 'dashboard') {
+      // Paralel olarak tüm sorguları çalıştır
+      const [
+        totalsRow,
+        series30dRows,
+        paymentSummary,
+        paymentMethods,
+        categoriesRows,
+        variantsRows,
+        dailyRevRows,
+        dailyPaidRows,
+        branchesRows,
+        itemsAggRows
+      ] = await Promise.all([
+        // Overview totals
+        prisma.$queryRaw<{ day: number | null; week: number | null; month: number | null; year: number | null }[]>(Prisma.sql`
+          WITH now_ist AS (
+            SELECT (NOW() AT TIME ZONE ${IST_TZ}) AS ts
+          ),
+          bounds AS (
+            SELECT
+              (SELECT ts::date               FROM now_ist) AS today_d,
+              (SELECT date_trunc('week',  ts)::date FROM now_ist) AS sow_d,
+              (SELECT date_trunc('month', ts)::date FROM now_ist) AS som_d,
+              (SELECT date_trunc('year',  ts)::date FROM now_ist) AS soy_d
+          )
+          SELECT
+            COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date = b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS day,
+            COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date >= b.sow_d   AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date <= b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS week,
+            COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date >= b.som_d   AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date <= b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS month,
+            COALESCE(SUM(CASE WHEN (o."createdAt" AT TIME ZONE ${IST_TZ})::date >= b.soy_d   AND (o."createdAt" AT TIME ZONE ${IST_TZ})::date <= b.today_d THEN o."netTotal" ELSE 0 END), 0)::float AS year
+          FROM "Order" o, bounds b
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+        `),
+        
+        // Overview series30d
+        prisma.$queryRaw<{ d: Date; total: number | null }[]>(Prisma.sql`
+          WITH days AS (
+            SELECT generate_series(
+              (NOW() AT TIME ZONE ${IST_TZ})::date - INTERVAL '29 day',
+              (NOW() AT TIME ZONE ${IST_TZ})::date,
+              INTERVAL '1 day'
+            )::date AS d
+          ),
+          agg AS (
+            SELECT
+              (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
+              COALESCE(SUM(o."netTotal"), 0)::float AS total
+            FROM "Order" o
+            WHERE o."tenantId" = ${tenantId}
+              AND o."status" = ANY(${statusArray})
+              ${orderTypeFilter}
+              ${notDeleted('o')}
+            GROUP BY 1
+          )
+          SELECT d.d, COALESCE(a.total, 0)::float AS total
+          FROM days d
+          LEFT JOIN agg a ON a.d = d.d
+          ORDER BY d.d ASC
+        `),
+        
+        // Payment summary
+        prisma.$queryRaw<{
+          paid_amount: number | null;
+          paid_count: number | null;
+          unpaid_amount: number | null;
+          unpaid_count: number | null;
+        }[]>(Prisma.sql`
+          WITH paid AS (
+            SELECT op."orderId", SUM(op."amount")::float AS paid
+            FROM "OrderPayment" op
+            JOIN "Order" o2 ON o2."id" = op."orderId"
+                           AND o2."tenantId" = ${tenantId}
+                           AND o2."status" = ANY(${statusArray})
+                           AND COALESCE(o2."orderType",0) <> 1
+                           ${notDeleted('o2')}
+            WHERE op."tenantId" = ${tenantId}
+            GROUP BY op."orderId"
+          )
+          SELECT
+            COALESCE(SUM(LEAST(o."netTotal", COALESCE(p.paid, 0))), 0)::float      AS paid_amount,
+            COUNT(*) FILTER (WHERE COALESCE(p.paid,0) >= o."netTotal")::int        AS paid_count,
+            COALESCE(SUM(GREATEST(o."netTotal" - COALESCE(p.paid, 0), 0)), 0)::float AS unpaid_amount,
+            COUNT(*) FILTER (WHERE COALESCE(p.paid,0) <  o."netTotal")::int        AS unpaid_count
+          FROM "Order" o
+          LEFT JOIN paid p ON p."orderId" = o."id"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+        `),
+        
+        // Payment methods
+        prisma.$queryRaw<{ method: string; amount: number; count: number }[]>(Prisma.sql`
+          SELECT op."method"::text as method,
+                 COALESCE(SUM(op."amount"), 0)::float AS amount,
+                 COUNT(*)::int AS count
+          FROM "OrderPayment" op
+          JOIN "Order" o ON o."id" = op."orderId"
+          WHERE op."tenantId" = ${tenantId}
+            AND o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY 1
+          ORDER BY amount DESC
+        `),
+        
+        // Categories
+        prisma.$queryRaw<{ category: string; amount: number; qty: number }[]>(Prisma.sql`
+          SELECT c."name" AS category,
+                 COALESCE(SUM(oi."subtotal"), 0)::float AS amount,
+                 COALESCE(SUM(oi."qty"), 0)::int        AS qty
+          FROM "OrderItem" oi
+          JOIN "Order" o   ON o."id" = oi."orderId"
+          JOIN "Category" c ON c."id" = oi."categoryId"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY c."name"
+          ORDER BY amount DESC
+        `),
+        
+        // Variants (top 20)
+        prisma.$queryRaw<{ variant: string; category: string; amount: number; qty: number }[]>(Prisma.sql`
+          SELECT v."name" AS variant,
+                 c."name" AS category,
+                 COALESCE(SUM(oi."subtotal"), 0)::float AS amount,
+                 COALESCE(SUM(oi."qty"), 0)::int        AS qty
+          FROM "OrderItem" oi
+          JOIN "Order"  o ON o."id" = oi."orderId"
+          JOIN "Variant" v ON v."id" = oi."variantId"
+          JOIN "Category" c ON c."id" = oi."categoryId"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY v."name", c."name"
+          ORDER BY amount DESC
+          LIMIT 20
+        `),
+        
+        // Daily revenue
+        prisma.$queryRaw<{ d: Date; revenue: number | null }[]>(Prisma.sql`
+          SELECT (o."createdAt" AT TIME ZONE ${IST_TZ})::date AS d,
+                 COALESCE(SUM(o."netTotal"), 0)::float  AS revenue
+          FROM "Order" o
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY 1
+        `),
+        
+        // Daily paid
+        prisma.$queryRaw<{ d: Date; paid: number | null }[]>(Prisma.sql`
+          SELECT (op."paidAt" AT TIME ZONE ${IST_TZ})::date AS d,
+                 COALESCE(SUM(op."amount"), 0)::float  AS paid
+          FROM "OrderPayment" op
+          JOIN "Order" o ON o."id" = op."orderId"
+          WHERE op."tenantId" = ${tenantId}
+            AND o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            AND op."paidAt" IS NOT NULL
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY 1
+        `),
+        
+        // Branches
+        prisma.$queryRaw<{
+          branchId: string | null; branch: string | null; code: string | null;
+          orders: number; revenue: number; paid: number
+        }[]>(Prisma.sql`
+          WITH p AS (
+            SELECT op."orderId", SUM(op."amount")::float AS paid
+            FROM "OrderPayment" op
+            JOIN "Order" o1 ON o1."id" = op."orderId"
+                           AND o1."tenantId" = ${tenantId}
+                           AND o1."status" = ANY(${statusArray})
+                           AND COALESCE(o1."orderType",0) <> 1
+                           ${notDeleted('o1')}
+            WHERE op."tenantId" = ${tenantId}
+            GROUP BY op."orderId"
+          )
+          SELECT
+            b."id"::text AS "branchId",
+            COALESCE(b."name", 'Şube') AS branch,
+            b."code"::text AS code,
+            COUNT(*)::int                                         AS orders,
+            COALESCE(SUM(o."netTotal"), 0)::float                 AS revenue,
+            COALESCE(SUM(COALESCE(p.paid, 0)), 0)::float          AS paid
+          FROM "Order" o
+          LEFT JOIN p       ON p."orderId" = o."id"
+          LEFT JOIN "Branch" b ON b."id" = o."branchId"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY b."id", b."name", b."code"
+          ORDER BY revenue DESC
+        `),
+        
+        // Items aggregation
+        prisma.$queryRaw<{
+          group: string | null; qty: number | null; amount: number | null;
+          total_width_cm: number | null; total_height_cm: number | null
+        }[]>(Prisma.sql`
+          SELECT
+            COALESCE(c."name", 'Ürün') AS group,
+            COALESCE(SUM(oi."qty"), 0)::int AS qty,
+            COALESCE(SUM(oi."subtotal"), 0)::float AS amount,
+            COALESCE(SUM((oi."width") * (oi."qty")), 0)::float  AS total_width_cm,
+            COALESCE(SUM((oi."height") * (oi."qty")), 0)::float AS total_height_cm
+          FROM "OrderItem" oi
+          JOIN "Order" o ON o."id" = oi."orderId"
+          LEFT JOIN "Category" c ON c."id" = oi."categoryId"
+          WHERE o."tenantId" = ${tenantId}
+            AND o."status" = ANY(${statusArray})
+            ${orderTypeFilter}
+            ${notDeleted('o')}
+          GROUP BY 1
+          ORDER BY amount DESC
+        `)
+      ])
+
+      // Process results
+      const totals = totalsRow[0] ?? { day: 0, week: 0, month: 0, year: 0 }
+      const series30d = series30dRows.map(r => ({
+        date: r.d.toISOString().slice(0,10),
+        total: Number(r.total ?? 0),
+      }))
+
+      const s = paymentSummary[0] ?? { paid_amount: 0, paid_count: 0, unpaid_amount: 0, unpaid_count: 0 }
+      
+      // Daily data processing
+      const daysRows = await prisma.$queryRaw<{ d: Date }[]>(Prisma.sql`
+        SELECT generate_series(
+          (NOW() AT TIME ZONE ${IST_TZ})::date - INTERVAL '29 day',
+          (NOW() AT TIME ZONE ${IST_TZ})::date,
+          INTERVAL '1 day'
+        )::date AS d
+      `)
+      const mRev = new Map<string, number>()
+      for (const r of dailyRevRows) mRev.set(r.d.toISOString().slice(0,10), Number(r.revenue ?? 0))
+      const mPaid = new Map<string, number>()
+      for (const r of dailyPaidRows) mPaid.set(r.d.toISOString().slice(0,10), Number(r.paid ?? 0))
+      const last30d = daysRows
+        .sort((a,b) => +a.d - +b.d)
+        .map(({ d }) => {
+          const key = d.toISOString().slice(0,10)
+          return { date: key, revenue: mRev.get(key) ?? 0, paid: mPaid.get(key) ?? 0 }
+        })
+
+      return NextResponse.json({
+        overview: {
+          mode: 'from_orders_netTotal',
+          statuses,
+          currency: 'TRY',
+          totals: {
+            day: Number(totals.day ?? 0),
+            week: Number(totals.week ?? 0),
+            month: Number(totals.month ?? 0),
+            year: Number(totals.year ?? 0),
+          },
+          series30d,
+        },
+        payments: {
+          paid: { amount: Number(s.paid_amount ?? 0), count: Number(s.paid_count ?? 0) },
+          unpaid: { amount: Number(s.unpaid_amount ?? 0), count: Number(s.unpaid_count ?? 0) },
+          methods: paymentMethods,
+        },
+        categories: {
+          byCategory: categoriesRows,
+        },
+        variants: {
+          topVariants: variantsRows,
+        },
+        daily: {
+          last30d,
+        },
+        branches: {
+          byBranch: branchesRows.map(r => ({
+            branchId: r.branchId,
+            branch: r.branch ?? 'Şube',
+            code: r.code,
+            orders: Number(r.orders ?? 0),
+            revenue: Number(r.revenue ?? 0),
+            paid: Number(r.paid ?? 0),
+          })),
+        },
+        itemsAgg: {
+          byProduct: itemsAggRows.map(r => ({
+            group: r.group ?? 'Ürün',
+            qty: Number(r.qty ?? 0),
+            amount: Number(r.amount ?? 0),
+            totalWidthCm: Number(r.total_width_cm ?? 0),
+            totalHeightCm: Number(r.total_height_cm ?? 0),
+          })),
+        },
+      }, { headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=600' } })
     }
 
     return NextResponse.json({ error: 'invalid_section' }, { status: 400 })
