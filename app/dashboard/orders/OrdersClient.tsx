@@ -1533,7 +1533,7 @@ const OrderCard = React.memo(({
   onOpenPayModal: (id: string) => void;
   router: any;
 }) => {
-  const referenceItems = detail?.items && detail.items.length > 0 ? detail.items : order.items;
+  const referenceItems = detail?.items && detail.items.length > 0 ? detail.items : [];
   const detailId = `order-detail-${order.id}`;
 
   const net = Number(order.netTotal ?? order.total ?? 0);
@@ -1712,7 +1712,7 @@ const OrderCard = React.memo(({
 
           {/* Kalemler */}
           <div className="rounded-2xl border border-neutral-200">
-            <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">Kalemler ({order.items.length})</div>
+            <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">Kalemler ({referenceItems.length})</div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-neutral-50 text-neutral-600">
@@ -1727,7 +1727,7 @@ const OrderCard = React.memo(({
                   </tr>
                 </thead>
                 <tbody>
-                  {order.items.map((it) => (
+                  {referenceItems.map((it) => (
                     <tr key={it.id} className="border-t border-neutral-100">
                       <td className="px-3 py-2">{it.category.name}</td>
                       <td className="px-3 py-2">{it.variant.name}</td>
