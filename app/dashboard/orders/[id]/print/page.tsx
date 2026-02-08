@@ -225,11 +225,28 @@ export default function PrintOrderPage() {
 
   const storItems = groupedByCategoryName.get("STOR PERDE") || [];
   const aksesuarItems = groupedByCategoryName.get("AKSESUAR") || [];
-  const total = useMemo(
-    () =>
-      (order?.items ?? []).reduce((a, b) => a + (Number(b.subtotal) || 0), 0),
-    [order?.items]
-  );
+  const total = useMemo(() => {
+    const cats = categories.length > 0 ? categories : [];
+    const tempCatById = new Map(cats.map((c) => [c.id, c]));
+
+    return (order?.items ?? []).reduce((a, b) => {
+      // Re-calculate subtotal for consistency
+      const catName = tempCatById.get(b.categoryId)?.name || "";
+      const isStor = normalize(catName) === "STOR PERDE" || normalize(catName) === "ZEBRA PERDE" || normalize(catName) === "DİKEY PERDE";
+
+      const qty = Math.max(1, Number(b.qty ?? 1));
+      const unitPrice = Number(b.unitPrice ?? 0);
+
+      if (isStor) {
+        const w = Math.max(100, Number(b.width ?? 0));
+        const h = Math.max(0, Number(b.height ?? 0));
+        const area = (w / 100) * (h / 100);
+        return a + (unitPrice * area * qty);
+      } else {
+        return a + (Number(b.subtotal) || 0);
+      }
+    }, 0);
+  }, [order?.items, categories]);
 
   if (loading) return <PageOverlay show={true} label="Yükleniyor..." />;
   if (error) return <div className="p-6 text-red-600">Hata: {error}</div>;

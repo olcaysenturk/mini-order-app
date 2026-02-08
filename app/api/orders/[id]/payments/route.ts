@@ -38,6 +38,10 @@ function n(v: unknown) {
    POST /api/orders/:id/payments
    Body: { amount, method: 'CASH'|'TRANSFER'|'CARD', note?, paidAt? }
 ======================================================== */
+/* ================== POST: Ödeme ekle ==================
+   POST /api/orders/:id/payments
+   Body: { amount, method: 'CASH'|'TRANSFER'|'CARD', note?, paidAt? }
+======================================================== */
 export async function POST(req: Request, ctx: any) {
   try {
     const auth = await requireTenant()
@@ -67,13 +71,21 @@ export async function POST(req: Request, ctx: any) {
       where: { orderId, tenantId },
       _sum: { amount: true },
     })
-    const paidSoFar = n(agg._sum.amount)
-    const netTotal = n(order.netTotal)
-    const remaining = Math.max(0, netTotal - paidSoFar)
+    
+    // Decimal arithmetic for precision
+    const paidSoFar = agg._sum.amount ?? new Prisma.Decimal(0)
+    const netTotal = order.netTotal ?? new Prisma.Decimal(0)
+    const remaining = netTotal.sub(paidSoFar)
+    const amountDec = new Prisma.Decimal(amount)
 
-    if (amount > remaining + 1e-6) {
+    // Allow a very small epsilon for floating point drift if any, 
+    // but primarily rely on Decimal comparison.
+    // If amount > remaining (strictly), reject.
+    // We add a tiny epsilon (0.005) to remaining to allow for rounding differences if any,
+    // though Decimal should be exact.
+    if (amountDec.gt(remaining.add(new Prisma.Decimal('0.009')))) {
       return NextResponse.json(
-        { error: 'amount_exceeds_remaining', remaining },
+        { error: 'amount_exceeds_remaining', remaining: Number(remaining) },
         { status: 400 }
       )
     }
@@ -83,7 +95,7 @@ export async function POST(req: Request, ctx: any) {
         tenantId,
         orderId,
         method,
-        amount: new Prisma.Decimal(amount),
+        amount: amountDec, // Use decimal directly
         note: note && note.length ? note : null,
         createdById: userId ?? null,
         ...(paidAt ? { paidAt: new Date(paidAt) } : {}),
@@ -95,13 +107,18 @@ export async function POST(req: Request, ctx: any) {
       orderBy: { paidAt: 'asc' },
       select: { id: true, method: true, note: true, paidAt: true, amount: true, createdById: true },
     })
-    const totalPaid = payments.reduce((a, p) => a + Number(p.amount), 0)
-    const newRemaining = Math.max(0, netTotal - totalPaid)
+    const totalPaidDec = payments.reduce((a, p) => a.add(p.amount), new Prisma.Decimal(0))
+    const newRemainingDec = netTotal.sub(totalPaidDec)
+    const newRemaining = Number(newRemainingDec) > 0 ? Number(newRemainingDec) : 0
 
     return NextResponse.json({
       ok: true,
       orderId,
-      totals: { netTotal, totalPaid, remaining: newRemaining },
+      totals: { 
+        netTotal: Number(netTotal), 
+        totalPaid: Number(totalPaidDec), 
+        remaining: newRemaining 
+      },
       payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
     })
   } catch (e) {
@@ -134,12 +151,18 @@ export async function GET(_req: Request, ctx: any) {
       select: { id: true, method: true, note: true, paidAt: true, amount: true, createdById: true },
     })
 
-    const totalPaid = payments.reduce((a, p) => a + Number(p.amount), 0)
-    const remaining = Math.max(0, Number(order.netTotal) - totalPaid)
+    const netTotal = order.netTotal ?? new Prisma.Decimal(0)
+    const totalPaidDec = payments.reduce((a, p) => a.add(p.amount), new Prisma.Decimal(0))
+    const remainingDec = netTotal.sub(totalPaidDec)
+    const remaining = Number(remainingDec) > 0 ? Number(remainingDec) : 0
 
     return NextResponse.json({
       orderId,
-      totals: { netTotal: Number(order.netTotal), totalPaid, remaining },
+      totals: { 
+        netTotal: Number(netTotal), 
+        totalPaid: Number(totalPaidDec), 
+        remaining 
+      },
       payments: payments.map((p) => ({ ...p, amount: Number(p.amount) })),
     })
   } catch (e) {

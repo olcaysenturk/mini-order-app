@@ -82,6 +82,12 @@ const calculateLineSubtotal = (item: LineItem, catName: string = "") => {
     const area = (w / 100) * (Math.max(0, Number(item.height ?? 0)) / 100);
     return unitSafe * (area || 0) * qtySafe;
   }
+  // Zebra Perde logic (same as Stor)
+  if (normalize(catName) === "ZEBRA PERDE" || normalize(catName) === "DİKEY PERDE") {
+    const w = Math.max(100, widthSafe);
+    const area = (w / 100) * (Math.max(0, Number(item.height ?? 0)) / 100);
+    return unitSafe * (area || 0) * qtySafe;
+  }
 
   return unitSafe * ((widthSafe / 100) * densitySafe || 1) * qtySafe;
 };
@@ -244,6 +250,18 @@ export default function EditOrderPage() {
   const [useCustomPrice, setUseCustomPrice] = useState(false);
   const [unitPriceInput, setUnitPriceInput] = useState<number>(0);
 
+  // Searchable Select State
+  const [isVarOpen, setIsVarOpen] = useState(false);
+  const [varSearch, setVarSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus input when opening
+  useEffect(() => {
+    if (isVarOpen) {
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+  }, [isVarOpen]);
+
   // Yeni varyant modal
   const [showVarModal, setShowVarModal] = useState(false);
   const [newVarName, setNewVarName] = useState("");
@@ -292,13 +310,21 @@ export default function EditOrderPage() {
         setOrderType(ord.orderType || 0);
 
 
+        // Create a temporary map for category lookup during normalization
+        const tempCatById = new Map(cats.map((c) => [c.id, c]));
+
         const normalized: LineItem[] = (ord.items || []).map((i: any) => {
           const qty = Math.max(1, Number(i.qty ?? 1));
           const width = Math.max(0, Number(i.width ?? 0));
           const height = Math.max(0, Number(i.height ?? 0));
           const unitPrice = Number(i.unitPrice ?? 0);
           const density = Number(i.fileDensity ?? 1);
-          const sub = unitPrice * ((width / 100) * density || 1) * qty;
+
+          // Use the shared calculation logic
+          const catName = tempCatById.get(i.categoryId)?.name || "";
+          const itemForCalc = { ...i, qty, width, height, unitPrice, fileDensity: density };
+          const sub = calculateLineSubtotal(itemForCalc, catName);
+
           const ls: Status =
             (i.lineStatus as Status) || (ord.status as Status) || "processing";
           return {
@@ -400,7 +426,7 @@ export default function EditOrderPage() {
     const selectedCatName = catById.get(selectedCategory?.id || "")?.name || "";
     const isStor = normalize(selectedCatName) === "STOR PERDE";
 
-    if (isStor) {
+    if (isStor || normalize(selectedCatName) === "ZEBRA PERDE" || normalize(selectedCatName) === "DİKEY PERDE") {
       const wEff = Math.max(100, w);
       const area = (wEff / 100) * (height / 100);
       return price * (area || 0) * q;
@@ -536,7 +562,7 @@ export default function EditOrderPage() {
     const selectedCatName = catById.get(selectedCategory.id)?.name || "";
     const isStor = normalize(selectedCatName) === "STOR PERDE";
     let sub = 0;
-    if (isStor) {
+    if (isStor || normalize(selectedCatName) === "ZEBRA PERDE" || normalize(selectedCatName) === "DİKEY PERDE") {
       const wEff = Math.max(100, w);
       const area = (wEff / 100) * (height / 100);
       sub = price * (area || 0) * q;
@@ -1138,23 +1164,63 @@ export default function EditOrderPage() {
                 <div>
                   <label className="text-sm">Ürün</label>
                   <div className="mt-1 flex items-center gap-2">
-                    <select
-                      className="select flex-1"
-                      value={varId}
-                      onChange={(e) => setVarId(e.target.value)}
-                      disabled={!selectedCategory}
-                    >
-                      {!selectedCategory && <option>Önce kategori seçin</option>}
-                      {selectedCategory &&
-                        selectedCategory.variants.length === 0 && (
-                          <option>Ürün yok</option>
-                        )}
-                      {selectedCategory?.variants.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative flex-1">
+                      <button
+                        type="button"
+                        className="select w-full text-left flex items-center justify-between"
+                        onClick={() => {
+                          if (selectedCategory) setIsVarOpen(!isVarOpen);
+                        }}
+                        disabled={!selectedCategory}
+                      >
+                        <span className="truncate block">
+                          {selectedVariant?.name || (selectedCategory ? "Seçiniz" : "Önce kategori seçin")}
+                        </span>
+                        <svg className="w-4 h-4 opacity-50 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+
+                      {isVarOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsVarOpen(false)} />
+                          <div className="absolute top-full left-0 w-full bg-white border border-neutral-300 shadow-xl rounded-xl z-50 p-2 mt-1 min-w-[200px]">
+                            <input
+                              ref={searchInputRef}
+                              className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-sm mb-2 focus:outline-none focus:border-indigo-500"
+                              placeholder="Ara..."
+                              value={varSearch}
+                              onChange={(e) => setVarSearch(e.target.value)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div className="max-h-60 overflow-y-auto">
+                              {selectedCategory?.variants
+                                .filter(v => v.name.toLocaleLowerCase('tr-TR').includes(varSearch.toLocaleLowerCase('tr-TR')))
+                                .map(v => (
+                                  <button
+                                    key={v.id}
+                                    type="button"
+                                    className={`w-full text-left px-2 py-1.5 text-sm rounded-lg hover:bg-neutral-100 ${varId === v.id ? 'bg-indigo-50 text-indigo-700 font-medium' : ''}`}
+                                    onClick={() => {
+                                      setVarId(v.id);
+                                      setIsVarOpen(false);
+                                      setVarSearch("");
+                                    }}
+                                  >
+                                    {v.name}
+                                  </button>
+                                ))}
+                              {selectedCategory?.variants.length === 0 && (
+                                <div className="py-2 text-center text-xs text-neutral-500">Ürün yok</div>
+                              )}
+                              {selectedCategory?.variants.length! > 0 && selectedCategory?.variants.filter(v => v.name.toLocaleLowerCase('tr-TR').includes(varSearch.toLocaleLowerCase('tr-TR'))).length === 0 && (
+                                <div className="py-2 text-center text-xs text-neutral-500">Sonuç yok</div>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
                     <button
                       type="button"
                       className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"

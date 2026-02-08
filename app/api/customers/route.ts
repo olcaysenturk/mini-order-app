@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const q = (searchParams.get('q') || '').trim()
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)))
+    const pageSize = Math.min(1000, Math.max(1, parseInt(searchParams.get('pageSize') || '20', 10)))
 
     const where: Prisma.CustomerWhereInput = q
       ? {

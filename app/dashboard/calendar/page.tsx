@@ -194,12 +194,15 @@ export default function OrdersCalendarPage() {
           headerFilter === "completed"
             ? `?status=${encodeURIComponent("completed")}&take=200`
             : headerFilter === "active"
-            ? `?status=${encodeURIComponent("pending,processing")}&take=200`
-            : `?take=200`;
+              ? `?status=${encodeURIComponent("pending,processing")}&take=200`
+              : `?take=200`;
         const res = await fetch(`/api/orders${qs}`, { cache: "no-store" });
         if (!res.ok) throw new Error("Siparişler alınamadı");
-        const data = (await res.json()) as Order[];
-        const normalized: Order[] = data.map((o: any) => ({
+        const json = await res.json();
+        // Handle both legacy array and new { data, meta } format
+        const rawData = Array.isArray(json) ? json : json.data || [];
+
+        const normalized: Order[] = rawData.map((o: any) => ({
           ...o,
           deliveryAt: o.deliveryAt ?? o.deliveryDate ?? null,
         }));
@@ -371,50 +374,50 @@ export default function OrdersCalendarPage() {
                     </svg>
                     Bugün
                   </button>
-                <div className="hidden items-center gap-2 rounded-xl border border-white/70 bg-white/90 p-1 shadow-sm sm:inline-flex">
+                  <div className="hidden items-center gap-2 rounded-xl border border-white/70 bg-white/90 p-1 shadow-sm sm:inline-flex">
+                    <button
+                      className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
+                      onClick={() => setCursor((c) => addMonths(c, -1))}
+                      title="Önceki Ay"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path fill="currentColor" d="M15 6l-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
+                      onClick={() => setCursor((c) => addMonths(c, +1))}
+                      title="Sonraki Ay"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path fill="currentColor" d="M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="inline-flex items-center gap-1 rounded-xl border border-white/70 bg-white/90 p-1 shadow-sm sm:hidden">
+                    <button
+                      className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
+                      onClick={() => setCursor((c) => addMonths(c, -1))}
+                      title="Önceki Ay"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path fill="currentColor" d="M15 6l-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z" />
+                      </svg>
+                    </button>
+                    <button
+                      className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
+                      onClick={() => setCursor((c) => addMonths(c, +1))}
+                      title="Sonraki Ay"
+                    >
+                      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+                        <path fill="currentColor" d="M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z" />
+                      </svg>
+                    </button>
+                  </div>
                   <button
-                    className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
-                    onClick={() => setCursor((c) => addMonths(c, -1))}
-                    title="Önceki Ay"
+                    className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/70 bg-white/90 px-3 text-sm text-neutral-700 shadow-sm transition hover:bg-white sm:hidden"
+                    onClick={() => setFiltersOpen(true)}
                   >
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path fill="currentColor" d="M15 6l-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z" />
-                    </svg>
-                  </button>
-                  <button
-                    className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
-                    onClick={() => setCursor((c) => addMonths(c, +1))}
-                    title="Sonraki Ay"
-                  >
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path fill="currentColor" d="M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="inline-flex items-center gap-1 rounded-xl border border-white/70 bg-white/90 p-1 shadow-sm sm:hidden">
-                  <button
-                    className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
-                    onClick={() => setCursor((c) => addMonths(c, -1))}
-                    title="Önceki Ay"
-                  >
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path fill="currentColor" d="M15 6l-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z" />
-                    </svg>
-                  </button>
-                  <button
-                    className="inline-flex size-8 items-center justify-center rounded-lg hover:bg-neutral-100"
-                    onClick={() => setCursor((c) => addMonths(c, +1))}
-                    title="Sonraki Ay"
-                  >
-                    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-                      <path fill="currentColor" d="M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z" />
-                    </svg>
-                  </button>
-                </div>
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/70 bg-white/90 px-3 text-sm text-neutral-700 shadow-sm transition hover:bg-white sm:hidden"
-                  onClick={() => setFiltersOpen(true)}
-                >
                     <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                       <path fill="currentColor" d="M3 5h18v2H3zM6 11h12v2H6zm3 6h6v2H9z" />
                     </svg>
@@ -444,11 +447,10 @@ export default function OrdersCalendarPage() {
                         role="tab"
                         aria-selected={headerFilter === k}
                         onClick={() => setHeaderFilter(k)}
-                        className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${
-                          headerFilter === k
+                        className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${headerFilter === k
                             ? "bg-indigo-600 text-white shadow-sm"
                             : "text-neutral-700 hover:bg-neutral-100"
-                        }`}
+                          }`}
                       >
                         {label}
                       </button>
@@ -585,18 +587,18 @@ export default function OrdersCalendarPage() {
                     return (
                       notDone &&
                       dAt <
-                        new Date(
-                          today.getFullYear(),
-                          today.getMonth(),
-                          today.getDate()
-                        )
+                      new Date(
+                        today.getFullYear(),
+                        today.getMonth(),
+                        today.getDate()
+                      )
                     );
                   }) && c.inCurrentMonth;
                 const ring = c.isToday
                   ? "ring-2 ring-indigo-400"
                   : isOverdue
-                  ? "ring-2 ring-rose-300"
-                  : "";
+                    ? "ring-2 ring-rose-300"
+                    : "";
 
                 const preview = list.slice(0, 2); // mobilde 2 satır önizleme
 
@@ -639,9 +641,8 @@ export default function OrdersCalendarPage() {
                           title={`${o.customerName} • ${o.dealer?.name ?? "—"}`}
                         >
                           <span
-                            className={`inline-block h-2 w-2 rounded-full ${
-                              statusDot[o.status]
-                            }`}
+                            className={`inline-block h-2 w-2 rounded-full ${statusDot[o.status]
+                              }`}
                           />
                           <span className="truncate">
                             {o.customerName || "—"}
@@ -687,10 +688,10 @@ export default function OrdersCalendarPage() {
         title={
           selectedYMD
             ? new Intl.DateTimeFormat("tr-TR", {
-                day: "2-digit",
-                month: "2-digit",
-                year: "numeric",
-              }).format(new Date(selectedYMD))
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            }).format(new Date(selectedYMD))
             : "Gün detayı"
         }
       >
@@ -712,9 +713,8 @@ export default function OrdersCalendarPage() {
                   <div className="mb-1 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`inline-block h-2.5 w-2.5 rounded-full ${
-                          statusDot[o.status]
-                        }`}
+                        className={`inline-block h-2.5 w-2.5 rounded-full ${statusDot[o.status]
+                          }`}
                         title={statusLabel[o.status]}
                       />
                       <a

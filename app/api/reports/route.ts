@@ -626,10 +626,59 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({ methods }, { headers: { 'Cache-Control': 'private, max-age=30' } })
     }
+    
+    /* ======= SECTION: PAYMENTS_DAY_DETAIL ======= */
+    if (section === 'payments_day_detail') {
+      const branchId = req.nextUrl.searchParams.get('branchId')
+      const dateStr = req.nextUrl.searchParams.get('date')
+      if (!branchId || !dateStr) {
+        return NextResponse.json({ error: 'missing_params' }, { status: 400 })
+      }
+      
+      const targetDate = parseISODate(dateStr)
+      if (!targetDate) {
+        return NextResponse.json({ error: 'invalid_date' }, { status: 400 })
+      }
+      const ymd = targetDate.toISOString().slice(0, 10)
+
+      const rows = await prisma.$queryRaw<{
+        customerName: string | null;
+        amount: number;
+        method: string;
+        orderId: string;
+        note: string | null;
+      }[]>(Prisma.sql`
+        SELECT
+          COALESCE(c."name", o."customerName", 'Müşteri') AS "customerName",
+          op."amount"::float                            AS "amount",
+          op."method"::text                              AS "method",
+          op."orderId"::text                             AS "orderId",
+          op."note"::text                                AS "note"
+        FROM "OrderPayment" op
+        JOIN "Order" o ON o."id" = op."orderId"
+        LEFT JOIN "Customer" c ON c."id" = o."customerId"
+        WHERE op."tenantId" = ${tenantId}
+          AND o."tenantId" = ${tenantId}
+          AND o."branchId" = ${branchId}
+          AND (op."paidAt" AT TIME ZONE ${IST_TZ})::date = ${ymd}::date
+          AND o."status" = ANY(${CastArray(statuses)})
+          ${orderTypeFilter}
+          ${notDeleted('o')}
+        ORDER BY op."paidAt" DESC
+      `)
+
+      return NextResponse.json({ rows }, { headers: { 'Cache-Control': 'private, max-age=10' } })
+    }
 
     return NextResponse.json({ error: 'invalid_section' }, { status: 400 })
   } catch (e) {
     console.error('GET /api/reports error', e)
     return NextResponse.json({ error: 'server_error' }, { status: 500 })
   }
+}
+
+// Helper to cast status array for queryRaw
+function CastArray(statuses: OrderStatus[]) {
+  const casted = statuses.map(s => Prisma.sql`${s}::"OrderStatus"`)
+  return Prisma.sql`ARRAY[${Prisma.join(casted)}]::"OrderStatus"[]`
 }

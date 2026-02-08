@@ -147,10 +147,10 @@ function getDueInfo(ymd?: string): DueInfo {
   const d = parseYMDToLocalDate(ymd);
   const dateText = d
     ? new Intl.DateTimeFormat("tr-TR", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      }).format(d)
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(d)
     : "—";
 
   if (!d) {
@@ -339,10 +339,11 @@ export default function OrdersPage() {
         signal,
       });
       if (!res.ok) throw new Error("Siparişler alınamadı");
-      const data: Order[] = await res.json();
+      const json = await res.json();
+      const rawData = Array.isArray(json) ? json : json.data || [];
 
-      // 🔹 Sadece orderType = 0 olanları al
-      const onlyOrders = data.filter((o) => o.orderType === 1);
+      // 🔹 Sadece orderType = 0 olanları al (Actually filter says orderType === 1 for offers)
+      const onlyOrders = rawData.filter((o: any) => o.orderType === 1);
       setOrders(onlyOrders);
     } catch (e: any) {
       if (e?.name !== "AbortError") setError(e?.message || "Bilinmeyen hata");
@@ -374,11 +375,11 @@ export default function OrdersPage() {
         paidTotal: Number(data.paidTotal ?? data.totalPaid ?? 0),
         balance: Number(
           data.balance ??
-            Math.max(
-              0,
-              Number(data.netTotal ?? data.total ?? 0) -
-                Number(data.paidTotal ?? data.totalPaid ?? 0)
-            )
+          Math.max(
+            0,
+            Number(data.netTotal ?? data.total ?? 0) -
+            Number(data.paidTotal ?? data.totalPaid ?? 0)
+          )
         ),
       };
       setDetailById((m) => ({ ...m, [id]: d }));
@@ -389,12 +390,12 @@ export default function OrdersPage() {
         prev.map((o) =>
           o.id === id
             ? {
-                ...o,
-                netTotal: d.netTotal ?? o.netTotal ?? o.total,
-                paidTotal: d.paidTotal,
-                totalPaid: d.paidTotal,
-                balance: d.balance,
-              }
+              ...o,
+              netTotal: d.netTotal ?? o.netTotal ?? o.total,
+              paidTotal: d.paidTotal,
+              totalPaid: d.paidTotal,
+              balance: d.balance,
+            }
             : o
         )
       );
@@ -427,7 +428,7 @@ export default function OrdersPage() {
           if (!detailById[id] && !detailLoading[id]) {
             try {
               await fetchOrderDetail(id);
-            } catch {}
+            } catch { }
           }
         })
       );
@@ -815,11 +816,10 @@ export default function OrdersPage() {
                       role="tab"
                       aria-selected={headerFilter === k}
                       onClick={() => setHeaderFilter(k)}
-                      className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${
-                        headerFilter === k
+                      className={`rounded-xl px-3 py-1.5 text-sm font-medium transition ${headerFilter === k
                           ? "bg-indigo-600 text-white shadow-sm"
                           : "text-neutral-700 hover:bg-neutral-100"
-                      }`}
+                        }`}
                     >
                       {label}
                     </button>
@@ -967,11 +967,10 @@ export default function OrdersPage() {
                       key={b.v}
                       type="button"
                       onClick={() => setPaymentStatus(b.v as any)}
-                      className={`h-8 rounded-sm border px-3 text-xs ${
-                        active
+                      className={`h-8 rounded-sm border px-3 text-xs ${active
                           ? "border-amber-600 bg-amber-600 text-white"
                           : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                      }`}
+                        }`}
                       aria-pressed={active}
                     >
                       {b.label}
@@ -1000,11 +999,10 @@ export default function OrdersPage() {
                             : [...prev, m]
                         )
                       }
-                      className={`h-8 rounded-sm border px-3 text-xs ${
-                        active
+                      className={`h-8 rounded-sm border px-3 text-xs ${active
                           ? "border-emerald-600 bg-emerald-600 text-white"
                           : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                      }`}
+                        }`}
                       aria-pressed={active}
                     >
                       {methodLabel[m]}
@@ -1035,162 +1033,162 @@ export default function OrdersPage() {
 
         {/* Liste */}
         <div className="mt-4 space-y-4 min-h-[100vh]">
-         
+
           {orders.length === 0 && loading && <InlineLoader />}
 
           {!loading
             ? paged.items.map((order, idx) => {
-                const globalIndex = paged.startIndex + idx;
-                const num = displayed.length - globalIndex; // genel sıra numarası
-                const isOpen = openIds.has(order.id);
-                const d = detailById[order.id];
-                const detailId = `order-detail-${order.id}`;
+              const globalIndex = paged.startIndex + idx;
+              const num = displayed.length - globalIndex; // genel sıra numarası
+              const isOpen = openIds.has(order.id);
+              const d = detailById[order.id];
+              const detailId = `order-detail-${order.id}`;
 
-                const net = Number(order.netTotal ?? order.total ?? 0);
-                const paid = Number(order.paidTotal ?? order.totalPaid ?? 0);
-                const balance = Number(
-                  order.balance ?? Math.max(0, net - paid)
-                );
-                const ratio = net > 0 ? paid / net : 0;
+              const net = Number(order.netTotal ?? order.total ?? 0);
+              const paid = Number(order.paidTotal ?? order.totalPaid ?? 0);
+              const balance = Number(
+                order.balance ?? Math.max(0, net - paid)
+              );
+              const ratio = net > 0 ? paid / net : 0;
 
-                return (
-                  <section
-                    key={order.id}
-                    className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
-                  >
-                    {/* Header */}
-                    <div className="flex flex-col md:flex-row items-start justify-between gap-3">
-                      {/* Sol: başlık + müşteri */}
-                      <div className="flex  w-full md:w-auto flex-1 flex-col gap-2">
-                        <div className="flex w-full md:w-[350px] justify-between flex-wrap items-center gap-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="
+              return (
+                <section
+                  key={order.id}
+                  className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+                >
+                  {/* Header */}
+                  <div className="flex flex-col md:flex-row items-start justify-between gap-3">
+                    {/* Sol: başlık + müşteri */}
+                    <div className="flex  w-full md:w-auto flex-1 flex-col gap-2">
+                      <div className="flex w-full md:w-[350px] justify-between flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="
                                 inline-flex size-6 items-center justify-center
                                 rounded-sm border border-neutral-300
                                 bg-neutral-50 text-[11px] font-semibold text-neutral-700
                                 ring-1 ring-inset ring-white/50 print:bg-white print:text-black
                               "
-                              aria-hidden
-                            >
-                              {num}
-                            </span>
-                            <div className="shrink-0 font-semibold truncate text-lg">
-                              {order.dealer.name || "—"}
-                            </div>
-                          </div>
-                          {/* <StatusBadge s={order.status} /> */}
-                        </div>
-
-                        <div className="grid gap-2 text-sm sm:grid-cols-2 sm:gap-2 w-full md:w-[350px]">
-                          <div className="min-w-0">
-                            <span className="flex flex-col  items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                              <span>MÜŞTERİ</span>{" "}
-                              <strong>{order.customerName || "—"}</strong>
-                            </span>
-                          </div>
-                          <div className="min-w-0">
-                            <span className="flex flex-col  items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                              <span>TELEFON</span>{" "}
-                              <strong>{order.customerPhone || "—"}</strong>
-                            </span>
-                          </div>
-                          <div className="min-w-0 flex hidden">
-                            <DuePill info={getDueInfo(order.deliveryDate)} />
-                          </div>
-                          <div className="min-w-0 hidden">
-                            <span
-                              className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"
-                              title="Oluşturma"
-                            >
-                              <svg
-                                viewBox="0 0 24 24"
-                                className="size-3.5"
-                                aria-hidden
-                              >
-                                <path
-                                  fill="currentColor"
-                                  d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z"
-                                />
-                              </svg>
-                              {new Intl.DateTimeFormat("tr-TR", {
-                                dateStyle: "medium",
-                                timeStyle: "short",
-                              }).format(new Date(order.createdAt))}
-                            </span>
+                            aria-hidden
+                          >
+                            {num}
+                          </span>
+                          <div className="shrink-0 font-semibold truncate text-lg">
+                            {order.dealer.name || "—"}
                           </div>
                         </div>
+                        {/* <StatusBadge s={order.status} /> */}
                       </div>
 
-                      {/* Sağ: finans rozetleri + aksiyonlar */}
-                      <div className="flex w-full flex-col items-end gap-2 md:w-auto">
-                        {/* Finans özet (responsive grid) */}
-                        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 hidden">
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>TOPLAM</span>{" "}
-                            <strong className="ms-1">
-                              {fmt(order.total)} ₺
-                            </strong>
-                          </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>İskonto</span>{" "}
-                            <strong className="ms-1">
-                              {fmt(order.discount)} ₺
-                            </strong>
-                          </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>Ödenen</span>{" "}
-                            <strong className="ms-1">{fmt(paid)} ₺</strong>
-                          </span>
-                          <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
-                            <span>Kalan</span>{" "}
-                            <strong className="ms-1">{fmt(balance)} ₺</strong>
+                      <div className="grid gap-2 text-sm sm:grid-cols-2 sm:gap-2 w-full md:w-[350px]">
+                        <div className="min-w-0">
+                          <span className="flex flex-col  items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                            <span>MÜŞTERİ</span>{" "}
+                            <strong>{order.customerName || "—"}</strong>
                           </span>
                         </div>
-
-                        {/* Aksiyonlar */}
-                        <div className="grid w-full grid-cols-2 gap-2">
-                          <button
-                            onClick={() =>
-                              router.push(`/dashboard/orders/${order.id}/print`)
-                            }
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
-                            title="Yazdır"
-                          >
-                            <svg
-                              className="size-4"
-                              viewBox="0 0 24 24"
-                              aria-hidden
-                            >
-                              <path fill="currentColor" d="M7 3h10v4H7z" />
-                              <path
-                                fill="currentColor"
-                                d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
-                              />
-                              <path fill="currentColor" d="M7 17h10v4H7z" />
-                            </svg>
-                            Yazdır
-                          </button>
-
-                          <button
-                            onClick={() => router.push(`/dashboard/orders/${order.id}`)}
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
-                            title="Düzenle"
+                        <div className="min-w-0">
+                          <span className="flex flex-col  items-start justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                            <span>TELEFON</span>{" "}
+                            <strong>{order.customerPhone || "—"}</strong>
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex hidden">
+                          <DuePill info={getDueInfo(order.deliveryDate)} />
+                        </div>
+                        <div className="min-w-0 hidden">
+                          <span
+                            className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200"
+                            title="Oluşturma"
                           >
                             <svg
                               viewBox="0 0 24 24"
-                              className="size-4"
+                              className="size-3.5"
                               aria-hidden
                             >
                               <path
                                 fill="currentColor"
-                                d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0 1.42 0l-1.83 1.83l3.75 3.75l1.84-1.82z"
+                                d="M7 2h2v2h6V2h2v2h3v2H4V4h3V2zm-3 6h16v12H4V8zm2 2v8h12v-8H6z"
                               />
                             </svg>
-                            Önizleme / Düzenle
-                          </button>
+                            {new Intl.DateTimeFormat("tr-TR", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            }).format(new Date(order.createdAt))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
-                          {/* <button
+                    {/* Sağ: finans rozetleri + aksiyonlar */}
+                    <div className="flex w-full flex-col items-end gap-2 md:w-auto">
+                      {/* Finans özet (responsive grid) */}
+                      <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 hidden">
+                        <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span>TOPLAM</span>{" "}
+                          <strong className="ms-1">
+                            {fmt(order.total)} ₺
+                          </strong>
+                        </span>
+                        <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span>İskonto</span>{" "}
+                          <strong className="ms-1">
+                            {fmt(order.discount)} ₺
+                          </strong>
+                        </span>
+                        <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span>Ödenen</span>{" "}
+                          <strong className="ms-1">{fmt(paid)} ₺</strong>
+                        </span>
+                        <span className="flex w-full flex-col items-center justify-between rounded-sm bg-neutral-50 px-2.5 py-1 text-xs font-medium text-neutral-700 ring-1 ring-inset ring-neutral-200">
+                          <span>Kalan</span>{" "}
+                          <strong className="ms-1">{fmt(balance)} ₺</strong>
+                        </span>
+                      </div>
+
+                      {/* Aksiyonlar */}
+                      <div className="grid w-full grid-cols-2 gap-2">
+                        <button
+                          onClick={() =>
+                            router.push(`/dashboard/orders/${order.id}/print`)
+                          }
+                          className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                          title="Yazdır"
+                        >
+                          <svg
+                            className="size-4"
+                            viewBox="0 0 24 24"
+                            aria-hidden
+                          >
+                            <path fill="currentColor" d="M7 3h10v4H7z" />
+                            <path
+                              fill="currentColor"
+                              d="M5 9h14a2 2 0 0 1 2 2v6h-4v-3H7v3H3v-6a2 2 0 0 1 2-2z"
+                            />
+                            <path fill="currentColor" d="M7 17h10v4H7z" />
+                          </svg>
+                          Yazdır
+                        </button>
+
+                        <button
+                          onClick={() => router.push(`/dashboard/orders/${order.id}`)}
+                          className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50"
+                          title="Düzenle"
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="size-4"
+                            aria-hidden
+                          >
+                            <path
+                              fill="currentColor"
+                              d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0 1.42 0l-1.83 1.83l3.75 3.75l1.84-1.82z"
+                            />
+                          </svg>
+                          Önizleme / Düzenle
+                        </button>
+
+                        {/* <button
                             className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-50 hidden "
                             onClick={() => openPayModal(order.id)}
                             title="Ödeme Ekle"
@@ -1207,13 +1205,138 @@ export default function OrdersPage() {
                             </svg>
                             Ödeme Ekle
                           </button> */}
-                          <div></div>
+                        <div></div>
 
+                        <button
+                          className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                          onClick={() => removeOrder(order.id)}
+                          disabled={deletingId === order.id}
+                          title="Sil"
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="size-4"
+                            aria-hidden
+                          >
+                            <path
+                              fill="currentColor"
+                              d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"
+                            />
+                          </svg>
+                          {deletingId === order.id ? "Siliniyor…" : "Sil"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Detay toggle */}
+                  <div className="mt-3">
+                    <button
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                      aria-expanded={isOpen}
+                      aria-controls={detailId}
+                      onClick={() => toggleOpen(order.id)}
+                      title={isOpen ? "Detayı gizle" : "Detayı göster"}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        className={`size-4 transition-transform ${isOpen ? "rotate-180" : ""
+                          }`}
+                        aria-hidden
+                      >
+                        <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+                      </svg>
+                      {isOpen ? "Detayı Gizle" : "Detayı Göster"}
+                    </button>
+                  </div>
+
+                  {/* Tahsilat Progress */}
+                  <div className="mt-3 hidden">
+                    <Progress
+                      value={Math.max(
+                        0,
+                        Math.min(100, Math.round(ratio * 100))
+                      )}
+                    />
+                  </div>
+
+                  {/* Detay */}
+                  {isOpen && (
+                    <div id={detailId} className="mt-4 space-y-4">
+                      {order.note && (
+                        <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                          <span className="font-medium">Sipariş Notu:</span>{" "}
+                          {order.note}
+                        </div>
+                      )}
+
+                      {/* Kalemler */}
+                      <div className="rounded-2xl border border-neutral-200">
+                        <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">
+                          Kalemler ({order.items.length})
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="bg-neutral-50 text-neutral-600">
+                              <tr>
+                                <th className="px-3 py-2 text-left">
+                                  Kategori
+                                </th>
+                                <th className="px-3 py-2 text-left">Ürün</th>
+                                <th className="px-3 py-2 text-right">Adet</th>
+                                <th className="px-3 py-2 text-right">En</th>
+                                <th className="px-3 py-2 text-right">Boy</th>
+                                <th className="px-3 py-2 text-right">
+                                  Birim ₺
+                                </th>
+                                <th className="px-3 py-2 text-right">
+                                  Tutar ₺
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {order.items.map((it) => (
+                                <tr
+                                  key={it.id}
+                                  className="border-t border-neutral-100"
+                                >
+                                  <td className="px-3 py-2">
+                                    {it.category.name}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    {it.variant.name}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {fmtInt(it.qty)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {fmtInt(it.width)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {fmtInt(it.height)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {fmt(it.unitPrice)}
+                                  </td>
+                                  <td className="px-3 py-2 text-right">
+                                    {fmt(it.subtotal)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Ödemeler */}
+                      <div className="rounded-2xl border border-neutral-200 hidden">
+                        <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
+                          <div className="text-sm font-semibold">
+                            Ödemeler
+                          </div>
                           <button
-                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-sm border border-rose-200 bg-white px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                            onClick={() => removeOrder(order.id)}
-                            disabled={deletingId === order.id}
-                            title="Sil"
+                            className="inline-flex items-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                            onClick={() => openPayModal(order.id)}
                           >
                             <svg
                               viewBox="0 0 24 24"
@@ -1222,211 +1345,85 @@ export default function OrdersPage() {
                             >
                               <path
                                 fill="currentColor"
-                                d="M6 7h12l-1 14H7L6 7zm3-3h6l1 2H8l1-2z"
+                                d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z"
                               />
                             </svg>
-                            {deletingId === order.id ? "Siliniyor…" : "Sil"}
+                            Ödeme Yap
                           </button>
                         </div>
-                      </div>
-                    </div>
 
-                    {/* Detay toggle */}
-                    <div className="mt-3">
-                      <button
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50"
-                        aria-expanded={isOpen}
-                        aria-controls={detailId}
-                        onClick={() => toggleOpen(order.id)}
-                        title={isOpen ? "Detayı gizle" : "Detayı göster"}
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          className={`size-4 transition-transform ${
-                            isOpen ? "rotate-180" : ""
-                          }`}
-                          aria-hidden
-                        >
-                          <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
-                        </svg>
-                        {isOpen ? "Detayı Gizle" : "Detayı Göster"}
-                      </button>
-                    </div>
-
-                    {/* Tahsilat Progress */}
-                    <div className="mt-3 hidden">
-                      <Progress
-                        value={Math.max(
-                          0,
-                          Math.min(100, Math.round(ratio * 100))
-                        )}
-                      />
-                    </div>
-
-                    {/* Detay */}
-                    {isOpen && (
-                      <div id={detailId} className="mt-4 space-y-4">
-                        {order.note && (
-                          <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-                            <span className="font-medium">Sipariş Notu:</span>{" "}
-                            {order.note}
-                          </div>
-                        )}
-
-                        {/* Kalemler */}
-                        <div className="rounded-2xl border border-neutral-200">
-                          <div className="border-b border-neutral-200 px-3 py-2 text-sm font-semibold">
-                            Kalemler ({order.items.length})
-                          </div>
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full text-sm">
-                              <thead className="bg-neutral-50 text-neutral-600">
-                                <tr>
-                                  <th className="px-3 py-2 text-left">
-                                    Kategori
-                                  </th>
-                                  <th className="px-3 py-2 text-left">Ürün</th>
-                                  <th className="px-3 py-2 text-right">Adet</th>
-                                  <th className="px-3 py-2 text-right">En</th>
-                                  <th className="px-3 py-2 text-right">Boy</th>
-                                  <th className="px-3 py-2 text-right">
-                                    Birim ₺
-                                  </th>
-                                  <th className="px-3 py-2 text-right">
-                                    Tutar ₺
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {order.items.map((it) => (
-                                  <tr
-                                    key={it.id}
-                                    className="border-t border-neutral-100"
-                                  >
-                                    <td className="px-3 py-2">
-                                      {it.category.name}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      {it.variant.name}
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      {fmtInt(it.qty)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      {fmtInt(it.width)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      {fmtInt(it.height)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      {fmt(it.unitPrice)}
-                                    </td>
-                                    <td className="px-3 py-2 text-right">
-                                      {fmt(it.subtotal)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-
-                        {/* Ödemeler */}
-                        <div className="rounded-2xl border border-neutral-200 hidden">
-                          <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2">
-                            <div className="text-sm font-semibold">
-                              Ödemeler
+                        <div className="p-3">
+                          {detailLoading[order.id] && <Skeleton />}
+                          {detailError[order.id] && (
+                            <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                              {detailError[order.id]}
                             </div>
-                            <button
-                              className="inline-flex items-center gap-1.5 rounded-sm border border-neutral-200 bg-white px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
-                              onClick={() => openPayModal(order.id)}
-                            >
-                              <svg
-                                viewBox="0 0 24 24"
-                                className="size-4"
-                                aria-hidden
-                              >
-                                <path
-                                  fill="currentColor"
-                                  d="M12 21a9 9 0 1 1 9-9h-2a7 7 0 1 0-7 7v2zm1-9h5v2h-7V7h2v5z"
-                                />
-                              </svg>
-                              Ödeme Yap
-                            </button>
-                          </div>
-
-                          <div className="p-3">
-                            {detailLoading[order.id] && <Skeleton />}
-                            {detailError[order.id] && (
-                              <div className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                                {detailError[order.id]}
-                              </div>
-                            )}
-                            {!detailLoading[order.id] &&
-                              !detailError[order.id] && (
-                                <>
-                                  {d && d.payments.length > 0 ? (
-                                    <div className="overflow-x-auto">
-                                      <table className="min-w-full text-sm">
-                                        <thead className="bg-neutral-50 text-neutral-600">
-                                          <tr>
-                                            <th className="px-3 py-2 text-left">
-                                              Tarih
-                                            </th>
-                                            <th className="px-3 py-2 text-left">
-                                              Yöntem
-                                            </th>
-                                            <th className="px-3 py-2 text-right">
-                                              Tutar ₺
-                                            </th>
-                                            <th className="px-3 py-2 text-left">
-                                              Not
-                                            </th>
+                          )}
+                          {!detailLoading[order.id] &&
+                            !detailError[order.id] && (
+                              <>
+                                {d && d.payments.length > 0 ? (
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full text-sm">
+                                      <thead className="bg-neutral-50 text-neutral-600">
+                                        <tr>
+                                          <th className="px-3 py-2 text-left">
+                                            Tarih
+                                          </th>
+                                          <th className="px-3 py-2 text-left">
+                                            Yöntem
+                                          </th>
+                                          <th className="px-3 py-2 text-right">
+                                            Tutar ₺
+                                          </th>
+                                          <th className="px-3 py-2 text-left">
+                                            Not
+                                          </th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {d.payments.map((p) => (
+                                          <tr
+                                            key={p.id}
+                                            className="border-t border-neutral-100"
+                                          >
+                                            <td className="px-3 py-2">
+                                              {new Intl.DateTimeFormat(
+                                                "tr-TR",
+                                                {
+                                                  dateStyle: "medium",
+                                                  timeStyle: "short",
+                                                }
+                                              ).format(new Date(p.paidAt))}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {methodLabel[p.method]}
+                                            </td>
+                                            <td className="px-3 py-2 text-right">
+                                              {fmt(p.amount)}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              {p.note ?? "—"}
+                                            </td>
                                           </tr>
-                                        </thead>
-                                        <tbody>
-                                          {d.payments.map((p) => (
-                                            <tr
-                                              key={p.id}
-                                              className="border-t border-neutral-100"
-                                            >
-                                              <td className="px-3 py-2">
-                                                {new Intl.DateTimeFormat(
-                                                  "tr-TR",
-                                                  {
-                                                    dateStyle: "medium",
-                                                    timeStyle: "short",
-                                                  }
-                                                ).format(new Date(p.paidAt))}
-                                              </td>
-                                              <td className="px-3 py-2">
-                                                {methodLabel[p.method]}
-                                              </td>
-                                              <td className="px-3 py-2 text-right">
-                                                {fmt(p.amount)}
-                                              </td>
-                                              <td className="px-3 py-2">
-                                                {p.note ?? "—"}
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  ) : (
-                                    <div className="text-sm text-neutral-500">
-                                      Henüz ödeme yok.
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                          </div>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-neutral-500">
+                                    Henüz ödeme yok.
+                                  </div>
+                                )}
+                              </>
+                            )}
                         </div>
                       </div>
-                    )}
-                  </section>
-                );
-              })
+                    </div>
+                  )}
+                </section>
+              );
+            })
             : ""}
         </div>
 
@@ -1463,11 +1460,10 @@ export default function OrdersPage() {
                   <span key={n} className="inline-flex">
                     {gap && <span className="px-1 text-neutral-400">…</span>}
                     <button
-                      className={`h-9 min-w-9 rounded-xl border px-3 text-sm ${
-                        n === paged.page
+                      className={`h-9 min-w-9 rounded-xl border px-3 text-sm ${n === paged.page
                           ? "border-indigo-600 bg-indigo-600 text-white"
                           : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
-                      }`}
+                        }`}
                       onClick={() => setPage(n)}
                     >
                       {n}

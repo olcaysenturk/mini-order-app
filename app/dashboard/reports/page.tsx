@@ -1,4 +1,4 @@
- // app/reports/page.tsx
+// app/reports/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -135,6 +135,14 @@ type ProductsResp = {
 type BranchDailyRow = { date: string; revenue: number; paid: number };
 type MethodsByDateRow = { date: string; method: string; amount: number };
 
+type PaymentDetailRow = {
+  customerName: string;
+  amount: number;
+  method: string;
+  orderId: string;
+  note?: string;
+};
+
 /* -------------------- page -------------------- */
 export default function ReportsPage() {
   const { data: session, status: sessionStatus } = useSession();
@@ -180,6 +188,11 @@ export default function ReportsPage() {
   const [prodDesc, setProdDesc] = useState(true);
   const [prodPage, setProdPage] = useState(1);
   const [prodPageSize, setProdPageSize] = useState(20);
+
+  // Detay Modal State
+  const [detailDate, setDetailDate] = useState<string | null>(null);
+  const [detailRows, setDetailRows] = useState<PaymentDetailRow[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   // Yükleme overlay
   const showOverlay = loading;
@@ -312,6 +325,30 @@ export default function ReportsPage() {
     run();
   }, [branch, dateFrom, dateTo, isStaff]);
 
+  async function openDetail(date: string) {
+    if (branch === "all") return;
+    setDetailDate(date);
+    setDetailLoading(true);
+    setDetailRows([]);
+    try {
+      const q = new URLSearchParams({
+        section: "payments_day_detail",
+        branchId: branch,
+        date: date,
+        status: STATUS_PRESETS[filter],
+      }).toString();
+      const r = await fetch(`/api/reports?${q}`, { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        setDetailRows(j.rows || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   // Üst metrikler için placeholder loading
   const metricsLoading = !over;
 
@@ -333,10 +370,10 @@ export default function ReportsPage() {
     const filtered = branchesWithBasic.filter((r) => (!q || r.label.toLowerCase().includes(q)));
     const cmp = (a: any, b: any) => {
       switch (branchSort) {
-        case "branch":  return a.label.localeCompare(b.label, "tr");
-        case "orders":  return (a.orders || 0) - (b.orders || 0);
+        case "branch": return a.label.localeCompare(b.label, "tr");
+        case "orders": return (a.orders || 0) - (b.orders || 0);
         case "revenue": return (a.revenue || 0) - (b.revenue || 0);
-        case "paid":    return (a.paid || 0) - (b.paid || 0);
+        case "paid": return (a.paid || 0) - (b.paid || 0);
       }
     };
     const sorted = filtered.sort((a, b) => (branchDesc ? -cmp(a, b) : cmp(a, b)));
@@ -438,9 +475,8 @@ export default function ReportsPage() {
                   role="tab"
                   aria-selected={filter === k}
                   onClick={() => setFilter(k)}
-                  className={`px-3 py-1.5 text-sm rounded-[10px] transition ${
-                    filter === k ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-700 hover:bg-neutral-50"
-                  }`}
+                  className={`px-3 py-1.5 text-sm rounded-[10px] transition ${filter === k ? "bg-indigo-600 text-white shadow-sm" : "text-neutral-700 hover:bg-neutral-50"
+                    }`}
                 >
                   {label}
                 </button>
@@ -470,10 +506,10 @@ export default function ReportsPage() {
 
       {/* Üst metrikler */}
       <section className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <MetricCard label="Bugün"     value={over ? fmtMoney(over.totals.day) : null} />
-        <MetricCard label="Bu Hafta"  value={over ? fmtMoney(over.totals.week) : null} />
-        <MetricCard label="Bu Ay"     value={over ? fmtMoney(over.totals.month) : null} />
-        <MetricCard label="Bu Yıl"    value={over ? fmtMoney(over.totals.year) : null} />
+        <MetricCard label="Bugün" value={over ? fmtMoney(over.totals.day) : null} />
+        <MetricCard label="Bu Hafta" value={over ? fmtMoney(over.totals.week) : null} />
+        <MetricCard label="Bu Ay" value={over ? fmtMoney(over.totals.month) : null} />
+        <MetricCard label="Bu Yıl" value={over ? fmtMoney(over.totals.year) : null} />
       </section>
 
       {/* Şube Bazlı Ciro */}
@@ -552,7 +588,7 @@ export default function ReportsPage() {
                     <div className="mt-0.5 text-xs text-neutral-600">{fmtInt(b.orders)} sipariş</div>
                   </div>
                   <div className="grid w-full grid-cols-2 items-end gap-3 sm:w-auto sm:min-w-[320px] sm:grid-cols-2">
-                    <KPI label="Ciro"   value={`${fmtMoney(b.revenue)} ₺`} />
+                    <KPI label="Ciro" value={`${fmtMoney(b.revenue)} ₺`} />
                     <KPI label="Alınan" value={`${fmtMoney(b.paid)} ₺`} />
                   </div>
                 </div>
@@ -650,8 +686,13 @@ export default function ReportsPage() {
                       {branchDaily.map((d) => {
                         const methods = methodsByDate.get(d.date) ?? [];
                         return (
-                          <tr key={d.date} className="hover:bg-neutral-50/60">
-                            <td className="px-3 py-2 font-medium text-neutral-900 whitespace-nowrap">{d.date}</td>
+                          <tr key={d.date} className="hover:bg-neutral-50/60 group">
+                            <td
+                              className="px-3 py-2 font-medium text-indigo-600 whitespace-nowrap cursor-pointer hover:underline"
+                              onClick={() => openDetail(d.date)}
+                            >
+                              {d.date}
+                            </td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(d.revenue)} ₺</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(d.paid)} ₺</td>
                             <td className="px-3 py-2">
@@ -692,7 +733,12 @@ export default function ReportsPage() {
                   return (
                     <div key={d.date} className="p-3">
                       <div className="mb-2 flex items-center justify-between">
-                        <div className="text-sm font-semibold">{d.date}</div>
+                        <div
+                          className="text-sm font-semibold text-indigo-600 cursor-pointer"
+                          onClick={() => openDetail(d.date)}
+                        >
+                          {d.date}
+                        </div>
                         <div className="text-xs text-neutral-500">Gün</div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
@@ -766,8 +812,8 @@ export default function ReportsPage() {
                     <stop offset="100%" stopColor="#34D399" />
                   </linearGradient>
                 </defs>
-                <Bar dataKey="revenue" name="Günlük Ciro"   fill="url(#barFillRevenue)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="paid"    name="Günlük Alınan" fill="url(#barFillPaid)"    radius={[8, 8, 0, 0]} />
+                <Bar dataKey="revenue" name="Günlük Ciro" fill="url(#barFillRevenue)" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="paid" name="Günlük Alınan" fill="url(#barFillPaid)" radius={[8, 8, 0, 0]} />
                 <Line type="monotone" dataKey="cumRevenue" name="Kümülatif Ciro" dot={false} stroke="#0EA5E9" strokeWidth={2} />
               </ComposedChart>
             </ResponsiveContainer>
@@ -899,7 +945,7 @@ export default function ReportsPage() {
               onChange={(e) => setProdPageSize(Number(e.target.value))}
               aria-label="Sayfa boyutu"
             >
-              {[10,20,50,100].map(n => <option key={n} value={n}>{n}/sayfa</option>)}
+              {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}/sayfa</option>)}
             </select>
 
             {/* CSV */}
@@ -907,16 +953,16 @@ export default function ReportsPage() {
               title="CSV indir"
               disabled={!products?.rows?.length}
               onClick={() => {
-                const rows: (string|number)[][] = [
+                const rows: (string | number)[][] = [
                   ["Ürün", "Adet", "Toplam m²", "Toplam Tutar (TRY)"],
-                  ...(products?.rows ?? []).map(r => [r.product, r.qty, r.areaM2.toLocaleString("tr-TR", {minimumFractionDigits:2, maximumFractionDigits:2}), r.amount]),
+                  ...(products?.rows ?? []).map(r => [r.product, r.qty, r.areaM2.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), r.amount]),
                 ];
                 const csv = rowsToCSV(rows);
                 const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `en_cok_satilan_urunler_${new Date().toISOString().slice(0,10)}.csv`;
+                a.download = `en_cok_satilan_urunler_${new Date().toISOString().slice(0, 10)}.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
               }}
@@ -983,6 +1029,91 @@ export default function ReportsPage() {
           )}
         </div>
       </section>
+
+      {/* Detay Modal */}
+      {detailDate && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setDetailDate(null)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[80vh] overflow-y-auto bg-white rounded-3xl shadow-2xl animate-in fade-in zoom-in duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 bg-white border-b border-neutral-100 flex items-center justify-between p-5">
+              <div>
+                <h3 className="text-xl font-bold text-neutral-900">{detailDate} Ödeme Detayları</h3>
+                <p className="text-xs text-neutral-500 mt-0.5">Bu tarihte yapılan tüm tahsilatlar</p>
+              </div>
+              <button
+                className="size-10 flex items-center justify-center rounded-xl bg-neutral-100 text-neutral-500 hover:bg-neutral-200 transition-colors"
+                onClick={() => setDetailDate(null)}
+              >
+                <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-5">
+              {detailLoading ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <div className="size-10 rounded-full border-4 border-neutral-200 border-t-indigo-600 animate-spin" />
+                  <p className="text-sm font-medium text-neutral-500">Detaylar yükleniyor...</p>
+                </div>
+              ) : detailRows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="size-16 rounded-3xl bg-neutral-50 flex items-center justify-center text-neutral-300 mb-4">
+                    <svg className="size-8" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z" />
+                    </svg>
+                  </div>
+                  <p className="text-base font-semibold text-neutral-900">Kayıt Bulunamadı</p>
+                  <p className="text-sm text-neutral-500 mt-1">Bu tarihte herhangi bir ödeme kaydı bulunmuyor.</p>
+                </div>
+              ) : (
+                <div className="overflow-hidden border border-neutral-100 rounded-2xl">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] font-bold tracking-wider">
+                      <tr>
+                        <th className="px-4 py-3">Müşteri</th>
+                        <th className="px-4 py-3">Tip</th>
+                        <th className="px-4 py-3 text-right">Tutar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-50">
+                      {detailRows.map((r, i) => (
+                        <tr key={i} className="hover:bg-neutral-50/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-neutral-900">{r.customerName}</div>
+                            {r.note && <div className="text-[11px] text-neutral-400 mt-0.5 leading-tight">{r.note}</div>}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-xs font-medium text-neutral-600">
+                              {METHOD_TR[r.method] || r.method}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-neutral-900">
+                            {fmtMoney(r.amount)} ₺
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-indigo-50/50">
+                      <tr>
+                        <td colSpan={2} className="px-4 py-3 font-bold text-indigo-900">Toplam</td>
+                        <td className="px-4 py-3 text-right font-black text-indigo-900">
+                          {fmtMoney(detailRows.reduce((acc, curr) => acc + curr.amount, 0))} ₺
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

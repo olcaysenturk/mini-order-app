@@ -235,6 +235,11 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // pagination
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+
   // modal
   const [showCreate, setShowCreate] = useState(false)
 
@@ -255,20 +260,26 @@ export default function CustomersPage() {
   const listAbort = useRef<AbortController | null>(null)
 
   // ---- helpers
-  const fetchCustomers = async (query = '') => {
+  const fetchCustomers = async (useQ = q, usePage = page, usePageSize = pageSize) => {
     listAbort.current?.abort()
     const ac = new AbortController()
     listAbort.current = ac
     setLoading(true)
     setError(null)
     try {
-      const url = '/api/customers' + (query ? `?q=${encodeURIComponent(query)}` : '')
-      const res = await fetch(url, { cache: 'no-store', signal: ac.signal })
+      // const url = '/api/customers' + (query ? `?q=${encodeURIComponent(query)}&pageSize=1000` : '?pageSize=1000')
+      const params = new URLSearchParams()
+      if (useQ.trim()) params.set('q', useQ.trim())
+      params.set('page', String(usePage))
+      params.set('pageSize', String(usePageSize))
+
+      const res = await fetch('/api/customers?' + params.toString(), { cache: 'no-store', signal: ac.signal })
       if (!res.ok) throw new Error('Müşteriler alınamadı')
       // API: { ok, items, total, page, pageSize }
       const data: any = await res.json()
       const list: Customer[] = Array.isArray(data?.items) ? data.items : []
       setItems(list)
+      setTotal(data?.total || 0)
     } catch (e: any) {
       if (e?.name === 'AbortError') return
       setError(e instanceof Error ? e.message : 'Bilinmeyen hata')
@@ -277,42 +288,58 @@ export default function CustomersPage() {
     }
   }
 
+  // Initial fetch and on pagination change
   useEffect(() => {
-    fetchCustomers()
+    fetchCustomers(q, page, pageSize)
     return () => listAbort.current?.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [page, pageSize])
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    if (!needle) return items
-    return items.filter((c) => {
-      const fields = [
-        c.name,
-        c.phone || '',
-        c.email || '',
-        c.address || '',
-        c.note || '',
-        new Date(c.createdAt).toLocaleDateString('tr-TR'),
-      ]
-      return fields.some((f) => String(f).toLowerCase().includes(needle))
-    })
-  }, [items, q])
+  // Arama değişince page=1 yap (bu da useEffect ile fetch tetikler mi? Hayır, [page, pageSize] dependency.
+  // Aramayı ayrı effect ile yönetelim veya debounced yapalım.
+  // Mevcut yapıda "Yenile" butonu vardı, ama kullanıcı yazdıkça live search veya enter bekliyordu.
+  // Basitlik için: q değişince debounced fetch yapalım.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1)
+      fetchCustomers(q, 1, pageSize)
+    }, 500)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q])
+
+  // Server-side filtered, so filtered just returns items
+  const filtered = items;
+  // const filtered = useMemo(() => {
+  //   const needle = q.trim().toLowerCase()
+  //   if (!needle) return items
+  //   return items.filter((c) => {
+  //     const fields = [
+  //       c.name,
+  //       c.phone || '',
+  //       c.email || '',
+  //       c.address || '',
+  //       c.note || '',
+  //       new Date(c.createdAt).toLocaleDateString('tr-TR'),
+  //     ]
+  //     return fields.some((f) => String(f).toLowerCase().includes(needle))
+  //   })
+  // }, [items, q])
 
   const ensureDraft = (c: Customer) => {
     setEditing((prev) =>
       prev[c.id]
         ? prev
         : {
-            ...prev,
-            [c.id]: {
-              name: c.name,
-              phone: c.phone,
-              email: c.email || '',
-              address: c.address || '',
-              note: c.note || '',
-            },
-          }
+          ...prev,
+          [c.id]: {
+            name: c.name,
+            phone: c.phone,
+            email: c.email || '',
+            address: c.address || '',
+            note: c.note || '',
+          },
+        }
     )
   }
 
@@ -406,8 +433,11 @@ export default function CustomersPage() {
         cache: 'no-store',
       })
       if (!res.ok) throw new Error('Siparişler alınamadı')
-      const data: any[] = await res.json()
-      const lite: OrderLite[] = data.map((o) => ({
+      const json = await res.json()
+      // Handle both legacy array and new { data, meta } format
+      const rawData = Array.isArray(json) ? json : json.data || []
+
+      const lite: OrderLite[] = rawData.map((o: any) => ({
         id: o.id,
         createdAt: o.createdAt,
         status: o.status as Status,
@@ -428,8 +458,12 @@ export default function CustomersPage() {
   }
 
   const stats = useMemo(() => {
-    const total = items.length
-    const filteredCount = filtered.length
+    // total is from API
+    // filteredCount is items.length (current page) ? Or just use total if q is present?
+    // Let's use total for "Filtered count" context if search is active
+    // const total = items.length
+    const filteredCount = total // total from API matches query
+
     const now = new Date()
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     let newThisMonth = 0
@@ -513,16 +547,29 @@ export default function CustomersPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={downloadCustomersCSV}
+                  onClick={downloadCustomersCSV} // TODO: This downloads only current page now. 
                   disabled={!filtered.length}
                   className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/70 bg-white/90 px-3 text-sm text-neutral-700 shadow-sm transition hover:bg-white disabled:opacity-50"
-                  title="CSV indir (filtrelenmiş liste)"
+                  title="CSV indir (mevcut sayfa)"
                 >
                   <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
                     <path fill="currentColor" d="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z" />
                   </svg>
                   CSV
                 </button>
+                <div className="hidden sm:flex items-center gap-2 rounded-xl border border-white/70 bg-white/90 px-3 py-1 text-xs text-neutral-600 shadow-sm">
+                  <span>Sayfa</span>
+                  <select
+                    className="rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs font-medium text-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
                 <button
                   type="button"
                   onClick={() => fetchCustomers(q)}
@@ -753,6 +800,59 @@ export default function CustomersPage() {
                 </section>
               )
             })}
+
+        </div>
+
+        {/* Pagination controls */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-neutral-600">
+            Toplam {fmtInt(total)} kayıt • Sayfa {page}/{Math.ceil(total / pageSize)}
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 disabled:opacity-50"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+            >
+              Önceki
+            </button>
+
+            {/* Simplified page numbers logic */}
+            {(() => {
+              const totalPages = Math.ceil(total / pageSize);
+              return Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((n) => {
+                  return n === 1 || n === totalPages || (n >= page - 2 && n <= page + 2);
+                })
+                .map((n, idx, arr) => {
+                  const prev = arr[idx - 1];
+                  const gap = prev && n - prev > 1;
+                  return (
+                    <span key={n} className="inline-flex">
+                      {gap && <span className="px-1 text-neutral-400">…</span>}
+                      <button
+                        className={`h-9 min-w-9 rounded-xl border px-3 text-sm ${n === page
+                          ? "border-indigo-600 bg-indigo-600 text-white"
+                          : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50"
+                          }`}
+                        onClick={() => setPage(n)}
+                      >
+                        {n}
+                      </button>
+                    </span>
+                  );
+                });
+            })()}
+
+            <button
+              className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-neutral-700 disabled:opacity-50"
+              onClick={() => setPage((p) => Math.min(Math.ceil(total / pageSize), p + 1))}
+              disabled={page >= Math.ceil(total / pageSize)}
+            >
+              Sonraki
+            </button>
+          </div>
         </div>
       </div>
 
@@ -760,7 +860,10 @@ export default function CustomersPage() {
       <NewCustomerModal
         open={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={() => fetchCustomers(q)}
+        onCreated={() => {
+          setPage(1)
+          fetchCustomers(q, 1)
+        }}
       />
     </>
   )

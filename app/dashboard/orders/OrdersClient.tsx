@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { CurrencyInput } from "@/app/components/CurrencyInput";
 
 type ConfirmState = {
   id: string;
@@ -383,11 +384,20 @@ type DueInfo = {
   iconPath: string;
   dateText: string;
 };
-function getDueInfo(ymd?: string): DueInfo {
+function getDueInfo(ymd?: string, status?: Status): DueInfo {
   const d = parseYMDToLocalDate(ymd);
   const dateText = d
     ? new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(d)
     : "—";
+
+  if (status === "delivered" || status === "completed") {
+    return {
+      label: status === "delivered" ? "Teslim Edildi" : "Tamamlandı",
+      tone: "neutral",
+      iconPath: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15-5-5 1.41-1.41L11 14.17l7.59-7.59L20 8l-9 9z",
+      dateText,
+    };
+  }
 
   if (!d) {
     return {
@@ -502,7 +512,7 @@ export default function OrdersPage() {
   const [detailError, setDetailError] = useState<Record<string, string | null>>({});
 
   // payment form
-  const [payAmount, setPayAmount] = useState<Record<string, string>>({});
+  const [payAmount, setPayAmount] = useState<Record<string, number>>({});
   const [payMethod, setPayMethod] = useState<Record<string, PaymentMethod>>({});
   const [payNote, setPayNote] = useState<Record<string, string>>({});
   const [paySaving, setPaySaving] = useState<Record<string, boolean>>({});
@@ -830,10 +840,13 @@ export default function OrdersPage() {
   useEffect(() => {
     if (!payModalOpenId) return;
     const d = detailById[payModalOpenId];
-    if (d && !(payAmount[payModalOpenId] ?? "").trim()) {
+    // if payment amount is empty or zero, auto fill with balance
+    const currentVal = payAmount[payModalOpenId];
+    if (d && (currentVal === undefined || currentVal === 0)) {
       setPayAmount((m) => ({
         ...m,
-        [payModalOpenId]: d.balance > 0 ? String(d.balance).replace(".", ",") : "",
+        // [payModalOpenId]: d.balance > 0 ? String(d.balance).replace(".", ",") : "",
+        [payModalOpenId]: d.balance > 0 ? d.balance : 0,
       }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -941,8 +954,10 @@ export default function OrdersPage() {
   };
 
   const addPayment = async (id: string) => {
-    const amountStr = (payAmount[id] ?? "").trim();
-    const amount = parseFloat(amountStr.replace(",", "."));
+    // const amountStr = (payAmount[id] ?? "").trim();
+    // const amount = parseFloat(amountStr.replace(",", "."));
+    const amount = payAmount[id] ?? 0;
+
     if (!Number.isFinite(amount) || amount <= 0) {
       toast.error("Geçerli bir ödeme tutarı girin.");
       return;
@@ -965,8 +980,8 @@ export default function OrdersPage() {
       setOrders((prev) =>
         prev.map((o) => {
           if (o.id !== id) return o;
-          const net = Number(o.netTotal ?? o.total ?? 0);
-          const paid = Number(o.paidTotal ?? o.totalPaid ?? 0) + amount;
+          const net = Number(o.netTotal ?? o.netTotal ?? 0);
+          const paid = Number(o.paidTotal ?? o.paidTotal ?? 0) + amount;
           const balance = Math.max(0, net - paid);
           return { ...o, paidTotal: paid, totalPaid: paid, balance };
         })
@@ -974,7 +989,7 @@ export default function OrdersPage() {
 
       await fetchOrderDetail(id);
 
-      setPayAmount((m) => ({ ...m, [id]: "" }));
+      setPayAmount((m) => ({ ...m, [id]: 0 }));
       setPayNote((m) => ({ ...m, [id]: "" }));
       toast.success("Ödeme kaydedildi");
       closePayModal();
@@ -1433,12 +1448,11 @@ export default function OrdersPage() {
 
                       <div className="space-y-2">
                         <label className="block text-sm font-medium">Tutar</label>
-                        <input
+                        <CurrencyInput
                           className="w-full rounded-md border border-neutral-200 px-3 py-2"
                           placeholder="0,00"
                           value={amount}
-                          onChange={(e) => setPayAmount((m) => ({ ...m, [payModalOpenId!]: e.target.value }))}
-                          inputMode="decimal"
+                          onChange={(val) => setPayAmount((m) => ({ ...m, [payModalOpenId!]: val }))}
                         />
                       </div>
 
@@ -1563,7 +1577,7 @@ const OrderCard = React.memo(({
               </span>
             </div>
             <div className="min-w-0 flex">
-              <DuePill info={getDueInfo(order.deliveryDate)} />
+              <DuePill info={getDueInfo(order.deliveryDate, order.status)} />
             </div>
             <div className="min-w-0">
               <span className="inline-flex w-full h-10 items-center gap-1 rounded-sm px-2.5 py-1 text-xs font-medium ring-1 ring-inset bg-neutral-50 text-neutral-700 ring-neutral-200" title="Oluşturma">

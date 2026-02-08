@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useOrderSetupStore } from "@/app/lib/orderSetupStore";
 import { toast } from "sonner";
 import { PageOverlay } from "@/app/components/PageOverlay";
 import { parseYMDToLocalDate } from "@/app/lib/date";
+import { CurrencyInput } from "@/app/components/CurrencyInput";
 
 /* ========= Types ========= */
 type Status = "pending" | "processing" | "completed" | "cancelled" | "workshop" | "delivered" | "deleted";
@@ -94,7 +95,10 @@ const statusDot: Record<Status, string> = {
   deleted: "bg-gray-500",
 };
 
-const isStorPerdeByName = (name: string) => normalize(name) === "STOR PERDE";
+const isStorPerdeByName = (name: string) => {
+  const n = normalize(name);
+  return n === "STOR PERDE" || n === "ZEBRA PERDE" || n === "DİKEY PERDE";
+};
 const isFonPerdeByName = (name: string) => normalize(name) === "FON PERDE";
 
 /** 🔢 Tutar hesabı:
@@ -201,15 +205,27 @@ export default function OrderEditor({
   const [useCustomPrice, setUseCustomPrice] = useState(false);
   const [unitPriceInput, setUnitPriceInput] = useState<number>(0);
   const [useCustomSubtotal, setUseCustomSubtotal] = useState(false);
-  const [subtotalInput, setSubtotalInput] = useState("");
+  const [subtotalInput, setSubtotalInput] = useState<number>(0);
 
   const [pageBusy, setPageBusy] = useState(false);
 
   // Yeni Ürün modal
   const [showVarModal, setShowVarModal] = useState(false);
   const [newVarName, setNewVarName] = useState("");
-  const [newVarPrice, setNewVarPrice] = useState<string>(""); // virgül desteği
+  const [newVarPrice, setNewVarPrice] = useState<number>(0);
   const [savingVariant, setSavingVariant] = useState(false);
+
+  // Searchable Select State
+  const [isVarOpen, setIsVarOpen] = useState(false);
+  const [varSearch, setVarSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus input when opening
+  useEffect(() => {
+    if (isVarOpen) {
+      setTimeout(() => searchInputRef.current?.focus(), 50);
+    }
+  }, [isVarOpen]);
   const [orderType, setOrderType] = useState(0);
 
   /* ==== setup’dan prefill ==== */
@@ -298,11 +314,7 @@ export default function OrderEditor({
 
   const manualSubtotal = useMemo(() => {
     if (!useCustomSubtotal) return null;
-    const normalized = subtotalInput.replace(",", ".").trim();
-    if (!normalized) return null;
-    const parsed = parseFloat(normalized);
-    if (Number.isNaN(parsed)) return null;
-    return Math.max(0, parsed);
+    return Math.max(0, subtotalInput);
   }, [useCustomSubtotal, subtotalInput]);
 
   const catById = useMemo(
@@ -376,7 +388,7 @@ export default function OrderEditor({
     setUseCustomPrice(false);
     setUnitPriceInput(defaultPrice);
     setUseCustomSubtotal(false);
-    setSubtotalInput("");
+    setSubtotalInput(0);
   };
   const openQuickFor = (categoryName: string, index: number) => {
     const cat = categories.find(
@@ -397,13 +409,13 @@ export default function OrderEditor({
     setUseCustomPrice(false);
     setUnitPriceInput(defaultPrice);
     setUseCustomSubtotal(false);
-    setSubtotalInput("");
+    setSubtotalInput(0);
   };
   const closeDrawer = () => {
     setSlot(null);
     setEditingLineId(null);
     setUseCustomSubtotal(false);
-    setSubtotalInput("");
+    setSubtotalInput(0);
   };
 
   const addOrUpdateLine = () => {
@@ -497,10 +509,10 @@ export default function OrderEditor({
     const storedSubtotal = Number(line.subtotal ?? expected);
     if (Math.abs(storedSubtotal - expected) > EPSILON) {
       setUseCustomSubtotal(true);
-      setSubtotalInput(String(storedSubtotal));
+      setSubtotalInput(storedSubtotal);
     } else {
       setUseCustomSubtotal(false);
-      setSubtotalInput("");
+      setSubtotalInput(0);
     }
   };
 
@@ -691,30 +703,70 @@ export default function OrderEditor({
               <div>
                 <label className="text-sm">Ürün</label>
                 <div className="mt-1 flex items-center gap-2">
-                  <select
-                    className="select flex-1"
-                    value={varId}
-                    onChange={(e) => setVarId(e.target.value)}
-                    disabled={!selectedCategory || loading}
-                  >
-                    {!selectedCategory && <option>Önce kategori seçin</option>}
-                    {selectedCategory &&
-                      selectedCategory.variants.length === 0 && (
-                        <option>Ürün yok</option>
-                      )}
-                    {selectedCategory?.variants.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative flex-1">
+                    <button
+                      type="button"
+                      className="select w-full text-left flex items-center justify-between"
+                      onClick={() => {
+                        if (selectedCategory) setIsVarOpen(!isVarOpen);
+                      }}
+                      disabled={!selectedCategory || loading}
+                    >
+                      <span className="truncate block">
+                        {selectedVariant?.name || (selectedCategory ? "Seçiniz" : "Önce kategori seçin")}
+                      </span>
+                      <svg className="w-4 h-4 opacity-50 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+
+                    {isVarOpen && (
+                      <>
+                        <div className="fixed inset-0 z-40" onClick={() => setIsVarOpen(false)} />
+                        <div className="absolute top-full left-0 w-full bg-white border border-neutral-300 shadow-xl rounded-xl z-50 p-2 mt-1 min-w-[200px]">
+                          <input
+                            ref={searchInputRef}
+                            className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-sm mb-2 focus:outline-none focus:border-indigo-500"
+                            placeholder="Ara..."
+                            value={varSearch}
+                            onChange={(e) => setVarSearch(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="max-h-60 overflow-y-auto">
+                            {selectedCategory?.variants
+                              .filter(v => v.name.toLocaleLowerCase('tr-TR').includes(varSearch.toLocaleLowerCase('tr-TR')))
+                              .map(v => (
+                                <button
+                                  key={v.id}
+                                  type="button"
+                                  className={`w-full text-left px-2 py-1.5 text-sm rounded-lg hover:bg-neutral-100 ${varId === v.id ? 'bg-indigo-50 text-indigo-700 font-medium' : ''}`}
+                                  onClick={() => {
+                                    setVarId(v.id);
+                                    setIsVarOpen(false);
+                                    setVarSearch("");
+                                  }}
+                                >
+                                  {v.name}
+                                </button>
+                              ))}
+                            {selectedCategory?.variants.length === 0 && (
+                              <div className="py-2 text-center text-xs text-neutral-500">Ürün yok</div>
+                            )}
+                            {selectedCategory?.variants.length! > 0 && selectedCategory?.variants.filter(v => v.name.toLocaleLowerCase('tr-TR').includes(varSearch.toLocaleLowerCase('tr-TR'))).length === 0 && (
+                              <div className="py-2 text-center text-xs text-neutral-500">Sonuç yok</div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                   <button
                     type="button"
                     className="h-9 rounded-xl border border-neutral-300 px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
                     disabled={!selectedCategory}
                     onClick={() => {
                       setNewVarName("");
-                      setNewVarPrice("");
+                      setNewVarPrice(0);
                       setShowVarModal(true);
                     }}
                     title="Yeni Ürün ekle"
@@ -786,18 +838,13 @@ export default function OrderEditor({
               <div>
                 <label className="text-sm">Birim Fiyat</label>
                 <div className="mt-1 flex items-center gap-2">
-                  <input
-                    className="input flex-1 text-right disabled:bg-gray-100"
-                    type="text"
-                    min={0}
-                    step="0.01"
-                    value={Number.isFinite(unitPriceInput) ? unitPriceInput : 0}
-                    onChange={(e) =>
-                      setUnitPriceInput(parseFloat(e.target.value || "0"))
-                    }
+                  <CurrencyInput
+                    className="input w-[120px] text-right disabled:bg-gray-100"
+                    value={unitPriceInput}
+                    onChange={(val) => setUnitPriceInput(val)}
                     disabled={!useCustomPrice}
                     placeholder={
-                      selectedVariant
+                      selectedVariant && !useCustomPrice
                         ? fmt(Number(selectedVariant.unitPrice))
                         : "—"
                     }
@@ -852,18 +899,14 @@ export default function OrderEditor({
                     Elle
                   </span> */}
                 </label>
-                <input
+                <CurrencyInput
                   className="input mt-1 text-right disabled:bg-neutral-100"
-                  type="text"
-                  inputMode="decimal"
                   value={
                     useCustomSubtotal
                       ? subtotalInput
-                      : selectedVariant
-                        ? fmt(previewSubtotal)
-                        : ""
+                      : (previewSubtotal || 0)
                   }
-                  onChange={(e) => setSubtotalInput(e.target.value)}
+                  onChange={(val) => setSubtotalInput(val)}
                   disabled={!useCustomSubtotal}
                   placeholder="—"
                 />
@@ -942,12 +985,11 @@ export default function OrderEditor({
               </div>
               <div>
                 <label className="text-sm">Birim Fiyat (₺) *</label>
-                <input
+                <CurrencyInput
                   className="input mt-1 w-full text-right"
-                  inputMode="decimal"
                   placeholder="0,00"
                   value={newVarPrice}
-                  onChange={(e) => setNewVarPrice(e.target.value)}
+                  onChange={(val) => setNewVarPrice(val)}
                 />
                 <p className="mt-1 text-[11px] text-neutral-500">
                   Ondalık için virgül veya nokta kullanabilirsiniz.
@@ -969,12 +1011,12 @@ export default function OrderEditor({
                 disabled={
                   !selectedCategory ||
                   !newVarName.trim() ||
-                  !newVarPrice.trim() ||
                   savingVariant
                 }
                 onClick={async () => {
                   if (!selectedCategory) return;
-                  const price = parseFloat(newVarPrice.replace(",", "."));
+                  // const price = parseFloat(newVarPrice.replace(",", "."));
+                  const price = newVarPrice;
                   if (!Number.isFinite(price) || price < 0) {
                     toast.error("Geçerli bir fiyat girin.");
                     return;
@@ -1597,15 +1639,11 @@ function Totals({
         </div>
         <div>
           <label className="text-xs">İskonto (₺)</label>
-          <input
+          <CurrencyInput
             className="input mt-1 text-right"
-            type="text"
-            min={0}
-            step="0.01"
+            placeholder="0,00"
             value={discountAmount}
-            onChange={(e) =>
-              setDiscountAmount(parseFloat(e.target.value || "0"))
-            }
+            onChange={(val) => setDiscountAmount(val)}
           />
         </div>
       </div>
@@ -1624,13 +1662,11 @@ function Totals({
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs">Alınan Ödeme (₺)</label>
-          <input
+          <CurrencyInput
             className="input mt-1 text-right"
-            type="text"
-            min={0}
-            step="0.01"
-            value={Number.isFinite(paidAmount) ? paidAmount : 0}
-            onChange={(e) => setPaidAmount(parseFloat(e.target.value || "0"))}
+            placeholder="0,00"
+            value={paidAmount}
+            onChange={(val) => setPaidAmount(val)}
           />
         </div>
         <div>
