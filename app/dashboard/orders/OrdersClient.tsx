@@ -496,7 +496,7 @@ export default function OrdersPage() {
 
   // Pagination
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<10 | 20 | 50>(10); // İlk yüklemede 10 kayıt
+  const [pageSize, setPageSize] = useState<10 | 20 | 25 | 50>(25); // İlk yüklemede 25 kayıt
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
 
@@ -1061,6 +1061,7 @@ export default function OrdersPage() {
                   >
                     <option value={10}>10</option>
                     <option value={20}>20</option>
+                    <option value={25}>25</option>
                     <option value={50}>50</option>
                   </select>
                 </div>
@@ -1110,6 +1111,7 @@ export default function OrdersPage() {
                     >
                       <option value={10}>10</option>
                       <option value={20}>20</option>
+                      <option value={25}>25</option>
                       <option value={50}>50</option>
                     </select>
                   </label>
