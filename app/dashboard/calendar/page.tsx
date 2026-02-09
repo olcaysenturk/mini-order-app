@@ -486,7 +486,7 @@ export default function OrdersCalendarPage() {
                 viewBox="0 0 24 24"
                 aria-hidden
               >
-                <path fill="currentColor" d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z" />
+                <path fill="currentColor" d="M10.5 3.75a6.75 6.75 0 1 1-4.77 11.53l-2 2a.75.75 0 1 1-1.06-1.06l2-2A6.75 6.75 0 0 1 10.5 3.75m0 1.5a5.25 5.25 0 1 0 0 10.5a5.25 5.25 0 0 0 0-10.5" />
               </svg>
             </div>
             <div className="hidden sm:block">

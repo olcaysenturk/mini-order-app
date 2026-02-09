@@ -33,6 +33,11 @@ const fmtInt = (n: number | undefined | null) =>
   new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(
     Number(n ?? 0)
   );
+const fmtDateTR = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" });
+};
 
 // Güvenli CSV helpers
 const csvEsc = (v: unknown) => `"${String(v).replace(/"/g, '""')}"`;
@@ -376,6 +381,27 @@ export default function ReportsPage() {
     const sorted = filtered.sort((a, b) => (branchDesc ? -cmp(a, b) : cmp(a, b)));
     return sorted;
   }, [branchesWithBasic, branchQuery, branchSort, branchDesc]);
+  const dailyRevenueTotal = useMemo(
+    () => branchDaily.reduce((a, b) => a + Number(b.revenue || 0), 0),
+    [branchDaily]
+  );
+  const dailyPaidTotal = useMemo(
+    () => branchDaily.reduce((a, b) => a + Number(b.paid || 0), 0),
+    [branchDaily]
+  );
+  const productsRows = products?.rows ?? [];
+  const productsPageQty = useMemo(
+    () => productsRows.reduce((a, b) => a + Number(b.qty || 0), 0),
+    [productsRows]
+  );
+  const productsPageArea = useMemo(
+    () => productsRows.reduce((a, b) => a + Number(b.areaM2 || 0), 0),
+    [productsRows]
+  );
+  const productsPageAmount = useMemo(
+    () => productsRows.reduce((a, b) => a + Number(b.amount || 0), 0),
+    [productsRows]
+  );
 
   if (sessionStatus === "loading") {
     return (
@@ -443,7 +469,7 @@ export default function ReportsPage() {
             <label className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-2 py-1">
               <span className="text-xs text-neutral-500">Şube</span>
               <select
-                className="h-8 rounded-lg border border-neutral-200 bg-white px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="h-8 rounded-lg  bg-white px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
               >
@@ -516,7 +542,7 @@ export default function ReportsPage() {
             <span aria-hidden className="size-2 rounded-full bg-indigo-600" />
             Şube Bazlı Ciro
           </div>
-          <div className="ms-auto flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
               <input
                 className="h-9 w-56 rounded-xl border border-neutral-200 bg-white px-3 pe-8 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
@@ -532,7 +558,7 @@ export default function ReportsPage() {
               >
                 <path
                   fill="currentColor"
-                  d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
+                  d="M10.5 3.75a6.75 6.75 0 1 1-4.77 11.53l-2 2a.75.75 0 1 1-1.06-1.06l2-2A6.75 6.75 0 0 1 10.5 3.75m0 1.5a5.25 5.25 0 1 0 0 10.5a5.25 5.25 0 0 0 0-10.5"
                 />
               </svg>
             </div>
@@ -608,7 +634,7 @@ export default function ReportsPage() {
                 </h2>
               </div>
 
-              <div className="ms-auto flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <DateChip label="Başlangıç" value={dateFrom} onChange={setDateFrom} max={dateTo || undefined} />
                 <DateChip label="Bitiş" value={dateTo} onChange={setDateTo} min={dateFrom || undefined} />
 
@@ -643,16 +669,23 @@ export default function ReportsPage() {
           </div>
 
           {/* Totals strip */}
-          <div className="grid gap-3 border-b border-neutral-200 p-3 sm:grid-cols-3 sm:p-4">
+          <div className="grid gap-3 border-b border-neutral-200 p-3 sm:grid-cols-2 lg:grid-cols-4 sm:p-4">
             <Tile label="Seçili Tarih Aralığı" value={`${dateFrom} → ${dateTo}`} mono />
             <Tile
               label="Toplam Ciro"
-              value={`${fmtMoney(branchDaily.reduce((a, b) => a + Number(b.revenue || 0), 0))} ₺`}
+              value={`${fmtMoney(dailyRevenueTotal)} ₺`}
             />
             <Tile
               label="Toplam Kasa"
-              value={`${fmtMoney(branchDaily.reduce((a, b) => a + Number(b.paid || 0), 0))} ₺`}
+              value={`${fmtMoney(dailyPaidTotal)} ₺`}
             />
+            <Tile
+              label="Net Kalan"
+              value={`${fmtMoney(dailyRevenueTotal - dailyPaidTotal)} ₺`}
+            />
+          </div>
+          <div className="border-b border-neutral-200 bg-neutral-50/70 px-3 py-2 text-xs text-neutral-600 sm:px-4">
+            Gün bazındaki tahsilat satırları için <span className="font-medium text-neutral-800">Detay</span> butonunu kullanın.
           </div>
 
           {/* Content */}
@@ -676,7 +709,9 @@ export default function ReportsPage() {
                         <th className="px-3 py-2 text-left text-[12px] font-medium uppercase tracking-wide text-neutral-500">Tarih</th>
                         <th className="px-3 py-2 text-right text-[12px] font-medium uppercase tracking-wide text-neutral-500">Ciro</th>
                         <th className="px-3 py-2 text-right text-[12px] font-medium uppercase tracking-wide text-neutral-500">Kasa</th>
+                        <th className="px-3 py-2 text-right text-[12px] font-medium uppercase tracking-wide text-neutral-500">Net Kalan</th>
                         <th className="px-3 py-2 text-left text-[12px] font-medium uppercase tracking-wide text-neutral-500">Ödeme Tipleri</th>
+                        <th className="px-3 py-2 text-right text-[12px] font-medium uppercase tracking-wide text-neutral-500">Detay</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
@@ -684,14 +719,12 @@ export default function ReportsPage() {
                         const methods = methodsByDate.get(d.date) ?? [];
                         return (
                           <tr key={d.date} className="hover:bg-neutral-50/60 group">
-                            <td
-                              className="px-3 py-2 font-medium text-indigo-600 whitespace-nowrap cursor-pointer hover:underline"
-                              onClick={() => openDetail(d.date)}
-                            >
-                              {d.date}
-                            </td>
+                            <td className="px-3 py-2 font-medium text-neutral-900 whitespace-nowrap">{fmtDateTR(d.date)}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(d.revenue)} ₺</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(d.paid)} ₺</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold text-amber-700">
+                              {fmtMoney(Number(d.revenue || 0) - Number(d.paid || 0))} ₺
+                            </td>
                             <td className="px-3 py-2">
                               {methods.length === 0 ? (
                                 <span className="text-xs text-neutral-500">—</span>
@@ -703,6 +736,15 @@ export default function ReportsPage() {
                                 </div>
                               )}
                             </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => openDetail(d.date)}
+                                className="inline-flex h-8 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                              >
+                                Detay
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -711,11 +753,15 @@ export default function ReportsPage() {
                       <tr className="bg-neutral-50/60">
                         <td className="px-3 py-2 text-xs font-medium text-neutral-600">Toplam</td>
                         <td className="px-3 py-2 text-right text-sm font-semibold">
-                          {fmtMoney(branchDaily.reduce((a, b) => a + Number(b.revenue || 0), 0))} ₺
+                          {fmtMoney(dailyRevenueTotal)} ₺
                         </td>
                         <td className="px-3 py-2 text-right text-sm font-semibold">
-                          {fmtMoney(branchDaily.reduce((a, b) => a + Number(b.paid || 0), 0))} ₺
+                          {fmtMoney(dailyPaidTotal)} ₺
                         </td>
+                        <td className="px-3 py-2 text-right text-sm font-semibold text-amber-700">
+                          {fmtMoney(dailyRevenueTotal - dailyPaidTotal)} ₺
+                        </td>
+                        <td className="px-3 py-2" />
                         <td className="px-3 py-2" />
                       </tr>
                     </tfoot>
@@ -730,17 +776,13 @@ export default function ReportsPage() {
                   return (
                     <div key={d.date} className="p-3">
                       <div className="mb-2 flex items-center justify-between">
-                        <div
-                          className="text-sm font-semibold text-indigo-600 cursor-pointer"
-                          onClick={() => openDetail(d.date)}
-                        >
-                          {d.date}
-                        </div>
+                        <div className="text-sm font-semibold text-neutral-900">{fmtDateTR(d.date)}</div>
                         <div className="text-xs text-neutral-500">Gün</div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         <MiniStat label="Ciro" value={`${fmtMoney(d.revenue)} ₺`} />
                         <MiniStat label="Alınan" value={`${fmtMoney(d.paid)} ₺`} />
+                        <MiniStat label="Net Kalan" value={`${fmtMoney(Number(d.revenue || 0) - Number(d.paid || 0))} ₺`} />
                       </div>
                       <div className="mt-2">
                         <div className="mb-1 text-[11px] font-medium text-neutral-500">Ödeme Tipleri</div>
@@ -754,6 +796,15 @@ export default function ReportsPage() {
                           </div>
                         )}
                       </div>
+                      <div className="mt-3">
+                        <button
+                          type="button"
+                          onClick={() => openDetail(d.date)}
+                          className="inline-flex h-8 items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                        >
+                          Detayları Gör
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -763,59 +814,210 @@ export default function ReportsPage() {
         </section>
       )}
 
-      {/* Günlük Ciro + Alınan + Kümülatif Ciro (Son 30 Gün) */}
-      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-          <span aria-hidden className="size-2 rounded-full bg-emerald-600" />
-          Günlük Ciro &amp; Alınan + Kümülatif (Son 30 Gün)
+      <section className="mb-6 grid grid-cols-1 gap-4 min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        {/* Günlük Ciro + Alınan + Kümülatif Ciro (Son 30 Gün) */}
+        <div className="rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+            <span aria-hidden className="size-2 rounded-full bg-emerald-600" />
+            Günlük Ciro &amp; Alınan + Kümülatif (Son 30 Gün)
+          </div>
+
+          {!daily?.last30d?.length ? (
+            <SkeletonBox />
+          ) : (
+            <div className="h-[90%] w-full">
+              <ResponsiveContainer>
+                <ComposedChart
+                  data={(() => {
+                    let cumRevenue = 0;
+                    return (daily?.last30d ?? []).map((d) => {
+                      cumRevenue += Number(d.revenue || 0);
+                      return { ...d, cumRevenue };
+                    });
+                  })()}
+                >
+                  <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
+                  <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={16} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <YAxis tickFormatter={(v) => fmtMoney(Number(v))} width={80} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
+                  <Tooltip
+                    formatter={(v: any, name: string) => {
+                      const map: Record<string, string> = {
+                        revenue: "Günlük Ciro",
+                        paid: "Günlük Alınan",
+                        cumRevenue: "Kümülatif Ciro",
+                      };
+                      return [`${fmtMoney(Number(v))} ₺`, map[name] ?? name];
+                    }}
+                    contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
+                    labelFormatter={(d) => `Tarih: ${d}`}
+                  />
+                  <defs>
+                    <linearGradient id="barFillRevenue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#6366F1" />
+                      <stop offset="100%" stopColor="#A78BFA" />
+                    </linearGradient>
+                    <linearGradient id="barFillPaid" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" />
+                      <stop offset="100%" stopColor="#34D399" />
+                    </linearGradient>
+                  </defs>
+                  <Bar dataKey="revenue" name="Günlük Ciro" fill="url(#barFillRevenue)" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="paid" name="Günlük Alınan" fill="url(#barFillPaid)" radius={[8, 8, 0, 0]} />
+                  <Line type="monotone" dataKey="cumRevenue" name="Kümülatif Ciro" dot={false} stroke="#0EA5E9" strokeWidth={2} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
-        {!daily?.last30d?.length ? (
-          <SkeletonBox />
-        ) : (
-          <div className="h-[320px] w-full">
-            <ResponsiveContainer>
-              <ComposedChart
-                data={(() => {
-                  let cumRevenue = 0;
-                  return (daily?.last30d ?? []).map((d) => {
-                    cumRevenue += Number(d.revenue || 0);
-                    return { ...d, cumRevenue };
-                  });
-                })()}
-              >
-                <CartesianGrid stroke="#E5E7EB" strokeDasharray="3 3" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={16} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
-                <YAxis tickFormatter={(v) => fmtMoney(Number(v))} width={80} tickLine={false} axisLine={{ stroke: "#E5E7EB" }} />
-                <Tooltip
-                  formatter={(v: any, name: string) => {
-                    const map: Record<string, string> = {
-                      revenue: "Günlük Ciro",
-                      paid: "Günlük Alınan",
-                      cumRevenue: "Kümülatif Ciro",
-                    };
-                    return [`${fmtMoney(Number(v))} ₺`, map[name] ?? name];
-                  }}
-                  contentStyle={{ borderRadius: 12, borderColor: "#E5E7EB" }}
-                  labelFormatter={(d) => `Tarih: ${d}`}
+        {/* En Çok Satılan Ürünler */}
+        <div className="rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-lg bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-700">
+              <span aria-hidden className="size-2 rounded-full bg-neutral-400" />
+              En Çok Satılan Ürünler
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <input
+                  className="h-9 w-52 rounded-xl border border-neutral-200 bg-white px-3 pe-8 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                  placeholder="Ürün ara"
+                  value={prodQuery}
+                  onChange={(e) => setProdQuery(e.target.value)}
+                  aria-label="Ürün ara"
                 />
-                <defs>
-                  <linearGradient id="barFillRevenue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366F1" />
-                    <stop offset="100%" stopColor="#A78BFA" />
-                  </linearGradient>
-                  <linearGradient id="barFillPaid" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10B981" />
-                    <stop offset="100%" stopColor="#34D399" />
-                  </linearGradient>
-                </defs>
-                <Bar dataKey="revenue" name="Günlük Ciro" fill="url(#barFillRevenue)" radius={[8, 8, 0, 0]} />
-                <Bar dataKey="paid" name="Günlük Alınan" fill="url(#barFillPaid)" radius={[8, 8, 0, 0]} />
-                <Line type="monotone" dataKey="cumRevenue" name="Kümülatif Ciro" dot={false} stroke="#0EA5E9" strokeWidth={2} />
-              </ComposedChart>
-            </ResponsiveContainer>
+                <svg
+                  className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
+                  viewBox="0 0 24 24"
+                  aria-hidden
+                >
+                  <path
+                    fill="currentColor"
+                    d="M10.5 3.75a6.75 6.75 0 1 1-4.77 11.53l-2 2a.75.75 0 1 1-1.06-1.06l2-2A6.75 6.75 0 0 1 10.5 3.75m0 1.5a5.25 5.25 0 1 0 0 10.5a5.25 5.25 0 0 0 0-10.5"
+                  />
+                </svg>
+              </div>
+              <select
+                className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                value={prodSort}
+                onChange={(e) => setProdSort(e.target.value as any)}
+                aria-label="Sırala"
+              >
+                <option value="amount">Tutar (₺)</option>
+                <option value="qty">Adet</option>
+                <option value="area">Toplam m²</option>
+                <option value="product">Ürün adı</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setProdDesc((s) => !s)}
+                className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50"
+                title={prodDesc ? "Azalan" : "Artan"}
+                aria-label={prodDesc ? "Azalan sırala" : "Artan sırala"}
+              >
+                <svg viewBox="0 0 24 24" className={`size-4 transition-transform ${prodDesc ? "" : "rotate-180"}`} aria-hidden>
+                  <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
+                </svg>
+              </button>
+              <select
+                className="h-9 rounded-xl border border-neutral-200 bg-white px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                value={prodPageSize}
+                onChange={(e) => setProdPageSize(Number(e.target.value))}
+                aria-label="Sayfa boyutu"
+              >
+                {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}/sayfa</option>)}
+              </select>
+              {/* <ActionButton
+                title="CSV indir"
+                disabled={!products?.rows?.length}
+                onClick={() => {
+                  const rows: (string | number)[][] = [
+                    ["Ürün", "Adet", "Toplam m²", "Toplam Tutar (TRY)"],
+                    ...(products?.rows ?? []).map(r => [r.product, r.qty, r.areaM2.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), r.amount]),
+                  ];
+                  const csv = rowsToCSV(rows);
+                  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `en_cok_satilan_urunler_${new Date().toISOString().slice(0, 10)}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                label="CSV"
+                iconPath="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"
+              /> */}
+            </div>
           </div>
-        )}
+
+          {!products || prodLoading ? (
+            <SkeletonBox />
+          ) : (products.rows ?? []).length === 0 ? (
+            <EmptyBox title="Kayıt bulunamadı" desc="Filtreleri değiştirerek tekrar deneyin." />
+          ) : (
+            <>
+              <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <Tile label="Sayfadaki Adet Toplamı" value={fmtInt(productsPageQty)} />
+                <Tile label="Sayfadaki m² Toplamı" value={productsPageArea.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />
+                <Tile label="Sayfadaki Tutar Toplamı" value={`${fmtMoney(productsPageAmount)} ₺`} />
+              </div>
+              <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
+                <div className="max-h-[320px] overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="bg-neutral-50 text-left text-[11px] uppercase tracking-wide text-neutral-500 [&>th]:px-3 [&>th]:py-2">
+                        <th className="w-14">Sıra</th>
+                        <th>Ürün</th>
+                        <th className="text-right">Adet</th>
+                        <th className="text-right">Toplam m²</th>
+                        <th className="text-right">Toplam Tutar</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {products.rows.map((r, i) => (
+                        <tr key={i} className="odd:bg-white even:bg-neutral-50/50 hover:bg-indigo-50/40 [&>td]:px-3 [&>td]:py-2.5 ">
+                          <td className="text-[12px]">
+                            <span className={`inline-flex min-w-8 items-center justify-center rounded-md px-2 py-0.5 text-xs font-semibold ${i < 3 ? "bg-indigo-100 text-indigo-700" : "bg-neutral-100 text-neutral-600"}`}>
+                              {(products.page - 1) * products.pageSize + i + 1}
+                            </span>
+                          </td>
+                          <td className="font-medium text-[12px] text-neutral-900">{r.product}</td>
+                          <td className="text-right text-[12px] tabular-nums">{fmtInt(r.qty)}</td>
+                          <td className="text-right text-[12px] tabular-nums">{r.areaM2.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td className="text-right text-[12px] tabular-nums font-semibold text-neutral-900">{fmtMoney(r.amount)} ₺</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-neutral-500">
+                  Toplam {products.total.toLocaleString("tr-TR")} kayıt • Sayfa {products.page} / {Math.max(1, Math.ceil(products.total / products.pageSize))}
+                </div>
+                <div className="inline-flex items-center gap-2">
+                  <button
+                    className="h-8 rounded-xl border border-neutral-200 bg-white px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
+                    onClick={() => setProdPage((p) => Math.max(1, p - 1))}
+                    disabled={products.page <= 1}
+                  >
+                    Önceki
+                  </button>
+                  <button
+                    className="h-8 rounded-xl border border-neutral-200 bg-white px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
+                    onClick={() => {
+                      const last = Math.max(1, Math.ceil(products.total / products.pageSize));
+                      setProdPage((p) => Math.min(last, p + 1));
+                    }}
+                    disabled={products.page >= Math.max(1, Math.ceil(products.total / products.pageSize))}
+                  >
+                    Sonraki
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </section>
 
       {/* Kategoriler & Ürün toplamları */}
@@ -860,9 +1062,9 @@ export default function ReportsPage() {
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
+                  <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500 text-[12px]">
                     <th>Ürün Grubu</th>
-                    <th className="text-right">Adet</th>
+                    <th className="text-right ">Adet</th>
                     <th className="text-right">Toplam En</th>
                     <th className="text-right">Toplam Boy</th>
                     <th className="text-right">Tutar</th>
@@ -870,159 +1072,17 @@ export default function ReportsPage() {
                 </thead>
                 <tbody className="divide-y">
                   {itemsAgg.byProduct.map((p, i) => (
-                    <tr key={i} className="[&>td]:px-3 [&>td]:py-2 hover:bg-neutral-50">
-                      <td className="font-medium">{p.group}</td>
-                      <td className="text-right">{fmtInt(p.qty)}</td>
-                      <td className="text-right">{(p.totalWidthCm / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} m</td>
-                      <td className="text-right">{(p.totalHeightCm / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} m</td>
-                      <td className="text-right">{fmtMoney(p.amount)} ₺</td>
+                    <tr key={i} className="[&>td]:px-3 [&>td]:py-2 hover:bg-neutral-50 text-[12px]">
+                      <td className="font-medium  ">{p.group}</td>
+                      <td className="text-right  ">{fmtInt(p.qty)}</td>
+                      <td className="text-right  ">{(p.totalWidthCm / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} m</td>
+                      <td className="text-right ">{(p.totalHeightCm / 100).toLocaleString("tr-TR", { maximumFractionDigits: 0 })} m</td>
+                      <td className="text-right ">{fmtMoney(p.amount)} ₺</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-      </section>
-
-      {/* En Çok Satılan Ürünler (tüm ürünler, sayfalama) */}
-      <section className="mb-6 rounded-2xl border border-neutral-200 bg-white/70 p-4 shadow-sm backdrop-blur">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center gap-2 rounded-lg bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-700">
-            <span aria-hidden className="size-2 rounded-full bg-neutral-400" />
-            En Çok Satılan Ürünler
-          </div>
-          <div className="ms-auto flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <input
-                className="h-9 w-60 rounded-xl border border-neutral-200 bg-white px-3 pe-8 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                placeholder="Ürün ara"
-                value={prodQuery}
-                onChange={(e) => setProdQuery(e.target.value)}
-                aria-label="Ürün ara"
-              />
-              <svg
-                className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-neutral-400"
-                viewBox="0 0 24 24"
-                aria-hidden
-              >
-                <path
-                  fill="currentColor"
-                  d="M10 4a6 6 0 1 1 3.9 10.6l3.8 3.8-1.4 1.4-3.8-3.8A6 6 0 0 1 10 4m0 2a4 4 0 1 0 0 8a4 4 0 0 0 0-8z"
-                />
-              </svg>
-            </div>
-            <select
-              className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              value={prodSort}
-              onChange={(e) => setProdSort(e.target.value as any)}
-              aria-label="Sırala"
-            >
-              <option value="amount">Tutar (₺)</option>
-              <option value="qty">Adet</option>
-              <option value="area">Toplam m²</option>
-              <option value="product">Ürün adı</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => setProdDesc((s) => !s)}
-              className="inline-flex h-9 items-center rounded-xl border border-neutral-200 bg-white px-2 text-sm text-neutral-700 hover:bg-neutral-50"
-              title={prodDesc ? "Azalan" : "Artan"}
-              aria-label={prodDesc ? "Azalan sırala" : "Artan sırala"}
-            >
-              <svg viewBox="0 0 24 24" className={`size-4 transition-transform ${prodDesc ? "" : "rotate-180"}`} aria-hidden>
-                <path fill="currentColor" d="M7 10l5 5 5-5H7z" />
-              </svg>
-            </button>
-
-            {/* Sayfa boyutu */}
-            <select
-              className="h-9 rounded-xl border border-neutral-200 bg-white px-2 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-              value={prodPageSize}
-              onChange={(e) => setProdPageSize(Number(e.target.value))}
-              aria-label="Sayfa boyutu"
-            >
-              {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}/sayfa</option>)}
-            </select>
-
-            {/* CSV */}
-            <ActionButton
-              title="CSV indir"
-              disabled={!products?.rows?.length}
-              onClick={() => {
-                const rows: (string | number)[][] = [
-                  ["Ürün", "Adet", "Toplam m²", "Toplam Tutar (TRY)"],
-                  ...(products?.rows ?? []).map(r => [r.product, r.qty, r.areaM2.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }), r.amount]),
-                ];
-                const csv = rowsToCSV(rows);
-                const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `en_cok_satilan_urunler_${new Date().toISOString().slice(0, 10)}.csv`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              label="CSV"
-              iconPath="M12 3v10l4-4 1.4 1.4L12 17l-5.4-6.6L8 9l4 4V3zM5 19h14v2H5z"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          {!products || prodLoading ? (
-            <SkeletonBox />
-          ) : (products.rows ?? []).length === 0 ? (
-            <EmptyBox title="Kayıt bulunamadı" desc="Filtreleri değiştirerek tekrar deneyin." />
-          ) : (
-            <>
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="[&>th]:px-3 [&>th]:py-2 text-left text-neutral-500">
-                    <th>Ürün</th>
-                    <th className="text-right">Adet</th>
-                    <th className="text-right">Toplam m²</th>
-                    <th className="text-right">Toplam Tutar</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {products.rows.map((r, i) => (
-                    <tr key={i} className="[&>td]:px-3 [&>td]:py-2 hover:bg-neutral-50">
-                      <td className="font-medium">{r.product}</td>
-                      <td className="text-right tabular-nums">{fmtInt(r.qty)}</td>
-                      <td className="text-right tabular-nums">{r.areaM2.toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td className="text-right tabular-nums">{fmtMoney(r.amount)} ₺</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Pagination */}
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-neutral-500">
-                  Toplam {products.total.toLocaleString("tr-TR")} kayıt • Sayfa {products.page} / {Math.max(1, Math.ceil(products.total / products.pageSize))}
-                </div>
-                <div className="inline-flex items-center gap-2">
-                  <button
-                    className="h-8 rounded-xl border border-neutral-200 bg-white px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
-                    onClick={() => setProdPage((p) => Math.max(1, p - 1))}
-                    disabled={products.page <= 1}
-                  >
-                    Önceki
-                  </button>
-                  <button
-                    className="h-8 rounded-xl border border-neutral-200 bg-white px-3 text-sm hover:bg-neutral-50 disabled:opacity-50"
-                    onClick={() => {
-                      const last = Math.max(1, Math.ceil(products.total / products.pageSize));
-                      setProdPage((p) => Math.min(last, p + 1));
-                    }}
-                    disabled={products.page >= Math.max(1, Math.ceil(products.total / products.pageSize))}
-                  >
-                    Sonraki
-                  </button>
-                </div>
-              </div>
-            </>
           )}
         </div>
       </section>
